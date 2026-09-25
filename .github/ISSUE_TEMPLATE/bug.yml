@@ -1,0 +1,127 @@
+name: 缺陷报告
+description: 报告一个已部署实例或开发中的缺陷。提交前请先按 docs/conventions/ISSUES.md §1 查重。
+title: "<模块>：<用户可见的症状>"
+labels: ["bug", "P2"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **提交前必做**：按 `docs/conventions/ISSUES.md` §1 完整读取开放 issue 列表与已关闭 issue，确认不是重复。
+
+        标题格式固定为 `<模块>：<用户可见的症状>`，模块名用下方「端」里的标签名。
+
+  - type: dropdown
+    id: site
+    attributes:
+      label: 端（主端）
+      description: 需要在哪个端实施或验收。跨端时在描述里补充其它端。
+      options:
+        - control
+        - console
+        - node
+        - runner
+        - protocol
+        - deploy
+        - docs
+        - tooling
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: 优先级
+      description: |
+        P0 = 实例不可用 / 数据丢失或损坏风险 / 机器人越权写入 GitHub / 阻断全员开发。
+        P1 = 主要功能受损但可绕过，或已明确排期。
+        P2 = 小缺陷、体验打磨、优化。
+        不确定时宁可低一档，禁止虚高 P0。
+      options:
+        - P1
+        - P2
+        - P0
+    validations:
+      required: true
+
+  - type: textarea
+    id: symptom
+    attributes:
+      label: 现象
+      description: 实际发生了什么。附上观察到的文本、报错原文或截图描述。
+      placeholder: PR 推了新提交后，机器人仍对旧提交发了一条审查评论，评论里引用的是上一个 head。
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 最小复现路径。
+      value: |
+        1. 打开
+        2. 点击 / 输入
+        3. 观察到
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望
+      description: 应该是什么样。
+    validations:
+      required: true
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: 影响
+      description: 谁会遇到、多严重、有没有绕过办法。决定优先级。
+    validations:
+      required: true
+
+  - type: textarea
+    id: env
+    attributes:
+      label: 环境
+      description: |
+        必填：分支与完整 commit SHA、实例版本（正式 X.Y.Z / 预发布 X.Y.Z-rc.N@sha12）、部署方式（本机 / 预发布实例 / 正式实例，Docker 栈或其它）。只写环境名，不写实例的内部地址或主机名。
+        按问题类型补充（docs/conventions/ISSUES.md §3）：涉及对 GitHub 的读写，写机器人账号在目标仓库的权限（Read / Triage / Write / Maintain / Admin），目标 issue 或 PR 写成 `<org>/<repo>#n` 这类占位，不贴私有仓库的内容；涉及某次任务，写任务 ID；涉及 PR 通道或 VM，写执行节点是否有 KVM；涉及模型输出，写所用模型与思考档位。与问题无关的不写。
+      placeholder: stage @ <完整 SHA>，预发布 0.1.0-rc.1@a1b2c3d4e5f6，预发布实例 Docker 栈；机器人在目标仓库是 Write；任务 ID 取自后台任务页；节点有 KVM；模型 <catalog id>，档位 medium
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 证据
+      description: 截图、录屏（直接拖进来上传）、报错原文、requestId、任务日志片段。不贴令牌、会话、节点令牌、完整请求头、真实数据或私有仓库的内容；需要展示时在沙盒仓库重现，仓库写成 `<org>/<repo>` 这类占位。
+    validations:
+      required: false
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 验收条件
+      description: 怎样算修好：可观察的结果，以及要在哪个实例、哪种部署方式或节点上看。
+      placeholder: 审查进行中推新提交，旧提交的审查不再发出，只对最新 head 发一条 COMMENT 审查；后台任务页能看到旧任务被取消及原因。
+    validations:
+      required: true
+
+  - type: textarea
+    id: implementation
+    attributes:
+      label: 实施
+      description: 开 issue 时留空。开 PR 的人回填分支名 `task/<issue>/<slug>` 和 PR 编号 `#n`；合并后补合并提交（docs/conventions/TRACKING.md §2）。
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 已按 docs/conventions/ISSUES.md §1 查重（含已关闭 issue）
+          required: true
+        - label: 标题格式为 `<模块>：<用户可见的症状>`
+          required: true

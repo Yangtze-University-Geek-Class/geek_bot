@@ -1,8 +1,55 @@
+# 依赖与构建产物
 node_modules/
 dist/
-.claude/worktrees/
-.env
-.env.*
-!.env.example
+.vite
+*.tsbuildinfo
+
+# 本机工具与测试产物
+.tools/
+coverage/
+test-results/
+playwright-report/
 *.log
 .DS_Store
+
+# task worktree（node scripts/task.mjs start 建在这里，生命周期跟着 issue，见 docs/conventions/BRANCHING.md）
+.claude/worktrees/
+
+# 私有 env：真实值只在目标机或本机，永远不入库
+.env
+.env.*
+# 模板例外：根 .env.example 与 deploy/env/.env.<环境> 只放占位符，必须入库（pnpm check:secrets 会扫描它们）
+!.env.example
+!deploy/env/.env.*
+# 模板例外之内仍然忽略本机覆盖文件
+deploy/env/.env.*.local
+
+# SQLite 库及其附属文件（WAL 模式下 -wal/-shm 可能含未 checkpoint 的数据）与本机备份副本。
+# 只按确切的库文件名忽略，不写 *.db* 这类宽模式：repo.db.ts、schema.dbml 这类源码和文档不能被静默忽略。
+# 这里没列到的库文件名（例如 app.db.orig）不会被忽略，由 pnpm check:secrets 的数据库文件规则报出来；
+# 强制 add 进来的库文件同样由它拦下。
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.db.bak
+*.db.[0-9]*
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-journal
+*.sqlite3-wal
+*.sqlite3-shm
+*.sqlite.bak
+*.sqlite3.bak
+*.sqlite.[0-9]*
+*.sqlite3.[0-9]*
+/data/
+
+# VM 镜像与缓存（节点在本机构建或下载，不入库）
+*.qcow2
+*.img
+*.iso
+/vm-cache/

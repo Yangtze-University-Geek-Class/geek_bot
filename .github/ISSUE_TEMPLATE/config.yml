@@ -1,0 +1,11 @@
+# issue 模板选择器配置。GitHub 把这个文件名保留给选择器，这里只放选择器设置，不放表单；
+# 表单是同目录的 bug.yml、feature.yml、chore.yml。
+#
+# 关闭空白 issue：开 issue 必须选一个表单，这样「端」「优先级」和查重确认不会漏填。
+# contact_links 暂不写：安全问题的私下报告渠道还没有（SECURITY.md 与私下漏洞报告随 #21 加入），
+# 不放不存在的地址。
+#
+# 生效前提：表单、这份选择器配置和 .github/pull_request_template.md 都只在进入默认分支 main 后生效；
+# 第一次 stage→main 之前，新建 issue / PR 页看不到它们，照 docs/conventions/ISSUES.md §2 与
+# docs/conventions/PULL-REQUESTS.md 手写各段。
+blank_issues_enabled: false

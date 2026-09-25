@@ -1,0 +1,6 @@
+packages:
+  - app/control
+  - app/console
+  - app/node
+  - app/runner
+  - packages/protocol

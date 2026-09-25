@@ -1,0 +1,32 @@
+{
+  "name": "geek_bot",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@9.15.9",
+  "scripts": {
+    "check:runtime": "node scripts/check-runtime.mjs",
+    "check:boundaries": "node scripts/check-boundaries.mjs",
+    "docs:index": "node scripts/docs-index.mjs",
+    "check:docs": "node scripts/docs-index.mjs --check && node scripts/check-docs.mjs && node scripts/tuffex-docs.mjs check",
+    "docs:tuffex": "node scripts/tuffex-docs.mjs",
+    "check:tuffex-docs": "node scripts/tuffex-docs.mjs check",
+    "check:secrets": "node scripts/check-secrets.mjs",
+    "check:public-safety": "node scripts/check-public-safety.mjs",
+    "check:branch-invariants": "node scripts/check-branch-invariants.mjs",
+    "hooks:enable": "git config core.hooksPath .githooks",
+    "labels:plan": "node scripts/labels.mjs",
+    "typecheck": "pnpm -r --if-present run typecheck && tsc -p tsconfig.json",
+    "check": "pnpm check:runtime && pnpm check:boundaries && pnpm check:docs && pnpm check:secrets && pnpm check:public-safety && pnpm typecheck",
+    "test": "vitest run",
+    "build": "pnpm check:runtime && pnpm -r --if-present run build",
+    "verify": "pnpm check && pnpm test && pnpm build"
+  },
+  "engines": {
+    "node": ">=22.13.0 <23"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}
