@@ -1,8 +1,8 @@
 # 本机开发
 
-> 在本机准备 Node 22 与 pnpm 9.15.9，安装依赖，跑 `pnpm verify`，启用 Git 钩子，用 task worktree 开工和收尾。
+> 在本机准备 Node 22 与 pnpm 9.15.9，安装依赖，跑 `pnpm verify`，启用 Git 钩子，用 task worktree 开工和收尾，每一步写执行记录。
 
-状态：`current` · 更新：2026-09-25 · 适用：在本机开发本仓库的维护者与 agent
+状态：`current` · 更新：2026-09-26 · 适用：在本机开发本仓库的维护者与 agent
 
 先读完 [AGENTS](../../AGENTS.md) §0 列出的规范再照本文操作。分支与 worktree 的规则以 [BRANCHING](../conventions/BRANCHING.md) 为准，测试规则以 [TESTING](../conventions/TESTING.md) 为准，本文只写操作步骤。
 
@@ -38,8 +38,9 @@ pnpm install --frozen-lockfile
 | `check:runtime` | `node scripts/check-runtime.mjs` | 当前 Node 必须是 22 且不低于 22.13 |
 | `check:boundaries` | `node scripts/check-boundaries.mjs` | 五个包互不导入实现；都可以导入 `@geek-bot/protocol`；protocol 不导入任何 app；`app/runner/src` 只用 Node 标准库、不引用 `src/` 以外的文件；每个包都登记在 `pnpm-workspace.yaml`、都有 `typecheck` 与 `build` 脚本。用 AST 解析，解析不了就失败 |
 | `check:docs` | `node scripts/docs-index.mjs --check && node scripts/check-docs.mjs && node scripts/tuffex-docs.mjs check` | `docs/INDEX.md` 与文档一致；`AGENTS.md`、`README.md`、`docs/README.md` 存在；相对链接指向真实文件；每个 `app/<name>` 与 `packages/<name>` 都有 `docs/services/<name>/README.md`；`.omp/skills/code-review` 与 `.claude/skills/code-review` 是指向 `.agents/skills/code-review` 的符号链接；`docs/components/tuffex/` 里受哈希管理的上游文件逐个与清单一致，`reference/`、`snapshot/` 下不许有清单以外的文件（报「没有登记在清单里」） |
+| `check:notes` | `node scripts/note.mjs check` | `notes/` 只能是 `<日期>/<GitHub 用户名>/<链路>.md` 加 `INDEX.md`；标题、负责人与目录一致；每条记录的标题是北京时间 `HH:MM:SS +08:00`、阶段在词表里、`执行者`/`做了什么`/`结果` 齐全；时间不倒退；task 链路以「开工」开始、收尾之后不再记；`notes/INDEX.md` 是最新的（[NOTES](../conventions/NOTES.md)） |
 | `check:secrets` | `node scripts/check-secrets.mjs` | 私有 env 文件、数据库文件不入库；env 模板里的密钥项只能留空或写 `*_FILE`；不出现私钥、GitHub 令牌、`sk-` 开头的长密钥。不按扩展名挑文件，每个非二进制文件都扫（`Dockerfile`、`.npmrc`、没有扩展名的文件都在内）；私钥文件名（`*.pem`、`*.key`、`id_ed25519` 等）和数据库附属、备份文件（`.db.bak`、`.sqlite-wal` 等）不看内容，一律不许入库 |
-| `check:public-safety` | `node scripts/check-public-safety.mjs` | 不出现私网、CGNAT、链路本地地址和带 mesh 子域的组网主机名；被禁词按 SHA-256 比对；确需保留的放行项逐条写进 `scripts/public-safety-allow.json` 并写明理由。文件名、目录名、符号链接目标同样扫描；放行清单自己的 `path`、`reason` 照常扫描；`docs/components/tuffex/reference/`、`snapshot/` 下只跳过清单（`manifest.json`）里登记过的文件内容 |
+| `check:public-safety` | `node scripts/check-public-safety.mjs` | 不出现私网、CGNAT、链路本地地址和带 mesh 子域的组网主机名；被禁词按 SHA-256 比对；确需保留的放行项逐条写进 `scripts/public-safety-allow.json` 并写明理由。文件名、目录名、符号链接目标同样扫描；`notes/` 下的路径和内容不做被禁词比对（记录必须写负责人的 GitHub 用户名，见 [NOTES](../conventions/NOTES.md) §7），地址和主机名规则照常；放行清单自己的 `path`、`reason` 照常扫描；`docs/components/tuffex/reference/`、`snapshot/` 下只跳过清单（`manifest.json`）里登记过的文件内容 |
 | `typecheck` | `pnpm -r --if-present run typecheck && tsc -p tsconfig.json` | 每个包 `tsc -p tsconfig.json --noEmit`；再用根 `tsconfig.json` 对 `tests/**` 与 `vitest.config.ts` 做类型检查，不产出文件 |
 | `test` | `vitest run` | 运行 `tests/` 下的全部单测 |
 | `build` | `pnpm check:runtime && pnpm -r --if-present run build` | 每个包 `tsc -p tsconfig.json`，产物进各包的 `dist/`（已被 `.gitignore` 忽略） |
@@ -49,6 +50,7 @@ pnpm install --frozen-lockfile
 - `pnpm docs:index`：改了文档标题、摘要或路径后重新生成 `docs/INDEX.md`，不要手工编辑它。
 - `pnpm check:branch-invariants`：核对 `stage` 包含 `main`、`main` 不领先 `stage`，违反就以非 0 退出；分支命名不合规默认只告警（加 `--strict-long-lived` 才算失败）。CI 的 `branch-guard` 用 `--require-remote-refs` 跑同一脚本。
 - `node scripts/check-public-safety.mjs --hash <词>`：打印一个词的 SHA-256，维护者用它往被禁词表里追加条目；表里只存哈希，不存明文。只接受单个 `[a-z0-9]+` token（大小写不限）或 IPv4；带连字符、空格的词要拆开分别登记；汉字词不支持，会以 2 退出。扫描时每个 token 连同它长度 4 到 32 的前缀、后缀一起比对，所以登记一个词就能拦住它和别的词、数字连写的形式（夹在两个词中间的拦不住）；短于 4 个字符的词只按整词比对，`--hash` 会在 stderr 提示。
+- `node scripts/note.mjs add|flush|index|check`：写执行记录、把暂存的记录并进当前 task worktree、重新生成 `notes/INDEX.md`（`--summary` 输出全部链路的一览表）、核对记录；`check --pr --base origin/stage --head <task 分支>` 是 CI 对 task PR 的检查，本地开 PR 前可以先跑（审查进行中加 `--for-review`，允许暂缺「审查」）。用法见 [NOTES](../conventions/NOTES.md) §5。
 - `pnpm labels:plan`：只打印创建标签的 `gh label create` 命令，不执行，由所有者决定是否运行（见 [CICD](CICD.md)）。
 - 还没有的命令：`dev:control`（#3）、`dev:console` 与 `test:e2e`（#4）、`check:environments` 与 `release:plan`（#7）、`test:vm`（#12）。
 
@@ -69,23 +71,27 @@ pnpm hooks:enable          # 等于 git config core.hooksPath .githooks
 
 ## task worktree：开工与收尾
 
-一个 issue 一个 `task/<issue>/<slug>` 分支、一个 worktree、一个 PR。`task.mjs` 需要本机已登录的 `gh`，它会读 issue 状态并在 issue 上留追踪记录。
+一个 issue 一个 `task/<issue>/<slug>` 分支、一个 worktree、一个 PR。`task.mjs` 需要本机已登录的 `gh`，它会读 issue 状态并在 issue 上留追踪记录；`start`、`finish`、`prune` 还要知道是谁在干活（执行记录的身份，[NOTES](../conventions/NOTES.md)）。
 
 ```bash
 git branch --show-current                        # 1. 确认当前在哪
-node scripts/task.mjs start <issue> <slug>       # 2. 从最新 origin/stage 建 task/<issue>/<slug> 与 .claude/worktrees/task-<issue>，并在 issue 上留开工记录
+export GEEK_NOTES_USER=<GitHub 用户名>            #    执行记录的身份：替谁干活
+export GEEK_NOTES_BY="agent-claude-geek-bot-01（Claude Code，<模型>）"   # 执行者；人自己做写 human-<GitHub 用户名>
+node scripts/task.mjs start <issue> <slug>       # 2. 从最新 origin/stage 建 task/<issue>/<slug> 与 .claude/worktrees/task-<issue>，在 issue 上留开工记录，notes/ 里写「开工」
 cd .claude/worktrees/task-<issue>
 pnpm install --frozen-lockfile                   # 3. 在 worktree 里安装、开发、验证、提交
 pnpm verify
-# 4. 开 PR → stage，正文按 PULL-REQUESTS 的契约写；每个阶段在 issue 上留追踪记录
+node scripts/note.mjs add --stage 提交 --issue <issue> --title "…" --did "…" --result "…"   # 每一步记一条，和代码一起提交
+# 4. 开 PR → stage，正文按 PULL-REQUESTS 的契约写；每个阶段在 issue 上留追踪记录，notes/ 里记「PR」「审查」「返工」
 # 5. PR 合并进 stage 后，远端分支与 issue 由 branch-hygiene / issue-lifecycle 自动处理；
-#    回到主工作区删本机的 worktree 与本地分支：
+#    回到主工作区删本机的 worktree 与本地分支（「收尾」先暂存，下一个 task 开工时随它入库）：
 node scripts/task.mjs finish <issue>
 ```
 
 - `node scripts/task.mjs list` 列出每个 worktree 对应的 issue 与 PR 状态；`node scripts/task.mjs prune` 一次清掉所有可清理的 worktree。
 - `slug` 只用小写字母、数字和 `_`（例 `review_queue`），不用 `-`。
 - 只有 PR 已合并，或 issue 已关闭（放弃）且没有开着的 PR 时，`finish` 才删除；worktree 有未提交改动、PR 还开着、issue 还开着且 PR 没合并、或查不到 issue 状态时，只报告原因、不删除，并以非 0 退出。
+- `start` 缺身份时直接以 1 退出，不查 issue、不建分支。`start` 查 issue 时分清两种失败：gh 明确回答没有这个编号，提示先开 issue；gh 本身失败（网络、TLS、认证、没装 gh），报「查 issue 状态失败」并附上 gh 的错误，以 1 退出，这时先修好 gh 再重跑。
 - 在主工作区运行 `finish`，不要在要删的 worktree 里运行。
 - 脚本按真实路径判断自己是否被直接运行：即使经符号链接路径启动，参数不对也会打印用法并以非 0 退出，不会静默退出 0。
 

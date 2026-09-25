@@ -20,6 +20,10 @@
  *      与 scripts/public-safety-denylist.json 比对，这样被禁词和别的词连写（<词>bot、<词>university）也能拦住；
  *      夹在中间的连写拦不住。另把每个 IPv4 字面量整体算 SHA-256 比对（用于个别公网地址）。
  *      清单里只有哈希，没有明文；用 --hash 生成新条目（只接受单个 [a-z0-9]+ token 或 IPv4，其它输入永远匹配不上，直接拒绝）。
+ *   执行记录目录 notes/ 例外：这里的路径（目录名、文件名）和内容不做规则 3 里的被禁 token 比对，只免这一条，其余规则照常。
+ *      记录按规定必须写负责人的 GitHub 用户名（目录名、标题、负责人行，docs/conventions/NOTES.md），
+ *      而被禁清单里有真实账号名，不免掉这一条就写不了记录。私网、CGNAT、链路本地地址、组网主机名、
+ *      被禁 IPv4 的哈希照常拦截；notes/ 的目录结构由 scripts/note.mjs check 限定，别的文件放不进去。
  *   4. 放行清单 scripts/public-safety-allow.json：逐条写 { path, value, reason }，不许有别的字段。value 对规则 1、2
  *      是命中的原文，对规则 3 是命中的 SHA-256。放行项必须写明理由；没有命中的放行项也算失败（清单要跟着文件一起清理）。
  *      放行清单自己的 path 与 reason 照常扫描，命中不能再被放行；只有 value 不扫（它要么是哈希，
@@ -46,6 +50,8 @@ export const SKIPPED_PREFIXES = Object.freeze(["docs/components/tuffex/reference
 /** 上游快照的清单：files[].path 相对 docs/components/tuffex/。 */
 export const TUFFEX_DIR = "docs/components/tuffex/";
 export const TUFFEX_MANIFEST = `${TUFFEX_DIR}manifest.json`;
+/** 执行记录目录：路径和内容不做被禁 token 比对（其余规则照常），理由见文件头。 */
+export const NOTES_DIR = "notes/";
 /** 放行清单每一项只能有这三个字段。 */
 const ALLOW_KEYS = Object.freeze(["path", "value", "reason"]);
 
@@ -143,15 +149,21 @@ function maskIPv4(value) {
   return `${value.split(".")[0]}.*.*.*`;
 }
 
+/** 这个仓库相对路径（文件或目录）要不要做被禁 token 比对：notes/ 目录本身和它下面的一切都不做。 */
+export function tokenRuleApplies(path) {
+  return !(path === NOTES_DIR.slice(0, -1) || path.startsWith(NOTES_DIR));
+}
+
 /**
  * 扫描一个文件的内容（纯函数）。返回的每条命中：{ file, line, rule, value, shown }。
  * value 用于和放行清单比对（规则 3 是哈希）；shown 是打印用的打码形式。
+ * tokens 为 false 时跳过被禁 token 比对（只用于 notes/，见 tokenRuleApplies），地址、主机名与 IPv4 哈希照常。
  * @param {string} file 仓库相对路径
  * @param {string} text
- * @param {{ denylist: Set<string>, hashCache?: Map<string, string> }} options
+ * @param {{ denylist: Set<string>, hashCache?: Map<string, string>, tokens?: boolean }} options
  * @returns {Finding[]}
  */
-export function scanText(file, text, { denylist, hashCache = new Map() }) {
+export function scanText(file, text, { denylist, hashCache = new Map(), tokens = true }) {
   /** @type {Finding[]} */
   const findings = [];
   const hashed = (value) => {
@@ -176,6 +188,7 @@ export function scanText(file, text, { denylist, hashCache = new Map() }) {
     for (const match of content.matchAll(MESH_HOST_RE)) {
       findings.push({ file, line, rule: "组网主机名（含 .mesh. 段）", value: match[0], shown: "*.mesh.*" });
     }
+    if (!tokens) return;
     const hits = new Set();
     for (const token of tokensOf(content)) {
       for (const candidate of candidatesOf(token)) {
@@ -202,7 +215,7 @@ export function scanPath(file, { denylist, hashCache = new Map(), seen = new Set
     const prefix = segments.slice(0, index + 1).join("/");
     if (seen.has(prefix)) return;
     seen.add(prefix);
-    for (const finding of scanText(prefix, segment, { denylist, hashCache })) findings.push({ ...finding, line: 0, rule: `路径：${finding.rule}` });
+    for (const finding of scanText(prefix, segment, { denylist, hashCache, tokens: tokenRuleApplies(prefix) })) findings.push({ ...finding, line: 0, rule: `路径：${finding.rule}` });
   });
   return findings;
 }
@@ -350,7 +363,7 @@ export function auditRepository({ root = ROOT, denylist = loadDenylist(), allow 
     if (buffer.subarray(0, 8192).includes(0)) continue; // 二进制：只查路径
     checked += 1;
     if (file === ALLOW_FILE) own.push(...scanAllowlist(buffer.toString("utf8"), allow, { denylist, hashCache }));
-    else findings.push(...scanText(file, buffer.toString("utf8"), { denylist, hashCache }));
+    else findings.push(...scanText(file, buffer.toString("utf8"), { denylist, hashCache, tokens: tokenRuleApplies(file) }));
   }
   const result = applyAllowlist(findings, allow);
   const remaining = [...result.findings, ...own];

@@ -2,7 +2,7 @@
 
 > 三条工作流（ci / issue-lifecycle / branch-hygiene）只做机器验证、PR 正文核对和合并后的清理，不部署；发布镜像的 `release.yml` 随 #7 加入。平台能力按 2026-09-25 的只读核对记录。
 
-状态：`current` · 更新：2026-09-25 · 适用：改 `.github/workflows/`、改 GitHub 仓库设置或标签之前
+状态：`current` · 更新：2026-09-26 · 适用：改 `.github/workflows/`、改 GitHub 仓库设置或标签之前
 
 发布规则以 [RELEASES](../conventions/RELEASES.md) 为准，分支模型以 [BRANCHING](../conventions/BRANCHING.md) 为准，PR 正文契约以 [PULL-REQUESTS](../conventions/PULL-REQUESTS.md) 为准，追踪记录以 [TRACKING](../conventions/TRACKING.md) 为准。
 
@@ -10,7 +10,7 @@
 
 | 工作流 | 触发 | 行为 |
 |---|---|---|
-| `ci.yml` | PR → `main`/`stage`；push `main`/`stage`（不含 tag）；`workflow_dispatch` | `branch-guard`（`node scripts/check-branch-invariants.mjs --require-remote-refs`）∥ `core`（Node 读 `.nvmrc`，pnpm 读 `packageManager`：`pnpm install --frozen-lockfile` → `pnpm check` → `pnpm test` → `pnpm build`）∥ `lint-workflows`（actionlint 1.7.12，下载后按内联 SHA-256 校验）→ `verify` 汇总 |
+| `ci.yml` | PR → `main`/`stage`；push `main`/`stage`（不含 tag）；`workflow_dispatch` | `branch-guard`（`node scripts/check-branch-invariants.mjs --require-remote-refs`；来源是 `task/**` 的 PR 另跑「执行记录（notes/）」：`node scripts/note.mjs check --pr --base origin/<目标分支> --head <task 分支>`，分支名经环境变量传入；每次运行都跑「执行记录一览（运行摘要）」：`node scripts/note.mjs index --summary` 追加到 Actions 的运行摘要。这个 job 不装依赖，两个脚本只用 Node 标准库）∥ `core`（Node 读 `.nvmrc`，pnpm 读 `packageManager`：`pnpm install --frozen-lockfile` → `pnpm check` → `pnpm test` → `pnpm build`）∥ `lint-workflows`（actionlint 1.7.12，下载后按内联 SHA-256 校验）→ `verify` 汇总 |
 | `issue-lifecycle.yml` | 指向 `stage` 或 `main` 的 PR 的 opened / edited / synchronize / reopened / ready_for_review / closed；每周一 03:37 UTC；`workflow_dispatch` | `pr-base`：PR 的目标分支只能是 `stage`，指向别的分支就失败；它随 edited 触发，改了 base 会重新判定（`ci.yml` 不监听 edited，所以不放在那里）；`pr-contract`（只处理指向 `stage` 的 PR）：从目标分支（`base.ref`）只检出 `scripts/pr-contract.mjs` 与 `scripts/lib/`，核对 PR 正文（`Closes #<issue>` 与 task 分支号一致、issue 存在且开着、九个必需段落、验收证据、审查结论），不检出也不执行 PR 的代码；`close-on-merge`（只处理合进 `stage` 的 PR）：合并进 `stage` 后关闭 issue，并在 issue 与 PR 上各留一条 `<!-- track v1 kind=closed stage=merged -->` 记录；`weekly-sweep`：列出「PR 已合并但 issue 还开着」「issue 开着但没有 task 分支也没有 open PR」，只告警 |
 | `branch-hygiene.yml` | PR `closed`（合并时才删）；每周一 03:17 UTC；`workflow_dispatch` | 合并后删除本仓库里 head 为 `task/**` 的分支（只有这个 job 有 `contents: write`，**永不**自动删 `dev/**` 或长期分支）；每周巡检远端 `task/**`，对「14 天无提交活动且没有 open PR」的分支只告警、不删除 |
 
@@ -79,7 +79,7 @@
 ## 本地复现
 
 - `core`：在 worktree 里运行 `pnpm install --frozen-lockfile && pnpm verify`（见 [LOCAL-DEV](LOCAL-DEV.md)）。
-- `branch-guard`：`node scripts/check-branch-invariants.mjs --require-remote-refs`，需要本地已有 `origin/main` 与 `origin/stage`。
+- `branch-guard`：`node scripts/check-branch-invariants.mjs --require-remote-refs`，需要本地已有 `origin/main` 与 `origin/stage`；执行记录那一步在 task worktree 里运行 `node scripts/note.mjs check --pr --base origin/stage --head <task 分支>`，一览表用 `node scripts/note.mjs index --summary`。
 - `pr-base`：只看 PR 的 base，本地没有对应命令；开 PR 时确认目标是 `stage` 即可。
 - `lint-workflows`：本机装 actionlint 1.7.12 后，在仓库根目录运行 `actionlint .github/workflows/*.yml`。
 

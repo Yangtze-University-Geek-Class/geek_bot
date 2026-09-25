@@ -41,7 +41,7 @@ geek_bot 是一个可以自己部署的通用产品。部署者在 Web 后台用
 
    ```bash
    pnpm install --frozen-lockfile
-   pnpm verify          # 运行时、包边界、文档、密钥、公开安全、类型检查 → 单测 → 构建
+   pnpm verify          # 运行时、包边界、文档、执行记录、密钥、公开安全、类型检查 → 单测 → 构建
    pnpm hooks:enable    # pre-push 核对分支不变量与发布 tag 规则
    ```
 

@@ -2,7 +2,7 @@
 
 > Conventional Commits 结构，中文说明，一次提交一个可回滚目的。
 
-状态：`current` · 更新：2026-09-25 · 适用：本仓库的所有提交，包括 PR 标题与机器人账号的提交。
+状态：`current` · 更新：2026-09-26 · 适用：本仓库的所有提交，包括 PR 标题与机器人账号的提交。
 
 ## 格式
 
@@ -29,6 +29,7 @@ scope 只用下表的词，按职责中心选一个，不罗列全部文件：
 | `protocol` | `packages/protocol`：共享类型与 JSON Schema |
 | `deploy` | 部署模板、compose、env 模板、部署脚本 |
 | `docs` | `docs/`、根 README 与 AGENTS.md |
+| `notes` | 只补 `notes/` 执行记录的提交（开 PR、拿到审查结论后补记，写成 `docs(notes): …`，见 [NOTES](NOTES.md)）；记录和代码一起提交时用代码的 scope |
 | `tooling` | 根脚本、`scripts/`、`.githooks/`、`.github/` 工作流与模板 |
 | `deps` | 依赖与锁文件变更 |
 | `release` | 版本号与发布相关的改动 |
@@ -41,6 +42,7 @@ scope 只用下表的词，按职责中心选一个，不罗列全部文件：
 - `feat(console): 仓库列表显示机器人在每个仓库的权限`
 - `docs(tooling): 统一根目录验收入口`
 - `fix(security): 写入出口拒绝 event 为空的 review`
+- `docs(notes): 补记 #12 的审查结论`
 
 ## 原子性与兼容性
 

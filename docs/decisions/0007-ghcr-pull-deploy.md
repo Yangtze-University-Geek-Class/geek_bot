@@ -9,7 +9,7 @@
 - 发版流程已由 [RELEASES](../conventions/RELEASES.md) 定下：`vX.Y.Z-rc.N` 打在 `stage` 的提交上发预发布，所有者验收后在同一提交上打 `vX.Y.Z` 发正式；正式实例运行的就是预发布验过的那个镜像 digest。本篇写的是镜像怎样构建、怎样到达目标机。
 - env 模板只放占位符和通用默认值、密钥一律 `*_FILE` 的决定和理由已经写在 [ADR-0001](0001-standalone-product.md)（#22 第 3 项），本篇沿用，不重复。
 - 目标机没有公网入站端口：第一台节点只在私有组网里可达，GitHub 托管的 runner 连不到它。免费计划的私有仓库没有 Environments，也就没有环境级 secrets 和部署审批（[CICD](../ops/CICD.md)）。
-- ADR-0001 背景里的规范体系用 CI 经 SSH 推送部署。放在这里既连不上目标机，也要把高权限的 SSH 密钥放进 CI。
+- 常见的做法是由 CI 经 SSH 推送部署。放在这里既连不上目标机，也要把高权限的 SSH 密钥放进 CI。
 - Container registry 的镜像存储和流量目前免费，GitHub 承诺改变前至少提前一个月通知（[GitHub Packages 计费](https://docs.github.com/en/billing/concepts/product-billing/github-packages)，2026-09-26 核对）。
 
 ## 决策
@@ -65,7 +65,7 @@
 
 ## 替代方案
 
-- **沿用 ADR-0001 背景里规范体系的 SSH 部署工作流**：目标机没有入站端口，免费计划的私有仓库也没有 Environments，做不到。
+- **CI 经 SSH 推送部署的工作流**：目标机没有入站端口，免费计划的私有仓库也没有 Environments，做不到。
 - **CI runner 用临时的组网加入密钥入网后经 SSH 部署**：多一枚高权限密钥进 CI；留待以后评估。
 - **栈内拉取式部署器**（轮询 Release manifest，自己过健康门）：能恢复自动闭环，作为 v1 之后的增强。
 - **把 `docker save` 的归档作为 Release 附件**：体积大；ghcr 目前免费，更合适。

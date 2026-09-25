@@ -6,7 +6,7 @@
 
 ## AI 第一操作
 
-Agent 进入仓库的第一件事是**确认当前分支**（`git branch --show-current`），第二件事是停止业务操作并完整读取 [AGENT-START](conventions/AGENT-START.md)、[PROJECT](conventions/PROJECT.md)、[BRANCHING](conventions/BRANCHING.md)、[CONTRIBUTING](conventions/CONTRIBUTING.md)、[CODE-REVIEW](conventions/CODE-REVIEW.md)、[RELEASES](conventions/RELEASES.md)、[TRACKING](conventions/TRACKING.md) 和任务适用文档，再开始实施。根 [AGENTS](../AGENTS.md) 保存硬门禁摘要；不能先执行再补读。
+Agent 进入仓库的第一件事是**确认当前分支**（`git branch --show-current`），第二件事是停止业务操作并完整读取 [AGENT-START](conventions/AGENT-START.md)、[PROJECT](conventions/PROJECT.md)、[BRANCHING](conventions/BRANCHING.md)、[CONTRIBUTING](conventions/CONTRIBUTING.md)、[CODE-REVIEW](conventions/CODE-REVIEW.md)、[RELEASES](conventions/RELEASES.md)、[TRACKING](conventions/TRACKING.md)、[NOTES](conventions/NOTES.md) 和任务适用文档，再开始实施。根 [AGENTS](../AGENTS.md) 保存硬门禁摘要；不能先执行再补读。
 
 ## 目录 ↔ docs ↔ 规范 地图
 
@@ -19,6 +19,7 @@ Agent 进入仓库的第一件事是**确认当前分支**（`git branch --show-
 | `packages/protocol/` | [services/protocol](services/protocol/README.md) | [MODULAR-DEVELOPMENT](conventions/MODULAR-DEVELOPMENT.md)、[API](architecture/API.md)、[节点协议](services/node/protocol.md) |
 | `deploy/`（计划中，#7 加入） | DEPLOY、ENVIRONMENTS（#7 写入）· [ops/CICD](ops/CICD.md) | [RELEASES](conventions/RELEASES.md)、[BRANCHING](conventions/BRANCHING.md) |
 | `docs/`（本文档树） | [INDEX](INDEX.md)（生成物） | [DOCUMENTATION](conventions/DOCUMENTATION.md) |
+| `notes/`（执行记录，入口 `notes/INDEX.md` 是生成物） | [NOTES](conventions/NOTES.md) | [NOTES](conventions/NOTES.md)、[CODE-REVIEW](conventions/CODE-REVIEW.md) |
 | `scripts/`、`tests/` | [TESTING](conventions/TESTING.md) · [ops/LOCAL-DEV](ops/LOCAL-DEV.md) · [ops/CICD](ops/CICD.md) | [CONTRIBUTING](conventions/CONTRIBUTING.md)、[CODE-REVIEW](conventions/CODE-REVIEW.md) |
 | `.github/`（工作流、issue 与 PR 模板、标签声明） | [ops/CICD](ops/CICD.md) | [ISSUES](conventions/ISSUES.md)、[PULL-REQUESTS](conventions/PULL-REQUESTS.md)、[TRACKING](conventions/TRACKING.md) |
 
@@ -37,6 +38,7 @@ Agent 进入仓库的第一件事是**确认当前分支**（`git branch --show-
 | 提交格式与 scope | [COMMITS](conventions/COMMITS.md) |
 | Issue（开发前必开）与 PR | [ISSUES](conventions/ISSUES.md)、[PULL-REQUESTS](conventions/PULL-REQUESTS.md) |
 | issue ↔ 分支 ↔ PR 的生命周期、追踪记录格式 | [TRACKING](conventions/TRACKING.md)、[ADR-0010](decisions/0010-tracking-record-prefix.md) |
+| 每一步的执行记录（`notes/`）、开工与收尾 | [NOTES](conventions/NOTES.md) |
 | 测试、隔离、验收证据 | [TESTING](conventions/TESTING.md) |
 | 文档结构、状态词表与事实来源 | [DOCUMENTATION](conventions/DOCUMENTATION.md) |
 | 包边界与模块拆分 | [MODULAR-DEVELOPMENT](conventions/MODULAR-DEVELOPMENT.md) |
