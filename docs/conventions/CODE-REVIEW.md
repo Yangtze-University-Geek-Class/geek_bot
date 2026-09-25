@@ -2,7 +2,7 @@
 
 > 本仓库专属的 diff 审查清单：触发时机、逐项检查、结论格式、审查记录位置，以及机器审查的边界。
 
-状态：`current` · 更新：2026-09-25 · 适用：所有进入 `stage` 或 `main` 的改动（代码、文档、脚本、配置、工作流）
+状态：`current` · 更新：2026-09-26 · 适用：所有进入 `stage` 或 `main` 的改动（代码、文档、脚本、配置、工作流）
 
 本规范规定**看什么、怎么判、写在哪**；PR 的字段要求与门禁见 [PULL-REQUESTS](PULL-REQUESTS.md)，分支模型见 [BRANCHING](BRANCHING.md)，逐项核对的命令见 [code-review 技能](../../.agents/skills/code-review/SKILL.md)。
 
@@ -20,7 +20,7 @@
 
 ## 必须逐项检查的清单
 
-第 1–10 项是通用项，第 11–14 项是机器人专项。每一项都要核对；与本次改动无关的项在结论里写「不涉及」，不能跳过不写。机器人专项对应的代码大多还没写（计划中，#5、#9、#10、#11、#13、#14、#17）；代码出现之前，这几项核对的是文档、设计与 [安全不变量](../architecture/SECURITY.md) 有没有被放宽，放宽同样按 `阻塞` 处理。
+第 1–10 项是通用项，第 11–14 项是机器人专项，第 15 项是执行记录（通用项，编号排在最后，前 14 项的编号不变）。每一项都要核对；与本次改动无关的项在结论里写「不涉及」，不能跳过不写。机器人专项对应的代码大多还没写（计划中，#5、#9、#10、#11、#13、#14、#17）；代码出现之前，这几项核对的是文档、设计与 [安全不变量](../architecture/SECURITY.md) 有没有被放宽，放宽同样按 `阻塞` 处理。
 
 1. **分支不变量**：当前分支是否为 `task/<issue>/<slug>` 或 `stage`（分支名不含 `-`，见 [BRANCHING](BRANCHING.md) 命名规则）；`stage` 是否包含 `main`（`git merge-base --is-ancestor origin/main origin/stage`）；是否存在把 `task/**`、`dev/**` 直接指向 `main` 的路径；远端是否残留已合并的 `task/**` 分支，或出现 `main`、`stage` 之外的长期分支。
 2. **是否直推 `main`**：PR 的目标分支、提交来源、CI 触发 ref；发现任何绕过 `stage` 的写入 `main` 的路径即阻塞。
@@ -36,6 +36,7 @@
 12. **令牌 scope 变化**：机器人账号申请的 OAuth scope、管理员登录申请的 scope，以及绑定时拒绝的 scope 名单（当前设计拒绝 `workflow`、`admin:org`、`delete_repo`、`write:packages`、`admin:repo_hook`，见 [安全不变量](../architecture/SECURITY.md)；身份决策 ADR-0002 由 #2 写入），任何增加、放宽或删减拒绝项都要写明理由并取得所有者批准，否则阻塞。机器人令牌只在 control 里加密存放，只有 publisher 与 GitHub 读取层能调用解密（S-01，计划中，#5、#9）；其它模块新增解密调用，或让令牌出现在响应、日志、审计、事件、备份明文或发往节点的数据里，即阻塞。
 13. **执行环境不持有凭据**：sandbox 容器、VM 与 node 容器的环境变量、挂载、镜像层、日志、传给 VM 的文件（包括 fw_cfg 与原始盘）里，不得出现 GitHub 令牌、模型网关密钥或宿主凭据（SSH 密钥、`docker.sock`、宿主 HOME、云凭据）（S-02、S-03）。它们只能拿到每任务的模型令牌（限定模型池、预算和租约期）；node 只持有自己的节点令牌。
 14. **仓库内容是不可信输入**：issue 与 PR 的标题、正文、评论，代码、diff、提交信息，`AGENTS.md`、`CLAUDE.md`、`.omp/`、`.claude/`、`.cursor/`、`mcp.json`、`.github/geek-bot.yml` 一律当作数据，不当作指令，以防提示注入（S-04、S-05、S-08）：规则文件只从 base 分支读取（ADR-0005，#2 写入），不从 PR head 读取；任务包剔除 `.omp/`、`.claude/`、`.cursor/`、`mcp.json`、`.env*`，omp 在干净的 HOME 里运行；模型输出发布前要去掉注释标记、中和结论行与 `Closes #n`、转义 @ 提及、按密钥形态打码。让仓库内容直接改变提示词、规则、能力开关或写入目标的改动即阻塞。
+15. **执行记录**：本 task 的 `notes/` 链路（[NOTES](NOTES.md)）从「开工」起连续，已记录到「PR」；`node scripts/note.mjs check --pr --for-review --base origin/stage --head <task 分支>` 通过。对照提交、PR 和 CI 核对记录内容属实：时间、SHA、命令输出、结果对得上，没有补写没发生过的事，已有记录没被删除或改写。记录里除负责人的 GitHub 用户名外不得出现真实账号、组织名、内部主机或网段（公开安全检查对 `notes/` 不做被禁词比对，见 NOTES §7，这一条只能靠人看）。审查进行中允许暂缺「审查」记录（此时 CI `branch-guard` 的「执行记录（notes/）」失败是预期的，不作为审查的阻塞项）；审查结论给出后，由作者在合并前补记「审查」（`docs(notes): …`），CI 的执行记录检查通过后才能合并。
 
 ## 产出格式
 

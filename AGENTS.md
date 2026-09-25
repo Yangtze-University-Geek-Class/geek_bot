@@ -2,7 +2,7 @@
 
 > 本文件是仓库唯一的 agent 入口，只写规范与硬门禁。规则正文全部在 `docs/`，这里不写教程、不复制第二套规则。
 
-状态：`current` · 更新：2026-09-25 · 适用：进入本仓库的所有维护者与 agent
+状态：`current` · 更新：2026-09-26 · 适用：进入本仓库的所有维护者与 agent
 
 ## 0. 首步门禁：先确认分支，再读完规范
 
@@ -16,6 +16,7 @@
 6. [CODE-REVIEW](docs/conventions/CODE-REVIEW.md)
 7. [RELEASES](docs/conventions/RELEASES.md)
 8. [TRACKING](docs/conventions/TRACKING.md)
+9. [NOTES](docs/conventions/NOTES.md)
 
 再按任务读取适用规范与服务契约（`docs/services/` 下的服务文档、[TESTING](docs/conventions/TESTING.md)、安全与运维文档等）。
 
@@ -43,6 +44,7 @@
 
 - **一件事 = 一个 issue = 一个 `task/<issue>/<slug>` 分支 = 一个 git worktree = 一个 PR**，生命周期跟着 issue 走（[TRACKING](docs/conventions/TRACKING.md)）。开工用 `node scripts/task.mjs start <issue> <slug>` 从最新 `stage` 建分支和独立 worktree，所有开发都在 worktree 里做，不在主工作区切分支；合并后 `node scripts/task.mjs finish <issue>` 删 worktree 与本地分支（[BRANCHING](docs/conventions/BRANCHING.md)「task worktree」）。开发前先按 [ISSUES](docs/conventions/ISSUES.md) 开 issue；PR 按 [PULL-REQUESTS](docs/conventions/PULL-REQUESTS.md) 的正文契约写（`Closes #<issue>`、解决链路、验收证据截图 / 录屏、人工验收步骤），CI 的 `pr-contract` 核对；**合并进 `stage` 即删分支、关 issue**，issue 与 PR 两边都要留记录。
 - 每个阶段的进展按 [TRACKING](docs/conventions/TRACKING.md) 的「追踪记录」格式写成 issue / PR 评论，记录头是 `<!-- track v1 kind=<类型> stage=<阶段> -->`（[ADR-0010](docs/decisions/0010-tracking-record-prefix.md)）；恢复上下文先读 issue 正文和最后几条追踪记录，不凭记忆续做。
+- **执行记录前后必须写**（[NOTES](docs/conventions/NOTES.md)）：每一步按北京时间记进 `notes/<日期>/<GitHub 用户名>/<链路>.md`，入口是 `notes/INDEX.md`。开发前由 `task.mjs start` 记「开工」（要带 `GEEK_NOTES_USER` 与 `GEEK_NOTES_BY` 身份），开发中每次提交、开 PR、审查、返工都记，合并、发布、验收照记，`task.mjs finish` 记「收尾」。task PR 的链路缺「开工」「提交」「PR」「审查」时 CI 的 `branch-guard` 不通过，不能合并。
 - 任何进入 `stage` 的内容必须走 [CODE-REVIEW](docs/conventions/CODE-REVIEW.md)：按 [code-review 技能](.agents/skills/code-review/SKILL.md) 逐项核对 diff，并把审查结论贴进 PR。**没有审查结论的 PR 不允许合并。**
 - 进入 `main` 和打正式 tag 前，必须有所有者在预发布实例对同一提交的真实验收记录；自动化 PASS 只是机器验证，不能代替人工验证。
 - 提交信息只遵循 [COMMITS](docs/conventions/COMMITS.md)；提交、推送、合并、打 tag、部署分别需要对应授权。发版流程、tag 规则与回滚见 [RELEASES](docs/conventions/RELEASES.md)。
@@ -78,14 +80,15 @@
 - 用 systemd、pm2、手工进程替代 Docker 栈部署，或手工改目标机运行中的栈。
 - 把 `proposed`/`historical` 文档当现行规范执行；规范冲突时自己挑一份照做而不报告。`proposed` 的架构、安全不变量和服务契约只是实现目标和审查时不得放宽的基线，不能拿来证明功能已经实现（见 [docs 总入口](docs/README.md)「文档类别与优先级」）。
 - 伪造审查结论、验收证据、测试结果或审批记录。
+- 不写执行记录就开发、合并或发布；改写、删除已写的记录，手填时间，或补写没发生过的事。
 - 未经所有者授权创建或推送发布 tag，或者移动、删除已推送的发布 tag。
-- 在代码、文档、测试或夹具里写死组织名、真实仓库名、内部主机、内网或组网网段、网关地址或真实账号；需要时写 `<owner>`、`<org>/<repo>`、`https://geek-bot.example.com`、`203.0.113.10` 这类占位。`pnpm check:public-safety` 只拦截已登记的地址段、主机名形式和被禁词哈希，通过不等于没有泄漏，审查时逐句看新增字符串（[CODE-REVIEW](docs/conventions/CODE-REVIEW.md) 第 9 项）。
+- 在代码、文档、测试或夹具里写死组织名、真实仓库名、内部主机、内网或组网网段、网关地址或真实账号（唯一的例外是 `notes/` 里负责人的 GitHub 用户名，见 [NOTES](docs/conventions/NOTES.md) §7）；需要时写 `<owner>`、`<org>/<repo>`、`https://geek-bot.example.com`、`203.0.113.10` 这类占位。`pnpm check:public-safety` 只拦截已登记的地址段、主机名形式和被禁词哈希，通过不等于没有泄漏，审查时逐句看新增字符串（[CODE-REVIEW](docs/conventions/CODE-REVIEW.md) 第 9 项）。
 - 放宽 publisher 的 GitHub 写入白名单或机器人令牌的权限范围，却不按阻塞级问题走 [CODE-REVIEW](docs/conventions/CODE-REVIEW.md)。
 - 让预发布实例用正式机器人账号写真实仓库；预发布实例只写沙盒仓库，或只演练不写。
 
 ## 6. 文档路由表
 
-服务代码与文档严格对齐，一个包一份契约；完整地图（含 `deploy/`、`docs/`、`scripts/`、`.github/` 行）见 [docs/README.md](docs/README.md)，冲突时以它为准：
+服务代码与文档严格对齐，一个包一份契约；完整地图（含 `deploy/`、`docs/`、`notes/`、`scripts/`、`.github/` 行）见 [docs/README.md](docs/README.md)，冲突时以它为准：
 
 | 包目录 | 服务契约 | 管辖规范 |
 |---|---|---|

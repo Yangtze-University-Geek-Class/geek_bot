@@ -2,7 +2,7 @@
 
 > 可自部署的 GitHub 维护机器人：用一个 GitHub 账号当机器人，审查 PR、受理和跟进 issue、在临时 VM 里修小改动并开 PR；批准与合并始终由人来做。
 
-状态：`current` · 更新：2026-09-25 · 适用：第一次打开本仓库的人
+状态：`current` · 更新：2026-09-26 · 适用：第一次打开本仓库的人
 
 中文 | [English](README.en.md)
 
@@ -41,7 +41,7 @@ geek_bot 是一个可以自己部署的通用产品。部署者在 Web 后台用
 
    ```bash
    pnpm install --frozen-lockfile
-   pnpm verify          # 运行时、包边界、文档、密钥、公开安全、类型检查 → 单测 → 构建
+   pnpm verify          # 运行时、包边界、文档、执行记录、密钥、公开安全、类型检查 → 单测 → 构建
    pnpm hooks:enable    # pre-push 核对分支不变量与发布 tag 规则
    ```
 

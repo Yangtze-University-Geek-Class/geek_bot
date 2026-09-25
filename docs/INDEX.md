@@ -7,7 +7,7 @@
 
 ## conventions/
 
-强制遵守的协作规范：分支、审查、提交、Issue、PR、追踪记录、发版、测试与文档。违反的改动会被 CODE-REVIEW 退回。
+强制遵守的协作规范：分支、审查、提交、Issue、PR、追踪记录、执行记录、发版、测试与文档。违反的改动会被 CODE-REVIEW 退回。
 
 | 文档 | 说明 | EN |
 |---|---|---|
@@ -19,6 +19,7 @@
 | [`DOCUMENTATION.md`](./conventions/DOCUMENTATION.md) | 区分当前事实、已接受决策、未实施提议和历史材料；`docs/` 与 `app/`、`packages/` 严格对齐；仓库可能公开，docs 里任何内容都要能公开。 | — |
 | [`ISSUES.md`](./conventions/ISSUES.md) | issue 是一件事的主档：开发前先开 issue，写清现象、复现、环境与验收条件；之后每一步进展都以追踪记录留在评论里，PR 合并即关闭。 | [EN](./conventions/ISSUES.en.md) |
 | [`MODULAR-DEVELOPMENT.md`](./conventions/MODULAR-DEVELOPMENT.md) | 五个工作区包职责清楚、依赖单向、只经 `@geek-bot/protocol` 共享契约；`app/`、`packages/` 与 `docs/services/` 严格对齐，不为目录形式制造部署复杂度。 | — |
+| [`NOTES.md`](./conventions/NOTES.md) | 每个人、每个 agent 做的每一步，都按北京时间写进仓库里的 `notes/<日期>/<GitHub 用户名>/<链路>.md`；开发前先记开工，开发后记到收尾，链路不完整的 PR 不能合并。 | — |
 | [`PROJECT.md`](./conventions/PROJECT.md) | 产品定位、五个包、授权边界、公开就绪约束、统一入口和完成定义。 | — |
 | [`PULL-REQUESTS.md`](./conventions/PULL-REQUESTS.md) | PR 是一次改动的证据档：写清解决链路、验证结果、可以直接照着做的人工验收步骤和截图录屏；审查与返工写成评论，合并后 issue 自动关闭。 | [EN](./conventions/PULL-REQUESTS.en.md) |
 | [`REFERENCES.md`](./conventions/REFERENCES.md) | 可追溯的工程依据：记录采用了哪些官方说明、用在仓库哪里，不把外部建议、产品选择和已完成验收混为一谈。 | — |
@@ -91,7 +92,7 @@
 | 文档 | 说明 | EN |
 |---|---|---|
 | [`CICD.md`](./ops/CICD.md) | 三条工作流（ci / issue-lifecycle / branch-hygiene）只做机器验证、PR 正文核对和合并后的清理，不部署；发布镜像的 `release.yml` 随 #7 加入。平台能力按 2026-09-25 的只读核对记录。 | — |
-| [`LOCAL-DEV.md`](./ops/LOCAL-DEV.md) | 在本机准备 Node 22 与 pnpm 9.15.9，安装依赖，跑 `pnpm verify`，启用 Git 钩子，用 task worktree 开工和收尾。 | — |
+| [`LOCAL-DEV.md`](./ops/LOCAL-DEV.md) | 在本机准备 Node 22 与 pnpm 9.15.9，安装依赖，跑 `pnpm verify`，启用 Git 钩子，用 task worktree 开工和收尾，每一步写执行记录。 | — |
 | [`RELEASE-ACCEPTANCE-TEMPLATE.md`](./ops/RELEASE-ACCEPTANCE-TEMPLATE.md) | 空白模板，供验收人逐字段手工填写；不是流水线自动生成的通过证明。 | — |
 
 ## decisions/
@@ -105,4 +106,4 @@
 
 ---
 
-共 28 篇文档（另有 4 篇英文版）。索引按目录分组，组内按文件名排序。
+共 29 篇文档（另有 4 篇英文版）。索引按目录分组，组内按文件名排序。
