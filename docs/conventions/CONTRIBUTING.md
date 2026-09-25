@@ -2,7 +2,7 @@
 
 > 统一入口、最小变更、可审查的提交与资源隔离。
 
-状态：`current` · 更新：2026-09-25 · 适用：所有向本仓库提交改动的人与 AI/Agent。
+状态：`current` · 更新：2026-09-26 · 适用：所有向本仓库提交改动的人与 AI/Agent。
 
 ## 开始前
 
@@ -23,6 +23,7 @@ AI 先执行 [AGENT-START](AGENT-START.md) 的阅读门禁，不能先运行下�
 
 - 开发前先按 [ISSUES](ISSUES.md) 开 issue，再用 `node scripts/task.mjs start <issue> <slug>` 从最新 `stage` 拉 `task/<issue>/<slug>`（例 `task/12/review_queue`；分支名不用 `-`），**同时得到一个独立的 worktree**，所有开发都在里面做，不在主工作区切分支（见 [BRANCHING](BRANCHING.md)「task worktree」）；
 - 一次任务一条 task 分支、一个 worktree，PR 回 `stage`，正文按 [PULL-REQUESTS](PULL-REQUESTS.md) 的契约写；
+- 从开工到收尾，每一步都按 [NOTES](NOTES.md) 写进 `notes/`：`task.mjs start` / `finish` 自动记开工和收尾（要带 `GEEK_NOTES_USER`、`GEEK_NOTES_BY` 身份），中间的提交、PR、审查、返工用 `node scripts/note.mjs add` 记；
 - **PR 合并后远端分支与 issue 自动清理，本机用 `node scripts/task.mjs finish <issue>` 删 worktree 与本地分支**，不留死分支、死目录；`node scripts/task.mjs list` 查看状态，`node scripts/task.mjs prune` 批量清理；
 - `dev/<github-username>`（例 `dev/alice`）是个人自由分支，想怎么改都行，但不得作为进入 `stage` 的凭据，也不部署；
 - 禁止直接向 `main` 提交，禁止 `task/**`、`dev/**` 直接进 `main`。`main` 只接受来自 `stage` 的合并。
@@ -33,7 +34,7 @@ AI 先执行 [AGENT-START](AGENT-START.md) 的阅读门禁，不能先运行下�
 
 ## 提交前
 
-- 运行根 `pnpm verify`（依次是 `pnpm check`、`pnpm test`、`pnpm build`），贴真实输出。
+- 运行根 `pnpm verify`（依次是 `pnpm check`、`pnpm test`、`pnpm build`；其中 `check:notes` 核对执行记录），贴真实输出。
 - 影响浏览器行为时跑 `pnpm test:e2e`（随 #4 加入）。
 - 需要 `/dev/kvm` 的 VM 测试 `pnpm test:vm`（随 #12 加入）是可选的，只在有 KVM 的机器上跑；没跑就在 PR 的「验证命令与结果」里逐条写「未验证」和原因，不能写成通过。
 - 审阅 diff，补文档；确认没有密钥、令牌、真实数据、编译产物，也没有组织名、真实仓库名、内部主机或网段（`pnpm check:secrets`、`pnpm check:public-safety` 只覆盖部分模式，仍要人眼看一遍）。

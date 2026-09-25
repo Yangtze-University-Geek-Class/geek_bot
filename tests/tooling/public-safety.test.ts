@@ -28,6 +28,8 @@ import {
   candidatesOf,
   MIN_AFFIX,
   MAX_AFFIX,
+  NOTES_DIR,
+  tokenRuleApplies,
 } from "../../scripts/check-public-safety.mjs";
 
 const script = fileURLToPath(new URL("../../scripts/check-public-safety.mjs", import.meta.url));
@@ -366,6 +368,40 @@ describe("扫描整个仓库", () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("docs/***:0: 路径：私网地址（10/8）：10.*.*.*");
     expect(result.stderr).not.toContain(address);
+  });
+
+  it("notes/ 下的被禁词不报：执行记录必须写负责人的 GitHub 用户名（目录名、标题、负责人行）；notes/ 之外照报", () => {
+    const chain = `${NOTES_DIR}2026-09-26/${FAKE_ORG}/task_12_review_queue.md`;
+    const root = repo({
+      [chain]: `# task/12/review_queue · ${FAKE_ORG} · 2026-09-26\n\n负责人：${FAKE_ORG}\n\n- 执行者：human-${FAKE_ORG}\n`,
+      [`${NOTES_DIR}INDEX.md`]: `- 2026-09-26：[${FAKE_ORG}](2026-09-26/${FAKE_ORG}/)\n`,
+      "docs/x.md": `负责人：${FAKE_ORG}\n`,
+    });
+    const report = auditRepository({ root, denylist });
+    expect(report.findings.map((item) => item.file)).toEqual(["docs/x.md"]);
+    expect(tokenRuleApplies("notes")).toBe(false);
+    expect(tokenRuleApplies(chain)).toBe(false);
+    // 只有 notes/ 这个顶层目录例外：别处叫 notes 的目录、名字以 notes 开头的目录照常
+    expect(tokenRuleApplies("docs/notes/a.md")).toBe(true);
+    expect(tokenRuleApplies("notes2/a.md")).toBe(true);
+    expect(scanPath(`notesx/${FAKE_ORG}/a.md`, { denylist }).map((item) => item.file)).toEqual([`notesx/${FAKE_ORG}`]);
+  });
+
+  it("notes/ 下的私网地址、组网主机名和被禁 IPv4 照报：例外只免被禁 token 这一条", () => {
+    const chain = `${NOTES_DIR}2026-09-26/${FAKE_ORG}/task_12_review_queue.md`;
+    const root = repo({
+      [chain]: [`- 结果：连到 ${ip(192, 168, 3, 4)}`, `- 结果：ssh ${meshHost("node1", "example", "net")}`, `- 结果：部署到 ${ip(203, 0, 113, 77)}`, ""].join("\n"),
+      [`${NOTES_DIR}2026-09-26/${FAKE_ORG}/${ip(10, 1, 2, 3)}.md`]: "safe\n",
+    });
+    const report = auditRepository({ root, denylist });
+    expect(report.ok).toBe(false);
+    const rules = report.findings.map((item) => `${item.file}:${item.line} ${item.rule}`).sort();
+    expect(rules).toEqual([
+      `${chain}:1 私网地址（192.168/16）`,
+      `${chain}:2 组网主机名（含 .mesh. 段）`,
+      `${chain}:3 被禁 IPv4（哈希命中）`,
+      `${NOTES_DIR}2026-09-26/${FAKE_ORG}/${ip(10, 1, 2, 3)}.md:0 路径：私网地址（10/8）`,
+    ].sort());
   });
 
   it("本仓库当前的文件通过（真实被禁清单与放行清单）", () => {

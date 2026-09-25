@@ -2,7 +2,7 @@
 
 > 只有 `main`（正式）与 `stage`（预发布）两条长期分支；task 分支合并后必须立即删除，任何操作前先确认当前分支。
 
-状态：`current` · 更新：2026-09-25 · 适用：本仓库的所有分支、推送与合并。依据：项目所有者 2026-09-25 指令，本仓库「遵循我们这个项目的规范」（背景见 [ADR-0001](../decisions/0001-standalone-product.md)）。
+状态：`current` · 更新：2026-09-26 · 适用：本仓库的所有分支、推送与合并。依据：所有者 2026-09-25 的指令（#22）。
 
 ## 第负一步：先确认分支
 
@@ -90,10 +90,10 @@ node scripts/check-branch-invariants.mjs --require-remote-refs # 只用 origin �
 
 **一个 issue = 一个 `task/<issue>/<slug>` 分支 = 一个 git worktree = 一个 PR，四者生命周期相同，都跟着 issue 走**（[TRACKING](TRACKING.md) §1）：
 
-- **开工**：`node scripts/task.mjs start <issue> <slug>`。它先确认 issue 开着，再从最新 `origin/stage` 建分支，同时在主工作区的 `.claude/worktrees/task-<issue>` 建一个独立 worktree，并在 issue 上留一条开工记录。之后这件事的所有编辑、安装、构建、测试、提交都在这个 worktree 里做。
+- **开工**：`node scripts/task.mjs start <issue> <slug>`。它先确认 issue 开着，再从最新 `origin/stage` 建分支，同时在主工作区的 `.claude/worktrees/task-<issue>` 建一个独立 worktree，在 issue 上留一条开工记录，并在 worktree 的 `notes/` 里写执行链路的第一条「开工」（要带身份，见 [NOTES](NOTES.md)）。之后这件事的所有编辑、安装、构建、测试、提交都在这个 worktree 里做，每一步都记进 `notes/`。
 - **不碰主工作区**：主工作区（以及别的 task 的 worktree）上可能有别人的未提交改动或正在运行的本机实例；在自己的 worktree 里做，互不影响，也不用切分支、stash。
 - **一个 issue 只有一个 worktree**：`start` 发现已有同号 worktree 会拒绝，直接进去继续做。不要在同一个 worktree 里做第二件事。
-- **结束**：PR 合并进 `stage` 后，`branch-hygiene` 删远端分支，`issue-lifecycle` 关 issue；本机运行 `node scripts/task.mjs finish <issue>` 删 worktree 与本地分支（在主工作区运行，不要在要删的 worktree 里运行）。`node scripts/task.mjs list` 列出每个 worktree 的 issue / PR 状态；`node scripts/task.mjs prune` 一次清掉所有可清理的。
+- **结束**：PR 合并进 `stage` 后，`branch-hygiene` 删远端分支，`issue-lifecycle` 关 issue；本机运行 `node scripts/task.mjs finish <issue>` 删 worktree 与本地分支，并暂存链路的最后一条「收尾」（在主工作区运行，不要在要删的 worktree 里运行）。`node scripts/task.mjs list` 列出每个 worktree 的 issue / PR 状态；`node scripts/task.mjs prune` 一次清掉所有可清理的。
 - **什么时候不删**：worktree 有未提交改动、PR 还开着、或 issue 还开着且 PR 没合并时，脚本只报告原因，不删除；放弃的 issue 先按 TRACKING 留「关闭」记录再关，之后就能清理。
 - **核对结果，不只看退出码**：`task.mjs` 按真实路径判断自己是否被直接运行（`scripts/lib/cli.mjs` 的 `isDirectRun`），经符号链接路径（例如 macOS 上经 `/tmp` 进入的目录）启动也会正常执行，参数不对时打印用法并以非 0 退出，不会静默成功。开工后仍用 `git worktree list` 核对 worktree 确实建好。
 - `.claude/worktrees/` 已被 `.gitignore` 忽略；每个 worktree 需要自己运行 `pnpm install --frozen-lockfile`（pnpm 的全局仓库会复用已下载的包）。
@@ -103,9 +103,9 @@ node scripts/check-branch-invariants.mjs --require-remote-refs # 只用 origin �
 ```bash
 git branch --show-current                      # 1. 确认当前在哪
 # 2. 按 ISSUES.md 开 issue，记下编号
-node scripts/task.mjs start <issue> <slug>     # 3. 从最新 origin/stage 建 task/<issue>/<slug> 与 .claude/worktrees/task-<issue>
+node scripts/task.mjs start <issue> <slug>     # 3. 从最新 origin/stage 建 task/<issue>/<slug> 与 .claude/worktrees/task-<issue>，notes/ 里写「开工」（先设 GEEK_NOTES_USER / GEEK_NOTES_BY）
 cd .claude/worktrees/task-<issue> && pnpm install --frozen-lockfile
-# 4. 在 worktree 里开发、验证、提交（见 CONTRIBUTING.md），每个阶段在 issue 上留追踪记录（TRACKING.md §3）
+# 4. 在 worktree 里开发、验证、提交（见 CONTRIBUTING.md），每个阶段在 issue 上留追踪记录（TRACKING.md §3），每一步记进 notes/（NOTES.md）
 # 5. 开 PR → stage，正文按 PULL-REQUESTS.md 的契约写（Closes #<issue>、解决链路、验收证据、人工验收步骤）
 # 6. 合并后：远端分支与 issue 由 branch-hygiene / issue-lifecycle 自动处理；
 cd <主工作区> && node scripts/task.mjs finish <issue>   #    本机删 worktree 与本地分支

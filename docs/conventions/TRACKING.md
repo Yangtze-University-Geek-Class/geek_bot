@@ -2,7 +2,7 @@
 
 > 一件事从提出到关闭，每一步都以固定格式的评论留在 issue 与 PR 上；人扫一眼能看懂进展，Agent 按字段就能读出状态。
 
-状态：`current` · 更新：2026-09-25 · 适用：本仓库所有 issue、PR 的评论，人、Agent 与机器人账号都遵守；§3 的格式同时是 geek_bot 产品内置的默认记录格式（§6）。
+状态：`current` · 更新：2026-09-26 · 适用：本仓库所有 issue、PR 的评论，人、Agent 与机器人账号都遵守；§3 的格式同时是 geek_bot 产品内置的默认记录格式（§6）。
 
 ## §1 生命周期：一件事 = 一个 issue = 一个 task 分支 = 一个 worktree = 一个 PR
 
@@ -20,6 +20,7 @@
 - **合并即结束**：PR 合并进 `stage` 后，`branch-hygiene` 工作流删除 task 分支，`issue-lifecycle` 工作流关闭 issue，并在 issue 和 PR 上各留一条「关闭」记录（由 `github-actions[bot]` 发出）。GitHub 只在合进默认分支 `main` 时才按 `Closes #n` 自动关闭，所以不能依赖它；工作流失败时由合并的人手工补关，并照 §3 的格式留言。
 - **一件事做不完**：在原 issue 留「阻塞」或「拆分」记录，拆出的新 issue 用 `Refs #<原 issue>` 互相引用；不在已合并的分支上继续提交。
 - **不再需要的事**：留「关闭」记录写明原因（重复、不做、被 #n 取代），再关闭；不静默关闭。
+- 评论之外，执行者自己的每一步记在仓库的 `notes/` 里（[NOTES](NOTES.md)）：评论给所有人看进展，`notes/` 按人和时间追溯每个 agent 做过什么，两者都要写，不能互相代替。
 - 每周一 `issue-lifecycle` 巡检一次：PR 已合并但 issue 还开着、issue 开着但既没有 task 分支也没有开着的 PR，都会列出来（只告警，不自动关闭）。定时巡检只在工作流进入默认分支 `main` 后运行；第一个正式版之前不会运行，残留由维护者手工核对，没有告警不代表没有残留（见 [CICD](../ops/CICD.md)「触发与职责」）。
 
 ## §2 互相引用
@@ -89,7 +90,7 @@
 
 ## §5 与其它规范的关系
 
-issue 正文字段见 [ISSUES](ISSUES.md)，PR 正文字段与 CI 契约见 [PULL-REQUESTS](PULL-REQUESTS.md)，审查清单见 [CODE-REVIEW](CODE-REVIEW.md)，分支规则见 [BRANCHING](BRANCHING.md)。本文件只规定评论与生命周期，不重复它们的内容。
+issue 正文字段见 [ISSUES](ISSUES.md)，PR 正文字段与 CI 契约见 [PULL-REQUESTS](PULL-REQUESTS.md)，审查清单见 [CODE-REVIEW](CODE-REVIEW.md)，分支规则见 [BRANCHING](BRANCHING.md)，仓库内的执行记录见 [NOTES](NOTES.md)。本文件只规定评论与生命周期，不重复它们的内容。
 
 ## §6 机器人的记录与产品默认格式
 

@@ -2,7 +2,7 @@
 
 > 发版只靠打 tag：`vX.Y.Z-rc.N` 打在 `stage` 的提交上发预发布，所有者在预发布验收通过后，在同一提交上打 `vX.Y.Z` 发正式。tag 不可移动、不可删除，版本号不自动提升；正式实例运行的就是预发布验过的那个镜像 digest。
 
-状态：`current` · 更新：2026-09-25 · 适用：本仓库的发布 tag、版本号、镜像与预发布 / 正式实例 · 依据：[ADR-0001](../decisions/0001-standalone-product.md)（开发流程沿用 ADR-0001 背景里的规范体系；部署方式改为 ghcr 同一 digest 加目标机拉取，详细决策 ADR-0007 由 #2 写入）。分支规则见 [BRANCHING](BRANCHING.md)。
+状态：`current` · 更新：2026-09-26 · 适用：本仓库的发布 tag、版本号、镜像与预发布 / 正式实例 · 依据：[ADR-0001](../decisions/0001-standalone-product.md)（独立产品，env 模板只放占位符）；部署方式是 ghcr 同一 digest 加目标机拉取，详细决策 ADR-0007 由 #2 写入。分支规则见 [BRANCHING](BRANCHING.md)。
 
 本文中标「计划中」的部分（release.yml、部署与回滚脚本、compose、env 模板、发布规划器、版本接口）还不存在，分别由 #3、#7、#11、#17、#20 实现；tag 格式、授权门禁、rc 编号、版本号与 tag 不可变这些规则现在就生效。
 

@@ -13,7 +13,8 @@
 # 分支模型：长期分支只有 main（正式）与 stage（预发布）；task/<issue>/<slug> 从 stage 拉出、
 # PR 回 stage、合并后删除；dev/<username> 是个人分支，只验证、不部署，也不能作为进入 stage 的凭据。
 # 分支名不用 -，只用 / 分层（见 docs/conventions/BRANCHING.md）。
-# 硬不变量由 branch-guard 强制（scripts/check-branch-invariants.mjs）。
+# 硬不变量由 branch-guard 强制（scripts/check-branch-invariants.mjs）；task 分支 PR 的执行记录链路
+# 也在 branch-guard 里核对（scripts/note.mjs，docs/conventions/NOTES.md）。
 #
 # 触发：pull_request → main/stage；push → main/stage；手工 dispatch。
 # PR 只能指向 stage：目标分支由 issue-lifecycle.yml 的 pr-base 核对（它监听 edited，改 base 后会重新判定；
@@ -73,6 +74,23 @@ jobs:
       - name: 判定分支不变量
         shell: bash
         run: node scripts/check-branch-invariants.mjs --require-remote-refs
+
+      # 执行记录（docs/conventions/NOTES.md）：task 分支进 stage 的 PR，链路里必须有引用本 issue 的
+      # 开工、提交、PR、审查，本次 PR 新增了记录，已有记录没被改写或删除。
+      # 分支名经环境变量传入，不直接拼进脚本。note.mjs 只用 Node 标准库，这个 job 不装依赖。
+      - name: 执行记录（notes/）
+        if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'task/')
+        shell: bash
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
+        run: node scripts/note.mjs check --pr --base "origin/${BASE_REF}" --head "${HEAD_REF}"
+
+      # 全部链路的一览表贴进运行摘要：stage、main 上随时能看到每个人的链路（入口 notes/INDEX.md）。
+      - name: 执行记录一览（运行摘要）
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: node scripts/note.mjs index --summary >> "$GITHUB_STEP_SUMMARY"
 
   # 核心工具链：Node 22（.nvmrc）+ pnpm 9.15.9（根 package.json packageManager）。
   core:

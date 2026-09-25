@@ -14,6 +14,8 @@ playwright-report/
 
 # task worktree（node scripts/task.mjs start 建在这里，生命周期跟着 issue，见 docs/conventions/BRANCHING.md）
 .claude/worktrees/
+# 在 task 分支之外写的执行记录先暂存在这里，下一个 task 开工时并进去（docs/conventions/NOTES.md）
+.claude/notes-pending/
 
 # 私有 env：真实值只在目标机或本机，永远不入库
 .env

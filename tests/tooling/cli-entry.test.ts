@@ -40,6 +40,7 @@ const CLIS = [
   "check-branch-invariants.mjs",
   "pr-contract.mjs",
   "task.mjs",
+  "note.mjs",
   "tuffex-docs.mjs",
   "labels.mjs",
 ];
@@ -69,7 +70,7 @@ describe("isDirectRun", () => {
 });
 
 describe("经符号链接路径启动", () => {
-  it.each(["task.mjs", "pr-contract.mjs"])("%s 不带参数：打印用法到 stderr 并以非 0 退出", (script) => {
+  it.each(["task.mjs", "pr-contract.mjs", "note.mjs"])("%s 不带参数：打印用法到 stderr 并以非 0 退出", (script) => {
     const result = viaLink(script);
     expect(result.status).not.toBe(0);
     expect(result.status).not.toBeNull();

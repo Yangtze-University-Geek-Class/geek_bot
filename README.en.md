@@ -2,7 +2,7 @@
 
 > A self-hosted GitHub maintenance bot: one GitHub account acts as the bot, reviews pull requests, triages and follows up on issues, and fixes small changes in a disposable VM before opening a pull request. Approving and merging always stay with humans.
 
-状态：`current` · 更新：2026-09-25 · 适用：anyone opening this repository for the first time
+状态：`current` · 更新：2026-09-26 · 适用：anyone opening this repository for the first time
 
 [中文](README.md) | English
 
@@ -43,7 +43,7 @@ Approving and merging always stay with humans. Each repository is handled by its
 
    ```bash
    pnpm install --frozen-lockfile
-   pnpm verify          # runtime, package boundaries, docs, secrets, public safety, typecheck, then tests and build
+   pnpm verify          # runtime, package boundaries, docs, execution records, secrets, public safety, typecheck, then tests and build
    pnpm hooks:enable    # pre-push checks branch invariants and release tag rules
    ```
 
