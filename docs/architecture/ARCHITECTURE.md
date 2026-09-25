@@ -37,7 +37,8 @@ geek_bot 是一个可自部署的 GitHub 维护机器人，面向任何部署者
                │（同机走 compose 网络；异机走私有组网或 https）
 ┌──────── 工作主机（每台一个 node 的 compose 项目）────┐   ▼
 │ node 容器：非 root，只挂 /dev/kvm，没有入站端口      │  GitHub
-│  ├─ 任务端点：sandbox 走 unix socket，VM 走 guestfwd  │
+│  ├─ 任务端点：sandbox 走 unix socket                  │
+│  │            VM 走原始盘上的 tar 与 virtio-serial    │
 │  ├─ 出网 CONNECT 代理：域名白名单，拒绝私网地址       │
 │  ├─ 本地模型代理：每任务令牌转发到 control 中继       │
 │  └─ qemu 一次性 VM × vm 槽位（PR 通道）              │

@@ -45,7 +45,7 @@
 ## 其他约束
 
 - 所有密钥一律以 `*_FILE` 文件引用，不写进 env 模板、镜像、日志、URL、issue、PR；仓库里的 env 模板只放占位符。`pnpm check:secrets` 检查密钥名与密钥形态。
-- 代码、文档、测试、夹具里不写组织名、真实仓库名、内部主机名、私网或组网地址、网关地址、真实账号名；`pnpm check:public-safety` 检查。
+- 代码、文档、测试、夹具里不写组织名、真实仓库名、内部主机名、私网或组网地址、网关地址、真实账号名。`pnpm check:public-safety` 只拦截已登记的模式：私网、CGNAT 与链路本地地址段，带 `.mesh.` 段的主机名，按哈希登记的被禁词和个别地址；没登记的仓库名、网关地址和账号名它认不出来，通过不等于没有泄漏，其余靠审查（[CODE-REVIEW](../conventions/CODE-REVIEW.md) 第 9 项）。
 - 节点令牌只显示一次，库里存哈希；节点不开入站端口，control 从不连节点。（#11）
 - 绑定机器人账号时拒绝 `workflow`、`admin:org`、`delete_repo`、`write:packages`、`admin:repo_hook` 这些 scope；令牌失效或 scope 变化时自动暂停全部写入。（#5）
 - node 容器非 root，只挂 `/dev/kvm`，不挂 docker.sock，不用 privileged；sandbox 容器无网络、根只读、不挂任何令牌文件。（#11、#14）

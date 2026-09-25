@@ -62,7 +62,7 @@
 
 组件资料统一放在 `docs/components` 下，固定来源提交、包 manifest、许可证、转换规则和文件哈希。第三方生成资料用 `reference-snapshot` 标记，它是资料属性，不覆盖 current/accepted 项目规则。
 
-每个库提供 AI 指南、组件/机器索引和按需查询入口；总索引不重复展开数百份生成页。原始文档和源码以不可执行文本保存；普通检查不联网，更新显式进行（`pnpm docs:tuffex`）。实例见 [Tuffex 文档库](../components/tuffex/README.md)。
+每个库提供 AI 指南、组件/机器索引和按需查询入口；总索引不重复展开数百份生成页。原始文档和源码以不可执行文本保存；普通检查不联网（`pnpm check:tuffex-docs` 按清单离线校验逐文件哈希），更新显式进行：`pnpm docs:tuffex sync --source <上游 checkout> --commit <40 位 SHA>`，步骤见 [Tuffex 来源](../components/tuffex/SOURCES.md)「更新」一节。实例见 [Tuffex 文档库](../components/tuffex/README.md)。
 
 ## 公开与内部文档
 

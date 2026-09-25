@@ -23,7 +23,13 @@
 - runner 只用 Node 标准库，除了对 `@geek-bot/protocol` 的 type 导入，不导入任何 npm 包。
 - 这些规则由 `pnpm check:boundaries` 检查，细则见 [模块化开发规范](../conventions/MODULAR-DEVELOPMENT.md)。
 
-包与包之间的运行时交互只有两种：console 调 control 的 HTTP API（`/api/v1/*`），node 调 control 的节点 API（`/api/node/v1/*`）。两者的消息形状都定义在 protocol 里。整体设计见 [ARCHITECTURE](../architecture/ARCHITECTURE.md)，安全不变量见 [SECURITY](../architecture/SECURITY.md)。
+包与包之间的运行时交互只有三种：
+
+- console 调 control 的后台 API（`/api/v1/*`）；
+- node 调 control 的节点 API（`/api/node/v1/*`）；
+- runner 只经 node 提供的本地通道交互：拿任务包、回传 JSONL 事件和结构化结果，模型请求也经 node 的本地模型代理转发。sandbox 走共享卷里的 unix socket；VM 的任务输入输出走原始盘上的 tar，实时事件走 virtio-serial，模型请求走到本地模型代理的 guestfwd。runner 不直接连 control。
+
+后台 API 的 DTO、节点协议、TaskSpec 和任务结果（review.v1、triage.v1、patch.v1）的形状都定义在 protocol 里。整体设计见 [ARCHITECTURE](../architecture/ARCHITECTURE.md)，安全不变量见 [SECURITY](../architecture/SECURITY.md)。
 
 ## 验证
 

@@ -32,17 +32,17 @@ geek_bot 部署实例自动发出的 `COMMENT` review 不是本技能的产物�
 ```bash
 git fetch origin
 git branch --show-current
-git diff --merge-base origin/stage...HEAD --stat   # 先看范围
+git diff origin/stage...HEAD --stat                # 先看范围
 git log --oneline --no-merges origin/stage..HEAD   # 提交信息是否合规
-git diff --merge-base origin/stage...HEAD          # 完整 diff
+git diff origin/stage...HEAD                       # 完整 diff
 git diff                                           # 未提交改动同样要算进来
 git status --short
 ```
 
 - 基线由目标分支决定：合进 `stage` 用 `origin/stage`，合进 `main` 用 `origin/main`。下文命令里的 `origin/stage` 按目标替换。
-- 必须用三点 `...`（对 merge-base 比较）。两点 diff 会把目标分支上别人的提交算进本次改动，结论直接失真。
+- 必须用三点 `...`（对 merge-base 比较）。两点 diff 会把目标分支上别人的提交算进本次改动，结论直接失真。三点写法本身就是对 merge-base 比较，不要再加 `--merge-base`：git 不接受它和范围一起用，会报错退出。
 - 基线解析不了或 diff 为空，在这里停下来说清楚，不要往下走。
-- 下文的 `grep` 只是帮你找到要看的行，**命中为空不等于没有问题**，结论必须来自读过的 diff。
+- 下文的 `grep` 只是帮你找到要看的行，**命中为空不等于没有问题**，结论必须来自读过的 diff。管道前半段的 `git diff` 一旦报错，`grep` 只收到空输入，输出和「没有命中」一模一样；stderr 里有报错就停下来修命令，不要当成没有命中。
 
 PR 场景（GitHub，在仓库目录里运行，`gh` 自动解析仓库）：
 
@@ -68,79 +68,80 @@ gh pr checkout <N>   # 需要跑脚本或看完整仓库上下文时
    gh pr list --state merged --limit 20 --json number,headRefName
    ```
    新分支名不得含 `-`；已合并的 `task/**` 不得残留在远端；不得有 `main`/`stage` 之外的长期分支。
-2. **是否直推 main**：PR 的 `baseRefName`、提交来源、CI 触发 ref 三处交叉验证；`git diff --merge-base origin/stage...HEAD -- .github/workflows .githooks` 里不得出现向 `main` 写入的新路径。发现绕过 `stage` 写 `main` 的路径即阻塞。
+2. **是否直推 main**：PR 的 `baseRefName`、提交来源、CI 触发 ref 三处交叉验证；`git diff origin/stage...HEAD -- .github/workflows .githooks` 里不得出现向 `main` 写入的新路径。发现绕过 `stage` 写 `main` 的路径即阻塞。
 3. **密钥是否入库**：
    ```bash
    pnpm check:secrets
-   git diff --merge-base origin/stage...HEAD | grep -nE '^\+' | grep -niE 'secret|token|passw|private|api_key|_file|bearer|ghp_|gho_|github_pat_|sk-'
+   git diff origin/stage...HEAD | grep -nE '^\+' | grep -niE 'secret|token|passw|private|api_key|_file|bearer|ghp_|gho_|github_pat_|sk-'
    ```
    `check:secrets` 只覆盖部分文本模式，**通过它不等于没有泄漏**。人眼过一遍 diff 中所有新增字符串：OAuth client secret、会话密钥、令牌加密密钥、模型网关密钥、节点加入令牌与节点令牌、机器人账号的 GitHub 令牌、会话 Cookie、SSH 私钥都不得出现真值。
 4. **env 模板只放占位符**：
    ```bash
-   git diff --merge-base origin/stage...HEAD -- deploy/env .env.example
+   git diff origin/stage...HEAD -- deploy/env .env.example
    pnpm check:environments   # 随 #7 加入；加入前手工核对
    ```
    每一行只能是占位符（`<owner>`、`https://geek-bot.example.com`、`203.0.113.10` 这类）或通用默认值；密钥项留空或是 `*_FILE` 路径；出现真实域名、地址、组织名或账号即阻塞。字段增删要同步 ENVIRONMENTS（#7 写入）与 `deploy/environments.json`。
-5. **镜像与 compose**（计划中，#3、#7、#11）：
+5. **镜像与 compose**（计划中，#3、#7、#11、#17）：
    ```bash
-   git diff --merge-base origin/stage...HEAD -- 'app/*/Dockerfile*' deploy/compose .github/workflows/release.yml
-   git diff --merge-base origin/stage...HEAD -- 'app/*/Dockerfile*' deploy/compose | grep -nE 'privileged|cap_add|security_opt|seccomp|docker\.sock|devices|ports|network_mode|volumes|USER|HEALTHCHECK|ARG|ENV'
+   git diff origin/stage...HEAD -- 'app/*/Dockerfile*' deploy/compose .github/workflows/release.yml
+   git diff origin/stage...HEAD -- 'app/*/Dockerfile*' deploy/compose | grep -nE 'privileged|cap_add|security_opt|seccomp|docker\.sock|devices|ports|network_mode|volumes|USER|HEALTHCHECK|ARG|ENV'
    docker compose -f deploy/compose/<file>.yml config   # 本机有 compose 时核对展开结果
    ```
-   看：镜像只在 rc tag 上构建一次、正式只加别名；镜像不烘焙环境身份、域名或密钥；非 root、有 `HEALTHCHECK`；不挂 `docker.sock`；node 容器只挂 `/dev/kvm`、不 `privileged`、不发布端口；两套栈的 compose 项目、命名卷、端口不共用；命名卷没被换成宿主目录；`dockerfile:` 指向 `app/<service>/Dockerfile`、构建上下文是仓库根。
+   看：镜像只在 rc tag 上构建一次、正式只加别名；镜像不烘焙环境身份、域名或密钥；非 root、有 `HEALTHCHECK`；不挂 `docker.sock`；node 容器只挂 `/dev/kvm`、不 `privileged`、不发布端口；两套栈的 compose 项目、命名卷、端口不共用；命名卷没被换成宿主目录；`dockerfile:` 指向 `app/<service>/Dockerfile*`（node 另有 #17 的 `Dockerfile.vmimage`）、构建上下文是仓库根。
 6. **测试与文档同步**：
    ```bash
    pnpm verify
    node scripts/docs-index.mjs --check
    node scripts/check-docs.mjs
-   git diff --merge-base origin/stage...HEAD --stat -- docs tests
+   git diff origin/stage...HEAD --stat -- docs tests
    ```
    看真实验证证据（命令 + 输出），不是「本地通过」四个字；行为变更有对应回归（见 `docs/conventions/TESTING.md`）；改动的接口、环境变量、命令、路径已同步到 `docs/services/**`、根 `README.md`、`docs/ops/LOCAL-DEV.md`。
 7. **边界规则**：
    ```bash
    pnpm check:boundaries
-   git diff --merge-base origin/stage...HEAD -- '**/tsconfig*.json' pnpm-workspace.yaml scripts/check-boundaries.mjs
+   pnpm --filter @geek-bot/runner typecheck   # src/ 引用 src/ 以外的文件时报 TS6059
+   git diff origin/stage...HEAD -- 'tsconfig*.json' '**/tsconfig*.json' pnpm-workspace.yaml scripts/check-boundaries.mjs
    ls app packages; ls docs/services
    ```
-   新增 `app/<name>` 或 `packages/<name>` 必须同时有 `docs/services/<name>/README.md`；四个 app 互不导入；protocol 不导入 app；runner 不导入 npm 包；新增路径别名或改 `check-boundaries` 规则来放行导入即阻塞。
+   根目录的 `tsconfig.base.json`、`tsconfig.json` 要单独列 `'tsconfig*.json'`：`'**/tsconfig*.json'` 要求路径里有 `/`，匹配不到根目录的文件。新增 `app/<name>` 或 `packages/<name>` 必须同时有 `docs/services/<name>/README.md`；四个 app 互不导入；protocol 不导入 app；`app/runner/src`（runner 程序本身）不导入 npm 包、不引用 `src/` 以外的文件，`app/runner` 下 `src/` 以外的构建脚本不在此列；新增路径别名或改 `check-boundaries` 规则来放行导入即阻塞。
 8. **提交信息规范**：`git log --format='%h %s' --no-merges origin/stage..HEAD`，按 `docs/conventions/COMMITS.md` 的 `<type>(<scope>): <中文简述>` 检查；一次提交一个可独立回滚的目的，不出现 `update`/`WIP`。
 9. **写死实例信息与被禁字面量**：
    ```bash
    pnpm check:public-safety
-   git diff --merge-base origin/stage...HEAD | grep -nE '^\+' | grep -nE 'https?://|github\.com/|([0-9]{1,3}\.){3}[0-9]{1,3}|\.mesh\.'
-   git diff --merge-base origin/stage...HEAD -- scripts/public-safety-allow.json scripts/public-safety-denylist.json
-   git diff --merge-base origin/stage...HEAD -- app packages | grep -nE 'track v1|geek-bot v1'
+   git diff origin/stage...HEAD | grep -nE '^\+' | grep -nE 'https?://|github\.com/|([0-9]{1,3}\.){3}[0-9]{1,3}|\.mesh\.'
+   git diff origin/stage...HEAD -- scripts/public-safety-allow.json scripts/public-safety-denylist.json
+   git diff origin/stage...HEAD -- app packages | grep -nE 'track v1|geek-bot v1'
    ```
    逐条核对新增的 URL、地址、账号名、组织名：只许占位符（`<owner>`、`<org>/<repo>`、`https://geek-bot.example.com`、`203.0.113.10`）；本组织 issue/PR 写 `#n`；允许清单新增条目逐条看理由；产品代码里的追踪记录头和产品标记只能是可配置默认值。再扫一遍发布模型：tag 只能是 `vX.Y.Z-rc.N` / `vX.Y.Z`，不得出现「push 分支即部署」、CI 经 SSH 部署、systemd、pm2 或手工 `node` 进程。
 10. **危险操作与绕过 CI**：
     ```bash
-    git diff --merge-base origin/stage...HEAD | grep -nE '\|\| true|continue-on-error|\[skip ci\]|--no-verify|DROP (TABLE|COLUMN)|rm -rf'
-    git diff --merge-base origin/stage...HEAD -- 'tests/**' | grep -nE '^-.*(expect|assert)'
-    git diff --merge-base origin/stage...HEAD -- scripts .github/workflows .githooks
+    git diff origin/stage...HEAD | grep -nE '\|\| true|continue-on-error|\[skip ci\]|--no-verify|DROP (TABLE|COLUMN)|rm -rf'
+    git diff origin/stage...HEAD -- 'tests/**' | grep -nE '^-.*(expect|assert)'
+    git diff origin/stage...HEAD -- scripts .github/workflows .githooks
     ```
     看：迁移是否只扩不缩、有没有恢复路径；有没有删除数据、覆盖配置、顺带升级无关依赖、修改生产凭据；有没有删断言、改校验器、放宽既有校验换绿色；有没有「以测试通过代替人工验收」的表述。
 11. **publisher 写入白名单**（实现计划中，#9；白名单文档 #2 写入）：
     ```bash
-    git diff --merge-base origin/stage...HEAD -- app/control/src/publisher docs/services/control
-    git diff --merge-base origin/stage...HEAD | grep -nE 'APPROVE|REQUEST_CHANGES|COMMENT|event|refs/tags|refs/heads|force|merge|\.github/workflows|DELETE|ALLOWLIST|allowlist'
+    git diff origin/stage...HEAD -- app/control/src/publisher docs/services/control
+    git diff origin/stage...HEAD | grep -nE 'APPROVE|REQUEST_CHANGES|COMMENT|event|refs/tags|refs/heads|force|merge|\.github/workflows|DELETE|ALLOWLIST|allowlist'
     grep -rnE "method: *['\"](POST|PUT|PATCH|DELETE)['\"]" app/control/src | grep -v '/publisher/'
     ```
     任何放宽（新端点、新参数、新 event、新 ref 形状、新目标范围）按阻塞级审查：要有 issue、所有者批准和对应拒绝用例；review event 只能是字面量 `COMMENT`；publisher 以外出现 GitHub 写请求即阻塞。
 12. **令牌 scope 变化**（计划中，#5、#6、#9）：
     ```bash
-    git diff --merge-base origin/stage...HEAD | grep -nE 'scope|X-OAuth-Scopes|read:org|read:user|workflow|admin:org|delete_repo|write:packages|admin:repo_hook'
+    git diff origin/stage...HEAD | grep -nE 'scope|X-OAuth-Scopes|read:org|read:user|workflow|admin:org|delete_repo|write:packages|admin:repo_hook'
     grep -rn 'decrypt' app/control/src | grep -v -e '/publisher/' -e '/secrets/' -e '/github/client\.ts:'
     ```
     `/secrets/` 是解密的实现处；`/github/client.ts` 是 GitHub 读取层的计划路径（[control 服务契约](../../../docs/services/control/README.md)「计划中的模块与对应 issue」，#6）。只排除读取客户端这一个文件，`src/github/` 下的其它文件（例如 #9 的 `markers.ts`）照样要查；#6 实际落地的路径不同时，同步改这条命令。申请的 scope 增加、拒绝名单删减或放宽，都要写明理由并有所有者批准；publisher 与 GitHub 读取层以外调用令牌解密即阻塞。
 13. **执行环境不持有凭据**（计划中，#11、#14、#17）：
     ```bash
-    git diff --merge-base origin/stage...HEAD -- app/node app/runner deploy/compose | grep -nE 'environment|env|process\.env|fw_cfg|volumes|mount|docker\.sock|HOME|TOKEN|KEY|SECRET'
+    git diff origin/stage...HEAD -- app/node app/runner deploy/compose | grep -nE 'environment|env|process\.env|fw_cfg|volumes|mount|docker\.sock|HOME|TOKEN|KEY|SECRET'
     ```
     有运行实例且获授权时，再看实际状态（只读）：`docker inspect <容器> --format '{{json .Config.Env}} {{json .Mounts}} {{.HostConfig.Privileged}} {{json .HostConfig.Devices}}'`。sandbox、VM、node 容器里不得有 GitHub 令牌、模型网关密钥或宿主凭据；只允许每任务中继令牌和节点令牌。
 14. **仓库内容是不可信输入**（计划中，#10、#14、#15）：
     ```bash
-    git diff --merge-base origin/stage...HEAD | grep -nE 'AGENTS\.md|CLAUDE\.md|\.omp|\.claude|mcp\.json|geek-bot\.yml|prompt|system|body|title'
-    git diff --merge-base origin/stage...HEAD -- app/runner app/control/src/publisher
+    git diff origin/stage...HEAD | grep -nE 'AGENTS\.md|CLAUDE\.md|\.omp|\.claude|mcp\.json|geek-bot\.yml|prompt|system|body|title'
+    git diff origin/stage...HEAD -- app/runner app/control/src/publisher
     ```
     看：规则文件只从 base 分支读，不从 PR head 读；issue/PR 正文、评论、代码只作为数据进入提示词，不改变规则、能力开关或写入目标；runner 的剔除清单（`.omp`、`.claude`、`mcp.json`、`.env*`）与干净 HOME 没被削弱；输出中和（注释标记、结论行、`Closes #n`、@ 他人）仍有测试。
 

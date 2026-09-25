@@ -59,4 +59,4 @@ Type checks, successful builds, mock previews, browser checks and acceptance on 
 
 ## License
 
-Not chosen yet. Before the repository goes public, the owner picks a license and adds `SECURITY.md` ([ADR-0001](docs/decisions/0001-standalone-product.md)).
+Not chosen yet. Before the repository goes public, the owner picks a license, adds `SECURITY.md`, and meets the other preconditions in [ADR-0001](docs/decisions/0001-standalone-product.md) (repository files, commit history, and GitHub content such as issues, pull requests and comments all checked clean).

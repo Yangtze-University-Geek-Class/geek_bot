@@ -57,4 +57,4 @@ geek_bot 是一个可以自己部署的通用产品。部署者在 Web 后台用
 
 ## 许可证
 
-尚未选定。公开前由所有者选定许可证并补上 `SECURITY.md`（[ADR-0001](docs/decisions/0001-standalone-product.md)）。
+尚未选定。公开前由所有者选定许可证、补上 `SECURITY.md`，并满足 [ADR-0001](docs/decisions/0001-standalone-product.md) 列出的其它公开前条件（仓库文件、提交历史，以及 GitHub 上的 issue、PR、评论等内容都检查干净）。

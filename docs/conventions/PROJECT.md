@@ -26,7 +26,7 @@ geek_bot 是一个可自部署的通用产品。部署者在 Web 后台用一个
 | `app/runner` | `@geek-bot/runner` | 在 sandbox 或 VM 里驱动 omp 的单文件程序，只用 Node 标准库。见 [runner](../services/runner/README.md) |
 | `packages/protocol` | `@geek-bot/protocol` | 纯类型加 JSON Schema（节点协议、TaskSpec、结果、RepoProfile、catalog 文件契约、console API DTO）。任何 app 都可以导入它；它不导入任何 app。见 [protocol](../services/protocol/README.md) |
 
-四个 app 之间互不导入实现，只经 `@geek-bot/protocol` 共享契约；runner 除 `@geek-bot/protocol` 的类型导入外不导入任何 npm 包。边界由 `pnpm check:boundaries` 强制，细节见 [MODULAR-DEVELOPMENT](MODULAR-DEVELOPMENT.md)。本仓库骨架（#1）不引入任何生产依赖；表里标「计划中」的框架由对应 issue 引入，引入前需要所有者批准。
+四个 app 之间互不导入实现，只经 `@geek-bot/protocol` 共享契约；runner 程序（`app/runner/src`）除 `@geek-bot/protocol` 的类型导入外不导入任何 npm 包。边界由 `pnpm check:boundaries` 强制，细节见 [MODULAR-DEVELOPMENT](MODULAR-DEVELOPMENT.md)。本仓库骨架（#1）不引入任何生产依赖；表里标「计划中」的框架由对应 issue 引入，引入前需要所有者批准。
 
 ## 公开就绪
 
