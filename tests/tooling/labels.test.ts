@@ -187,27 +187,17 @@ describe("issue 表单与 PR 模板的内容", () => {
   });
 });
 
-describe("ci.yml：PR 只能指向 stage（PULL-REQUESTS「目标分支」）", () => {
+describe("issue-lifecycle.yml：PR 只能指向 stage（PULL-REQUESTS「目标分支」）", () => {
+  const workflow = readFileSync(join(root, ".github", "workflows", "issue-lifecycle.yml"), "utf8");
   const ci = readFileSync(join(root, ".github", "workflows", "ci.yml"), "utf8");
 
   /** 顶层 jobs 下某个 job 的全部行，到下一个同级键或同级注释为止 */
   function jobLines(job: string): string[] {
-    const lines = ci.split("\n");
+    const lines = workflow.split("\n");
     const start = lines.indexOf(`  ${job}:`);
-    expect(start, `ci.yml 里没有 job ${job}`).toBeGreaterThan(0);
+    expect(start, `issue-lifecycle.yml 里没有 job ${job}`).toBeGreaterThan(0);
     const end = lines.findIndex((line, index) => index > start && /^ {2}\S/.test(line));
     return lines.slice(start, end < 0 ? undefined : end);
-  }
-
-  /** job 里的步骤（`      - name: ...` 开头），每个带上自己的全部行 */
-  function steps(lines: string[]): { name: string; lines: string[] }[] {
-    const result: { name: string; lines: string[] }[] = [];
-    for (const line of lines) {
-      const step = /^ {6}- name: (.+)$/.exec(line);
-      if (step) result.push({ name: step[1], lines: [line] });
-      else result.at(-1)?.lines.push(line);
-    }
-    return result;
   }
 
   /** 步骤里 `run: |` 块的 shell 文本（去掉 10 格缩进） */
@@ -222,22 +212,20 @@ describe("ci.yml：PR 只能指向 stage（PULL-REQUESTS「目标分支」）", 
     return `${body.join("\n").trim()}\n`;
   }
 
-  it("PR → main 仍触发 CI，branch-guard 第一步只在 PR 事件上核对 github.base_ref，排在不变量判定之前", () => {
-    const guard = steps(jobLines("branch-guard"));
-    const gate = guard[0];
-    // 去掉 main 的话，误开的 PR → main 一个检查都没有，看起来和全绿一样能合并
-    expect(ci).toMatch(/^ {2}pull_request:\n {4}branches: \[main, stage\]$/m);
-    expect(gate.name).toContain("PR 目标分支");
-    expect(gate.lines).toContain("        if: github.event_name == 'pull_request'");
-    expect(gate.lines).toContain("          BASE_REF: ${{ github.base_ref }}");
-    const invariants = guard.findIndex((step) => step.name === "判定分支不变量");
-    expect(invariants).toBeGreaterThan(0);
-    // verify 汇总 branch-guard，这一步失败会让唯一的汇总 check 变红
-    expect(ci).toMatch(/^ {4}needs: \[branch-guard, core, lint-workflows\]$/m);
+  it("pr-base 对指向 main 与 stage 的 PR 都运行，而且监听 edited（改 base 后重新判定）", () => {
+    expect(workflow).toMatch(/^ {2}pull_request:\n(?: {4}#.*\n)* {4}branches: \[main, stage\]\n {4}types: \[[^\]]*\bedited\b[^\]]*\]$/m);
+    const lines = jobLines("pr-base");
+    expect(lines).toContain("    if: github.event_name == 'pull_request' && github.event.action != 'closed'");
+    expect(lines).toContain("          BASE_REF: ${{ github.base_ref }}");
+    // 其余 PR job 只处理指向 stage 的 PR
+    expect(jobLines("pr-contract").join("\n")).toContain("github.base_ref == 'stage'");
+    expect(jobLines("close-on-merge").join("\n")).toContain("github.base_ref == 'stage'");
+    // ci.yml 不监听 edited，这一步放在那里改 base 后不会重跑
+    expect(ci).not.toContain("PR 目标分支（只接受 stage）");
   });
 
   it("按 GitHub 的 bash 参数真实执行：stage 通过；main 与其它分支退出 1 并打出 ::error", () => {
-    const script = runBlock(steps(jobLines("branch-guard"))[0].lines);
+    const script = runBlock(jobLines("pr-base"));
     const run = (base: string) =>
       spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", "-c", script], {
         encoding: "utf8",

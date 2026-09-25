@@ -16,9 +16,9 @@
 # 硬不变量由 branch-guard 强制（scripts/check-branch-invariants.mjs）。
 #
 # 触发：pull_request → main/stage；push → main/stage；手工 dispatch。
-# PR 只能指向 stage：指向 main 的 PR 一律失败（branch-guard 第一步核对 github.base_ref）。
-# main 只由维护者在预发布验收后本地快进（docs/conventions/RELEASES.md「发布流程」第 7 步），不接受 PR。
-# 仍对 PR → main 触发，是为了让误开的这种 PR 显示红色；不触发的话它没有任何检查，看起来和全绿一样能合并。
+# PR 只能指向 stage：目标分支由 issue-lifecycle.yml 的 pr-base 核对（它监听 edited，改 base 后会重新判定；
+# 本工作流不监听 edited，改 PR 描述不该重跑整套构建）。main 只由维护者在预发布验收后本地快进
+# （docs/conventions/RELEASES.md「发布流程」第 7 步），不接受 PR。
 # 不对 task/**、dev/** 的 push 触发：task 分支的每次推送已由它的 PR（pull_request 事件）覆盖，
 # 再按 push 触发会让同一个提交跑两遍，私有仓库每月的 Actions 分钟数有限。
 # dev/** 个人分支需要机器验证时，本地跑 pnpm verify，或在该分支上手工 dispatch 本工作流
@@ -57,25 +57,12 @@ env:
 jobs:
   # 分支不变量：stage 必须包含 main，main 不得领先 stage。
   # 长期分支命名违规只告警（硬失败只针对上面两条不变量），见脚本内的分级说明。
-  # PR 事件先核对目标分支。单靠不变量脚本（只看 origin/main 与 origin/stage，不看 PR 指向哪里），
-  # 指向 main 的 PR 合并前是全绿的；点合并会在 main 上生成 stage 没有的提交，要到 push main 才报错。
+  # 不变量脚本只看 origin/main 与 origin/stage，不看 PR 指向哪里；PR 的目标分支由 issue-lifecycle.yml 的 pr-base 核对。
   branch-guard:
     name: branch-guard (main/stage 不变量)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: 核对 PR 目标分支（只接受 stage）
-        if: github.event_name == 'pull_request'
-        shell: bash
-        env:
-          BASE_REF: ${{ github.base_ref }}
-        run: |
-          if [ "$BASE_REF" != stage ]; then
-            echo "::error title=PR 目标分支::PR 只能指向 stage，这个 PR 指向 ${BASE_REF}。main 只由维护者在预发布验收后本地快进（docs/conventions/RELEASES.md「发布流程」第 7 步），不接受 PR；把 base 改成 stage。"
-            exit 1
-          fi
-          echo "PR 目标分支是 stage。"
-
       - name: 检出代码（取全部远端分支，不保留凭据）
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

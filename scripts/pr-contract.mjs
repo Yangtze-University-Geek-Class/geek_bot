@@ -40,18 +40,23 @@ export function stripComments(text) {
 const linesOf = (text) => String(text ?? "").replace(/\r\n/g, "\n").split("\n");
 
 /**
- * 围栏代码块的开合判定（stripCode 与 sections 共用同一套）：``` 或 ~~~ 开头（前面最多 3 个空格）的行是围栏线；
- * 同一种字符、长度不短于开头的围栏线才关闭。没闭合的围栏一直到正文末尾。
+ * 围栏代码块的开合判定（stripCode 与 sections 共用同一套，按 CommonMark / GFM）：
+ * - 不在围栏里时，前面最多 3 个空格、3 个以上 ``` 或 ~~~ 开头的行打开围栏；反引号围栏的 info 串里不能再有反引号，
+ *   所以「```pnpm verify``` 通过」是行内代码，不开围栏。
+ * - 在围栏里时，只有同一种字符、长度不短于开头、后面只跟空白的行才关闭；「```md」这类带 info 串的行只是代码内容。
+ * 没闭合的围栏一直到正文末尾。
  * @param {string} line
  * @param {string | null} fence 当前打开的围栏串，不在围栏里为 null
- * @returns {{ marker: boolean, fence: string | null }} marker：这一行是不是围栏线；fence：这一行之后的状态
+ * @returns {{ marker: boolean, fence: string | null }} marker：这一行是不是开或关围栏的行；fence：这一行之后的状态
  */
 function fenceStep(line, fence) {
-  const mark = /^[ ]{0,3}(`{3,}|~{3,})/.exec(line);
-  if (!mark) return { marker: false, fence };
-  if (!fence) return { marker: true, fence: mark[1] };
-  if (mark[1][0] === fence[0] && mark[1].length >= fence.length) return { marker: true, fence: null };
-  return { marker: true, fence };
+  if (fence === null) {
+    const open = /^[ ]{0,3}(?:(`{3,})[^`]*|(~{3,}).*)$/.exec(line);
+    return open ? { marker: true, fence: open[1] ?? open[2] } : { marker: false, fence };
+  }
+  const close = /^[ ]{0,3}(`{3,}|~{3,})[ \t]*$/.exec(line);
+  if (close && close[1][0] === fence[0] && close[1].length >= fence.length) return { marker: true, fence: null };
+  return { marker: false, fence };
 }
 
 /** 去掉围栏代码块与行内代码：代码里的 Closes #n、结论行、证据都只是示例文字。 */

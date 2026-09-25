@@ -40,8 +40,10 @@ control 内部（计划中）：index -> app -> routes/<module> -> 服务 -> pub
 1. 五个包互不导入实现：`app/control`、`app/console`、`app/node`、`app/runner` 任何一个都不得导入另一个的文件（包名导入或相对路径都算）。
 2. 每个 app 都可以导入 `@geek-bot/protocol`（或指向 `packages/protocol` 的相对路径）；这是跨包共享的唯一入口。
 3. `packages/protocol` 不导入任何 app。
-4. `app/runner/src`（runner 程序本身，#14 起打成单文件 `dist/runner.mjs`）不许导入任何 npm 包，只用 Node 标准库；唯一例外是对 `@geek-bot/protocol` 的 type 导入。`app/runner` 下 `src/` 以外的文件（例如 #14 的打包配置）不打进 runner 程序，不受这一条约束，但仍受规则 1。`src/` 里的文件不能引用 `src/` 以外的文件：这一点由 `pnpm typecheck` 把关（`app/runner/tsconfig.json` 设了 `rootDir: src`，越界引用报 TS6059），不由 `check-boundaries` 检查。
-5. 计划中（#3、#9）：control 的路由模块互不导入；底层（db、GitHub 读取客户端、密钥）不反向导入路由或应用组装；publisher 以外不得调用 GitHub 写接口；令牌解密接口只许 publisher 与 GitHub 读取层（读取客户端，计划路径 `src/github/client.ts`，#6）调用（[SECURITY](../architecture/SECURITY.md) S-01）。这些规则随对应 issue 加进 `check-boundaries`，加入前由审查逐项核对（见 [CODE-REVIEW](CODE-REVIEW.md) 第 11、12 项）。
+4. `app/runner/src`（runner 程序本身，#14 起打成单文件 `dist/runner.mjs`）不许导入任何 npm 包，只用 Node 标准库；唯一例外是对 `@geek-bot/protocol` 的 type 导入。`app/runner` 下 `src/` 以外的文件（例如 #14 的打包配置）不打进 runner 程序，不受这一条约束，但仍受规则 1。`src/` 里的文件也不能引用 `app/runner` 里 `src/` 以外的文件（不论 `.ts`、`.mjs`、`.js`，还是副作用导入），`check-boundaries` 会拦下。
+5. `app/`、`packages/` 下出现没在 `check-boundaries` 里登记的目录时失败：新增包要先划定边界。
+6. 每个包都要在 `pnpm-workspace.yaml` 里逐行列出（不用通配），`package.json` 里都要有非空的 `typecheck` 与 `build` 脚本：根脚本用 `pnpm -r --if-present run` 调用它们，缺了会被静默跳过。
+7. 计划中（#3、#9）：control 的路由模块互不导入；底层（db、GitHub 读取客户端、密钥）不反向导入路由或应用组装；publisher 以外不得调用 GitHub 写接口；令牌解密接口只许 publisher 与 GitHub 读取层（读取客户端，计划路径 `src/github/client.ts`，#6）调用（[SECURITY](../architecture/SECURITY.md) S-01）。这些规则随对应 issue 加进 `check-boundaries`，加入前由审查逐项核对（见 [CODE-REVIEW](CODE-REVIEW.md) 第 11、12 项）。
 
 检查由 TypeScript AST 解析静态 import、动态 import、re-export、import-type 与 `require`；Vue 单文件组件只解析 `<script>` 块；解析 `.js` 指向 `.ts` 以及 tsconfig 声明的路径别名；按解析后的文件路径判断所属包，不以导入名称判断。本地导入（相对路径、已声明别名、`@geek-bot/` 作用域）解析失败不是忽略理由，检查必须失败；非字面量的动态导入无法静态判定，同样失败；`app/`、`packages/` 下出现没在 `check-boundaries` 里登记边界的目录也失败。不允许靠新增别名绕过检查。运行时 HTTP 调用、跨包 URL 和 Schema 的语义还需测试，不宣称 import 检查覆盖它们。根 TypeScript 检查不自动证明 Vue 源码正确（console 另跑 `vue-tsc`，#4 起）。
 

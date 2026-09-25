@@ -120,6 +120,20 @@ describe("五个包的边界", () => {
     expect(found).toContain("app/runner/src/d.ts:1: runner 只能 type 导入 @geek-bot/protocol");
   });
 
+  it("runner 程序引用 app/runner 里 src 以外的文件：失败（.ts、.mjs、副作用导入都算）", () => {
+    const found = violations({
+      "app/runner/src/a.ts": `import { helper } from '../build/helper';`,
+      "app/runner/src/b.ts": `import '../build.mjs';`,
+      "app/runner/build/helper.ts": `export const helper = 1;`,
+      "app/runner/build.mjs": `export {};`,
+      "app/runner/src/c.ts": `import { ok } from './ok';`,
+      "app/runner/src/ok.ts": `export const ok = 1;`,
+    }).join("\n");
+    expect(found).toContain("app/runner/src/a.ts:1: runner 程序（app/runner/src）不能引用 src 以外的文件 app/runner/build/helper.ts");
+    expect(found).toContain("app/runner/src/b.ts:1: runner 程序（app/runner/src）不能引用 src 以外的文件 app/runner/build.mjs");
+    expect(found).not.toContain("app/runner/src/c.ts");
+  });
+
   it("其它 app 可以导入 npm 包", () => {
     expect(violations({ "app/control/src/a.ts": `import Fastify from 'fastify';`, "app/console/src/b.ts": `import { ref } from 'vue';` })).toEqual([]);
   });

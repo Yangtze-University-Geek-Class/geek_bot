@@ -10,6 +10,7 @@
  *   2. 每个 app 都可以导入 @geek-bot/protocol（或指向 packages/protocol 的相对路径）；
  *   3. packages/protocol 不导入任何 app；
  *   4. app/runner/src 只用 Node 标准库：不许导入任何 npm 包，唯一例外是对 @geek-bot/protocol 的 type 导入；
+ *      也不许引用 app/runner 里 src 以外的文件（不论 .ts、.mjs、.js，还是副作用导入）；
  *   5. app/ 与 packages/ 下出现没登记的目录时失败：新增包要先在 PACKAGES 里划定边界；
  *   6. PACKAGES 与 pnpm-workspace.yaml 的 packages 列表一一对应（只认逐行列出目录，不认通配与排除），
  *      每个包的 package.json 都有非空的 typecheck 与 build 脚本：根 typecheck、build 用 `pnpm -r --if-present run`
@@ -319,7 +320,12 @@ export function checkProject(root = ROOT) {
         continue;
       }
       follow(target);
-      if (from.name === to.name) continue;
+      if (from.name === to.name) {
+        if (runnerProgram && !targetName.startsWith("app/runner/src/")) {
+          violations.push(`${at}: runner 程序（app/runner/src）不能引用 src 以外的文件 ${targetName}：打包成单文件时带不进去，也会绕过「只用 Node 标准库」的检查`);
+        }
+        continue;
+      }
       if (from.name === SHARED) {
         violations.push(`${at}: protocol 不能导入任何 app（protocol -> ${to.name}）`);
         continue;

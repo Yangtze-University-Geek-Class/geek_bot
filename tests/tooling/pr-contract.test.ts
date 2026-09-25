@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -67,6 +67,20 @@ describe("PR 正文契约", () => {
     expect(parts.get("验证命令与结果")).toContain("pnpm verify");
     // 「验证命令与结果」整段只有一个代码块：不算空段
     expect(checkPullRequest({ branch: "task/32/x", body: filled({ 验证命令与结果: "```sh\npnpm verify\n```" }) }).ok).toBe(true);
+  });
+
+  it("单行的 ```命令``` 是行内代码，不打开围栏，后面的段落照常切出来", () => {
+    const body = filled({ 验证命令与结果: "```pnpm verify``` 通过" });
+    expect([...sections(body).keys()]).toEqual(expect.arrayContaining(REQUIRED_SECTIONS));
+    expect(checkPullRequest({ branch: "task/32/x", body }).ok).toBe(true);
+  });
+
+  it("围栏里带 info 串的 ```md 行不关闭围栏：代码块里抄的审查结论不算数", () => {
+    const body = filled({ 审查结论: "待审查", 风险与回滚: "revert\n\n```\n示例：\n```md\n### 审查结论\n**结论：通过**\n```" });
+    const result = checkPullRequest({ branch: "task/32/x", body });
+    expect(result.ok).toBe(false);
+    expect(result.errors.join()).toContain("「审查结论」没有独占一行");
+    expect(sections(body).get("审查结论")?.trim()).toBe("待审查");
   });
 
   it("填好的正文 + 开着的 issue：通过", () => {
@@ -226,8 +240,9 @@ describe("issue-lifecycle 只检出 pr-contract 用到的文件", () => {
       if (local.has(file)) continue;
       local.add(file);
       const source = readFileSync(join(repo, file), "utf8");
-      for (const match of source.matchAll(/(?:^|\n)\s*(?:import|export)\s[^;]*?\sfrom\s+["']([^"']+)["']|import\(\s*["']([^"']+)["']\s*\)/g)) {
-        const specifier = match[1] ?? match[2];
+      // 三种写法：import/export ... from "x"、副作用导入 import "x"、动态 import("x")
+      for (const match of source.matchAll(/(?:^|\n)\s*(?:import|export)\s[^;]*?\sfrom\s+["']([^"']+)["']|(?:^|\n)\s*import\s+["']([^"']+)["']|import\(\s*["']([^"']+)["']\s*\)/g)) {
+        const specifier = match[1] ?? match[2] ?? match[3];
         if (specifier.startsWith(".")) queue.push(join(file, "..", specifier).split("\\").join("/"));
         else external.add(specifier);
       }
@@ -243,6 +258,16 @@ describe("issue-lifecycle 只检出 pr-contract 用到的文件", () => {
       const covered = entries.some((entry) => (entry.endsWith("/") ? file.startsWith(entry) : file === entry));
       expect(covered, `${file} 没有写进 issue-lifecycle.yml 的 sparse-checkout`).toBe(true);
     }
+  });
+
+  it("只检出 sparse-checkout 列出的文件时，pr-contract.mjs 能真正跑起来", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pr-contract-sparse-"));
+    temporary.push(dir);
+    for (const entry of sparseEntries()) cpSync(join(repo, entry), join(dir, entry), { recursive: true });
+    const result = spawnSync(process.execPath, [join(dir, "scripts/pr-contract.mjs"), "issue", "--branch", "task/1/repo_skeleton"], { encoding: "utf8" });
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    expect(result.stdout.trim()).toBe("1");
   });
 
   it("pr-contract.mjs 及其导入只用 Node 内置模块（这一步不装依赖）", () => {

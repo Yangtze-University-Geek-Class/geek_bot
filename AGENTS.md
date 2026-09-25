@@ -33,7 +33,7 @@
 - 任务分支命名 `task/<issue>/<slug>`（例 `task/12/review_queue`），**只能从 `stage` 拉出**；PR 合并后必须立即删除，不得残留死分支。
 - `dev/<github-username>`（例 `dev/alice`）是个人自由开发区，不作为进入 `stage` 的凭据，也不部署。
 - 推送分支不部署：push `stage`/`main` 只跑 CI。发版只靠打 tag：`vX.Y.Z-rc.N` 打在 `stage` 的提交上 → 预发布实例；`vX.Y.Z` 打在 `main` 的同一提交上 → 正式实例。本机 localhost 只是本地开发，不是预发布。
-- 规则存在不等于远程保护已生效：本仓库是免费计划下的私有仓库，GitHub 不提供分支保护、rulesets 和 Environments（见 [CICD](docs/ops/CICD.md)）。分支不变量由两道机器检查核对：本地 pre-push 钩子（`pnpm hooks:enable`）和 CI 的 `branch-guard`；合并前再由审查者和 CI 的 `pr-contract` 把关。部署文件齐全也不代表实例、CI 或部署已经落地。
+- 规则存在不等于远程保护已生效：本仓库是免费计划下的私有仓库，GitHub 不提供分支保护、rulesets 和 Environments（见 [CICD](docs/ops/CICD.md)）。分支不变量由两道机器检查核对：本地 pre-push 钩子（`pnpm hooks:enable`）和 CI 的 `branch-guard`；合并前再由审查者和 `issue-lifecycle` 的 `pr-base`（PR 只能指向 `stage`）、`pr-contract` 把关。部署文件齐全也不代表实例、CI 或部署已经落地。
 
 细节见 [BRANCHING](docs/conventions/BRANCHING.md)。
 

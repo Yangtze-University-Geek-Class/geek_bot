@@ -11,7 +11,7 @@
 | 工作流 | 触发 | 行为 |
 |---|---|---|
 | `ci.yml` | PR → `main`/`stage`；push `main`/`stage`（不含 tag）；`workflow_dispatch` | `branch-guard`（`node scripts/check-branch-invariants.mjs --require-remote-refs`）∥ `core`（Node 读 `.nvmrc`，pnpm 读 `packageManager`：`pnpm install --frozen-lockfile` → `pnpm check` → `pnpm test` → `pnpm build`）∥ `lint-workflows`（actionlint 1.7.12，下载后按内联 SHA-256 校验）→ `verify` 汇总 |
-| `issue-lifecycle.yml` | 指向 `stage` 的 PR 的 opened / edited / synchronize / reopened / ready_for_review / closed；每周一 03:37 UTC；`workflow_dispatch` | `pr-contract`：从目标分支（`base.ref`）只检出 `scripts/pr-contract.mjs` 与 `scripts/lib/`，核对 PR 正文（`Closes #<issue>` 与 task 分支号一致、issue 存在且开着、九个必需段落、验收证据、审查结论），不检出也不执行 PR 的代码；`close-on-merge`：合并进 `stage` 后关闭 issue，并在 issue 与 PR 上各留一条 `<!-- track v1 kind=closed stage=merged -->` 记录；`weekly-sweep`：列出「PR 已合并但 issue 还开着」「issue 开着但没有 task 分支也没有 open PR」，只告警 |
+| `issue-lifecycle.yml` | 指向 `stage` 或 `main` 的 PR 的 opened / edited / synchronize / reopened / ready_for_review / closed；每周一 03:37 UTC；`workflow_dispatch` | `pr-base`：PR 的目标分支只能是 `stage`，指向别的分支就失败；它随 edited 触发，改了 base 会重新判定（`ci.yml` 不监听 edited，所以不放在那里）；`pr-contract`（只处理指向 `stage` 的 PR）：从目标分支（`base.ref`）只检出 `scripts/pr-contract.mjs` 与 `scripts/lib/`，核对 PR 正文（`Closes #<issue>` 与 task 分支号一致、issue 存在且开着、九个必需段落、验收证据、审查结论），不检出也不执行 PR 的代码；`close-on-merge`（只处理合进 `stage` 的 PR）：合并进 `stage` 后关闭 issue，并在 issue 与 PR 上各留一条 `<!-- track v1 kind=closed stage=merged -->` 记录；`weekly-sweep`：列出「PR 已合并但 issue 还开着」「issue 开着但没有 task 分支也没有 open PR」，只告警 |
 | `branch-hygiene.yml` | PR `closed`（合并时才删）；每周一 03:17 UTC；`workflow_dispatch` | 合并后删除本仓库里 head 为 `task/**` 的分支（只有这个 job 有 `contents: write`，**永不**自动删 `dev/**` 或长期分支）；每周巡检远端 `task/**`，对「14 天无提交活动且没有 open PR」的分支只告警、不删除 |
 
 - **push `stage` 或 `main` 不部署任何实例**，只跑 `ci.yml`。
@@ -53,7 +53,7 @@
 
 由此得出的做法：
 
-- 分支不变量由两道机器检查核对：本地 pre-push 钩子（每个克隆运行一次 `pnpm hooks:enable`）和 CI 的 `branch-guard`；合并前再由审查者和 CI 的 `pr-contract`（进 `stage` 的 PR 只能来自对应 issue 的 task 分支）把关。没有平台级的分支保护兜底。以后产品自己的 GitHub 写入另由 publisher 的写入白名单约束。
+- 分支不变量由两道机器检查核对：本地 pre-push 钩子（每个克隆运行一次 `pnpm hooks:enable`）和 CI 的 `branch-guard`；合并前再由审查者和 `issue-lifecycle` 的 `pr-base`（PR 只能指向 `stage`）、`pr-contract`（进 `stage` 的 PR 只能来自对应 issue 的 task 分支）把关。没有平台级的分支保护兜底。以后产品自己的 GitHub 写入另由 publisher 的写入白名单约束。
 - 官方文档写明免费计划只能给公开仓库配置 Environments。工作流里不写 `environment:`（引用不存在的环境会自动创建一个没有保护规则的环境），也不设计环境级 secrets 和正式环境审批；部署授权靠流程加上目标机上的人工执行。
 - 建议所有者在仓库设置里把 `allowed_actions` 改为 `selected`（GitHub 官方 action 加上 `pnpm/action-setup`），并打开 `sha_pinning_required`；现有工作流已经全部按 SHA 固定。这两项是仓库设置，AI 不改。
 - `delete_branch_on_merge` 保持关闭。如果以后改成打开，就去掉 `branch-hygiene` 的删除 job，两套机制只留一套。
@@ -80,6 +80,7 @@
 
 - `core`：在 worktree 里运行 `pnpm install --frozen-lockfile && pnpm verify`（见 [LOCAL-DEV](LOCAL-DEV.md)）。
 - `branch-guard`：`node scripts/check-branch-invariants.mjs --require-remote-refs`，需要本地已有 `origin/main` 与 `origin/stage`。
+- `pr-base`：只看 PR 的 base，本地没有对应命令；开 PR 时确认目标是 `stage` 即可。
 - `lint-workflows`：本机装 actionlint 1.7.12 后，在仓库根目录运行 `actionlint .github/workflows/*.yml`。
 
 ## 官方依据

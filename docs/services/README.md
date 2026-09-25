@@ -20,7 +20,7 @@
 
 - 五个包互不导入实现代码。
 - 任何包都可以导入 `@geek-bot/protocol`；protocol 不导入任何 app。
-- runner 只用 Node 标准库，除了对 `@geek-bot/protocol` 的 type 导入，不导入任何 npm 包。
+- runner 程序（`app/runner/src`）只用 Node 标准库，除了对 `@geek-bot/protocol` 的 type 导入，不导入任何 npm 包，也不引用 `src/` 以外的文件。
 - 这些规则由 `pnpm check:boundaries` 检查，细则见 [模块化开发规范](../conventions/MODULAR-DEVELOPMENT.md)。
 
 包与包之间的运行时交互只有三种：

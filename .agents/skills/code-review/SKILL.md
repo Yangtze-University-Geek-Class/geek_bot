@@ -99,7 +99,7 @@ gh pr checkout <N>   # 需要跑脚本或看完整仓库上下文时
 7. **边界规则**：
    ```bash
    pnpm check:boundaries
-   pnpm --filter @geek-bot/runner typecheck   # src/ 引用 src/ 以外的文件时报 TS6059
+   pnpm check:boundaries   # runner 的 src/ 引用 src/ 以外的文件、导入 npm 包都会失败
    git diff origin/stage...HEAD -- 'tsconfig*.json' '**/tsconfig*.json' pnpm-workspace.yaml scripts/check-boundaries.mjs
    ls app packages; ls docs/services
    ```

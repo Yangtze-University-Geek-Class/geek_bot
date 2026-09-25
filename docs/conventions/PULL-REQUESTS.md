@@ -6,7 +6,7 @@
 
 ## 目标分支
 
-PR 只能指向 `stage`。`main` 不接受来自 `task/**`、`dev/**` 的 PR，只接受在预发布实例验收通过后把 `main` 快进到被验收提交的操作（见 [BRANCHING](BRANCHING.md) 与 [RELEASES](RELEASES.md)）。合并本身不部署，发版靠打 tag。合并后立刻删除来源 task 分支。
+PR 只能指向 `stage`（`issue-lifecycle` 的 `pr-base` 核对，改了 base 会重新判定）。`main` 不接受来自 `task/**`、`dev/**` 的 PR，只接受在预发布实例验收通过后把 `main` 快进到被验收提交的操作（见 [BRANCHING](BRANCHING.md) 与 [RELEASES](RELEASES.md)）。合并本身不部署，发版靠打 tag。合并后立刻删除来源 task 分支。
 
 ## 正文契约
 

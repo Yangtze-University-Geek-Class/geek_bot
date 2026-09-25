@@ -36,8 +36,8 @@ pnpm install --frozen-lockfile
 | 步骤 | 实际命令 | 做什么 |
 |---|---|---|
 | `check:runtime` | `node scripts/check-runtime.mjs` | 当前 Node 必须是 22 且不低于 22.13 |
-| `check:boundaries` | `node scripts/check-boundaries.mjs` | 五个包互不导入实现；都可以导入 `@geek-bot/protocol`；protocol 不导入任何 app；runner 只用 Node 标准库。用 AST 解析，解析不了就失败 |
-| `check:docs` | `node scripts/docs-index.mjs --check && node scripts/check-docs.mjs && node scripts/tuffex-docs.mjs check` | `docs/INDEX.md` 与文档一致；`AGENTS.md`、`README.md`、`docs/README.md` 存在；相对链接指向真实文件；每个 `app/<name>` 与 `packages/<name>` 都有 `docs/services/<name>/README.md`；`.omp/skills/code-review` 与 `.claude/skills/code-review` 是指向 `.agents/skills/code-review` 的符号链接；`docs/components/tuffex/` 里受哈希管理的上游文件逐个与清单一致，`reference/`、`snapshot/` 下不许有清单以外的文件（报 `unlisted`） |
+| `check:boundaries` | `node scripts/check-boundaries.mjs` | 五个包互不导入实现；都可以导入 `@geek-bot/protocol`；protocol 不导入任何 app；`app/runner/src` 只用 Node 标准库、不引用 `src/` 以外的文件；每个包都登记在 `pnpm-workspace.yaml`、都有 `typecheck` 与 `build` 脚本。用 AST 解析，解析不了就失败 |
+| `check:docs` | `node scripts/docs-index.mjs --check && node scripts/check-docs.mjs && node scripts/tuffex-docs.mjs check` | `docs/INDEX.md` 与文档一致；`AGENTS.md`、`README.md`、`docs/README.md` 存在；相对链接指向真实文件；每个 `app/<name>` 与 `packages/<name>` 都有 `docs/services/<name>/README.md`；`.omp/skills/code-review` 与 `.claude/skills/code-review` 是指向 `.agents/skills/code-review` 的符号链接；`docs/components/tuffex/` 里受哈希管理的上游文件逐个与清单一致，`reference/`、`snapshot/` 下不许有清单以外的文件（报「没有登记在清单里」） |
 | `check:secrets` | `node scripts/check-secrets.mjs` | 私有 env 文件、数据库文件不入库；env 模板里的密钥项只能留空或写 `*_FILE`；不出现私钥、GitHub 令牌、`sk-` 开头的长密钥。不按扩展名挑文件，每个非二进制文件都扫（`Dockerfile`、`.npmrc`、没有扩展名的文件都在内）；私钥文件名（`*.pem`、`*.key`、`id_ed25519` 等）和数据库附属、备份文件（`.db.bak`、`.sqlite-wal` 等）不看内容，一律不许入库 |
 | `check:public-safety` | `node scripts/check-public-safety.mjs` | 不出现私网、CGNAT、链路本地地址和带 mesh 子域的组网主机名；被禁词按 SHA-256 比对；确需保留的放行项逐条写进 `scripts/public-safety-allow.json` 并写明理由。文件名、目录名、符号链接目标同样扫描；放行清单自己的 `path`、`reason` 照常扫描；`docs/components/tuffex/reference/`、`snapshot/` 下只跳过清单（`manifest.json`）里登记过的文件内容 |
 | `typecheck` | `pnpm -r --if-present run typecheck && tsc -p tsconfig.json` | 每个包 `tsc -p tsconfig.json --noEmit`；再用根 `tsconfig.json` 对 `tests/**` 与 `vitest.config.ts` 做类型检查，不产出文件 |
@@ -48,7 +48,7 @@ pnpm install --frozen-lockfile
 
 - `pnpm docs:index`：改了文档标题、摘要或路径后重新生成 `docs/INDEX.md`，不要手工编辑它。
 - `pnpm check:branch-invariants`：核对 `stage` 包含 `main`、`main` 不领先 `stage`，违反就以非 0 退出；分支命名不合规默认只告警（加 `--strict-long-lived` 才算失败）。CI 的 `branch-guard` 用 `--require-remote-refs` 跑同一脚本。
-- `node scripts/check-public-safety.mjs --hash <词>`：打印一个词的 SHA-256，维护者用它往被禁词表里追加条目；表里只存哈希，不存明文。只接受单个 `[a-z0-9]+` token（大小写不限）或 IPv4；带连字符、空格的词要拆开分别登记；汉字词不支持，会以 2 退出。扫描时每个 token 连同它长度不小于 4 的前缀、后缀一起比对，所以登记一个词就能拦住它和别的词、数字连写的形式（夹在两个词中间的拦不住）。
+- `node scripts/check-public-safety.mjs --hash <词>`：打印一个词的 SHA-256，维护者用它往被禁词表里追加条目；表里只存哈希，不存明文。只接受单个 `[a-z0-9]+` token（大小写不限）或 IPv4；带连字符、空格的词要拆开分别登记；汉字词不支持，会以 2 退出。扫描时每个 token 连同它长度 4 到 32 的前缀、后缀一起比对，所以登记一个词就能拦住它和别的词、数字连写的形式（夹在两个词中间的拦不住）；短于 4 个字符的词只按整词比对，`--hash` 会在 stderr 提示。
 - `pnpm labels:plan`：只打印创建标签的 `gh label create` 命令，不执行，由所有者决定是否运行（见 [CICD](CICD.md)）。
 - 还没有的命令：`dev:control`（#3）、`dev:console` 与 `test:e2e`（#4）、`check:environments` 与 `release:plan`（#7）、`test:vm`（#12）。
 
@@ -60,12 +60,12 @@ pnpm hooks:enable          # 等于 git config core.hooksPath .githooks
 
 - 每个克隆运行一次；task worktree 共用所在克隆的 Git 配置，不用再设。停用：`git config --unset core.hooksPath`。
 - `.githooks/pre-push` 在每次推送前运行 `check-branch-invariants --push`，下列情况拒绝推送：
-  - 推 `main`：被推的提交不在 `stage`（本地或 `origin/stage`）里，或本地两者都找不到；
+  - 推 `main`：被推的提交不在本地 `stage` 里（本地没有 `stage` 时看 `origin/stage`），或两者都找不到；本地 `stage` 落后时先 `git fetch` 并更新它，否则已经进了 `origin/stage` 的提交也会被拒；
   - 推 `stage`：来源不是 `stage` 自身或合规的 `task/<issue>/<slug>`，或被推的 `stage` 不包含 `main`；
   - 删除远端 `main` 或 `stage`；
   - 发布 tag：格式不对、删除或移动已有发布 tag、rc tag 不在 `stage` 的提交上、正式 tag 不在 `main` 的提交上、tag 版本与该提交 `package.json` 的 `version` 不一致、已有正式 tag 的版本再打 rc。
 - 推到其它分支时，命名不合规（例如 `task/12-foo`、`dev-alice`）只告警，推送照常放行；以不合规分支为来源推 `stage` 才会被上面第二条拒绝（命名规则见 [BRANCHING](../conventions/BRANCHING.md)）。
-- 本仓库是免费计划下的私有仓库，GitHub 没有分支保护（见 [CICD](CICD.md)）。分支不变量由两道机器检查核对：这个钩子和 CI 的 `branch-guard`；合并前再由审查者和 CI 的 `pr-contract` 把关。发布 tag 在 `release.yml`（#7）加入之前只有本地钩子这一道（见 [RELEASES](../conventions/RELEASES.md)「tag 不可变」）。不要用 `--no-verify` 绕过钩子。
+- 本仓库是免费计划下的私有仓库，GitHub 没有分支保护（见 [CICD](CICD.md)）。分支不变量由两道机器检查核对：这个钩子和 CI 的 `branch-guard`；合并前再由审查者和 `issue-lifecycle` 的 `pr-base`、`pr-contract` 把关。发布 tag 在 `release.yml`（#7）加入之前只有本地钩子这一道（见 [RELEASES](../conventions/RELEASES.md)「tag 不可变」）。不要用 `--no-verify` 绕过钩子。
 
 ## task worktree：开工与收尾
 

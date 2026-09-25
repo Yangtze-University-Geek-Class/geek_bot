@@ -1,6 +1,9 @@
 # issue 与 PR 的生命周期（docs/conventions/TRACKING.md §1）
 #
-# 一件事 = 一个 issue = 一个 task/<issue>/<slug> 分支 = 一个 PR。三件事：
+# 一件事 = 一个 issue = 一个 task/<issue>/<slug> 分支 = 一个 PR。四件事：
+#   0. pr-base：PR 只能指向 stage。main 只由维护者在预发布验收后本地快进（docs/conventions/RELEASES.md
+#      「发布流程」第 7 步），不接受 PR。放在这里而不是 ci.yml，是因为改 PR 的 base 属于 edited 事件：
+#      本工作流监听 edited，改完 base 会重新判定；ci.yml 不监听 edited（改描述不该重跑整套构建）。
 #   1. pr-contract：每个进 stage 的 PR 检查正文契约（Closes #<issue> 与分支号一致、issue 开着、
 #      九个必需段落齐全、有验收证据、有审查结论）。改 PR 描述会自动重跑。
 #   2. close-on-merge：PR 合并进 stage 后关闭对应 issue，并在 issue 与 PR 上各留一条追踪记录。
@@ -23,7 +26,8 @@ name: Issue lifecycle
 
 on:
   pull_request:
-    branches: [stage]
+    # 也监听指向 main 的 PR：只为让 pr-base 把它标红，其余 job 都限定 base 为 stage。
+    branches: [main, stage]
     types: [opened, edited, synchronize, reopened, ready_for_review, closed]
   schedule:
     # 每周一 03:37 UTC（错开 branch-hygiene 的 03:17）
@@ -38,9 +42,27 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' && github.event.action != 'closed' }}
 
 jobs:
+  pr-base:
+    name: pr-base (PR 只能指向 stage)
+    if: github.event_name == 'pull_request' && github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: 核对 PR 目标分支（只接受 stage）
+        shell: bash
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [ "$BASE_REF" != stage ]; then
+            echo "::error title=PR 目标分支::PR 只能指向 stage，这个 PR 指向 ${BASE_REF}。main 只由维护者在预发布验收后本地快进（docs/conventions/RELEASES.md「发布流程」第 7 步），不接受 PR；把 base 改成 stage，改完会自动重新判定。"
+            exit 1
+          fi
+          echo "PR 目标分支是 stage。"
+
   pr-contract:
     name: pr-contract (PR 正文契约)
-    if: github.event_name == 'pull_request' && github.event.action != 'closed'
+    if: github.event_name == 'pull_request' && github.event.action != 'closed' && github.base_ref == 'stage'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -91,6 +113,7 @@ jobs:
       github.event_name == 'pull_request'
       && github.event.action == 'closed'
       && github.event.pull_request.merged == true
+      && github.base_ref == 'stage'
       && startsWith(github.event.pull_request.head.ref, 'task/')
     runs-on: ubuntu-latest
     timeout-minutes: 10

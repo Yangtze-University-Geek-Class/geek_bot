@@ -52,7 +52,7 @@ pnpm --filter @geek-bot/runner typecheck
 pnpm exec vitest run tests/runner
 ```
 
-`pnpm check:boundaries` 检查 runner 没有导入任何 npm 包（`@geek-bot/protocol` 的 type 导入除外）。
+`pnpm check:boundaries` 检查 `app/runner/src` 没有导入任何 npm 包（`@geek-bot/protocol` 的 type 导入除外），也没有引用 `src/` 以外的文件。
 
 ## 已知限制
 

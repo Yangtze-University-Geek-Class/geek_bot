@@ -16,7 +16,7 @@
  *   1. 私网 IPv4（10/8、172.16/12、192.168/16）、CGNAT（100.64/10）、链路本地（169.254/16）；
  *   2. 主机名里带 `.mesh.` 这一段（组网内部主机名）；
  *   3. 被禁 token：文本转小写后按 [a-z0-9]+ 切成 token；另按驼峰、全大写缩写接小写、字母与数字相连这几种边界
- *      再切一次（fooBar、ABCbot、host01）。每个 token 本身，以及它长度不小于 4 的每个前缀和后缀，逐个算 SHA-256，
+ *      再切一次（fooBar、ABCbot、host01）。每个 token 本身，以及它长度 4–32 的每个前缀和后缀，逐个算 SHA-256，
  *      与 scripts/public-safety-denylist.json 比对，这样被禁词和别的词连写（<词>bot、<词>university）也能拦住；
  *      夹在中间的连写拦不住。另把每个 IPv4 字面量整体算 SHA-256 比对（用于个别公网地址）。
  *      清单里只有哈希，没有明文；用 --hash 生成新条目（只接受单个 [a-z0-9]+ token 或 IPv4，其它输入永远匹配不上，直接拒绝）。
@@ -117,17 +117,22 @@ export function tokensOf(line) {
   const lowerStart = line.replace(/([a-z0-9])([A-Z])/g, "$1 $2");
   // 全大写串后面接小写有两种读法：ACMEBot 是 ACME + Bot，ACMEbot 是 ACME + bot。两种都切，token 取并集。
   const variants = [lowerStart.replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2"), lowerStart.replace(/([A-Z]{2,})([a-z])/g, "$1 $2")];
-  for (const variant of variants) for (const token of digits(variant).toLowerCase().match(/[a-z0-9]+/g) ?? []) tokens.add(token);
+  // 每个变体收两份：按字母与数字边界切开的，和不切的（带数字的被禁词如 acme42 夹在 fooAcme42Bar 里也要命中）。
+  for (const variant of variants) {
+    for (const text of [variant, digits(variant)]) for (const token of text.toLowerCase().match(/[a-z0-9]+/g) ?? []) tokens.add(token);
+  }
   return tokens;
 }
 
-/** 连写检测的最短片段：被禁词里最短的是 4 个字符。 */
+/** 连写检测的最短片段：被禁词里最短的是 4 个字符；更短的词只按整词比对（--hash 会提示）。 */
 export const MIN_AFFIX = 4;
+/** 连写检测的最长片段：前缀、后缀最多取这么长，单个很长的 token（哈希、base64）不会让耗时变成平方级。 */
+export const MAX_AFFIX = 32;
 
-/** 一个 token 要比对的候选：它本身，以及长度不小于 MIN_AFFIX 的每个前缀和后缀。 */
+/** 一个 token 要比对的候选：它本身，以及长度在 MIN_AFFIX..MAX_AFFIX 之间的每个前缀和后缀。 */
 export function candidatesOf(token) {
   const out = new Set([token]);
-  for (let length = MIN_AFFIX; length < token.length; length++) {
+  for (let length = MIN_AFFIX; length < token.length && length <= MAX_AFFIX; length++) {
     out.add(token.slice(0, length));
     out.add(token.slice(token.length - length));
   }
@@ -362,6 +367,10 @@ function main(argv) {
     if (values["--root"] !== undefined) throw new UsageError("--hash 不能和 --root 一起用");
     const problem = hashTermProblem(values["--hash"]);
     if (problem) throw new UsageError(problem);
+    const term = String(values["--hash"]).trim().toLowerCase();
+    if (/^[a-z0-9]+$/.test(term) && term.length < MIN_AFFIX) {
+      console.error(`注意：${term.length} 个字符的词只按整个 token 比对；和别的字母连写（如 <词>bot）拦不住，需要时把常见连写形式另外登记。`);
+    }
     console.log(hashTerm(values["--hash"]));
     return;
   }
