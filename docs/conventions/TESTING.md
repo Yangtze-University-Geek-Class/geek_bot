@@ -2,7 +2,7 @@
 
 > 现在就有的测试与计划中的测试分开记录；类型检查、单元与路由测试、构建、浏览器验证、VM 冒烟和实例验收是不同证据，不相互替代。
 
-状态：`current` · 更新：2026-09-25 · 适用：`tests/**`、各包的 `typecheck` / `build`、根 `pnpm check` / `pnpm test` / `pnpm build` / `pnpm verify`
+状态：`current` · 更新：2026-09-26 · 适用：`tests/**`、各包的 `typecheck` / `build`、根 `pnpm check` / `pnpm test` / `pnpm build` / `pnpm verify`
 
 ## 根入口和分工
 
@@ -49,8 +49,8 @@
 
 | 包 | 必须覆盖 | 随哪个 issue 加入 |
 |---|---|---|
-| control | 迁移前生成备份；库版本高于代码时拒绝启动；备份→恢复→`integrity_check` 往返一致；日志打码覆盖 `ghp_`、`gho_`、`github_pat_`、`sk-`、`Bearer`；SIGTERM 后 WAL 已 checkpoint | #3 |
-| control | device flow 的 `authorization_pending`、`slow_down`、`expired_token`；没有认领码不能成为 owner；带被拒 scope 的令牌被拒；非管理员访问后台接口 403；缺 Origin 的写请求 403；被邀请管理员的登录令牌被吊销；响应和日志里没有令牌；库里令牌列是密文 | #5 |
+| control | 迁移前生成备份；库的兼容版本高于代码认识的版本时拒绝启动，上一版代码打开只扩不缩的新库仍能启动、能读写（ADR-0008）；备份→恢复→`integrity_check` 往返一致；日志打码覆盖 `ghp_`、`gho_`、`github_pat_`、`sk-`、`gbn_`、`gbt_`、`Bearer`；SIGTERM 后 WAL 已 checkpoint | #3 |
+| control | device flow 的 `authorization_pending`、`slow_down`、`expired_token`；没有认领码不能成为 owner；`X-OAuth-Scopes` 超出 `repo`、`read:org` 的令牌被拒（旧拒绝名里的 5 个 scope 作为样例）；没有会话访问后台接口 401，operator、viewer 调用 owner 专属操作 403，超过 10 分钟未重新认证的 owner 做 SECURITY S-09 清单里的操作被拒；缺 Origin 的写请求 403；被邀请管理员的登录令牌被吊销；响应和日志里没有令牌；库里令牌列是密文 | #5 |
 | control | 权限到能力映射的每一行；需要组织批准的识别；仓库消失记为 lost；已归档仓库禁用写入开关 | #6 |
 | control | ETag 条件请求与 304；受理规则每一条；静默窗口不被机器人自身写入重置、判断回复时排除 `[bot]` 账号；新 head 让旧审查变为 superseded；两通道优先级 | #8 |
 | control | 写入白名单每一个编号的允许与拒绝，至少 30 个越权样例（APPROVE、REQUEST_CHANGES、空 event，推 tag、推默认分支或 `stage`/`main`、非快进推送，改 `.github/workflows`，跨仓库或跨条目写入，合并、删分支、关闭 PR）；崩溃注入后不产生第二条评论；模型输出中的注释标记、结论行、`Closes #n`、@ 他人被中和 | #9 |

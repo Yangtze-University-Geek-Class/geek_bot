@@ -2,7 +2,7 @@
 
 > 纯类型加 JSON Schema：节点协议、TaskSpec、任务结果、RepoProfile、catalog 文件契约、console API DTO；各包之间唯一的共享契约。
 
-状态：`proposed` · 更新：2026-09-25 · 适用：`packages/protocol`（`@geek-bot/protocol`）、`tests/protocol`
+状态：`proposed` · 更新：2026-09-26 · 适用：`packages/protocol`（`@geek-bot/protocol`）、`tests/protocol`
 
 ## 职责
 
@@ -27,7 +27,7 @@
 
 | 契约 | 内容 | issue |
 |---|---|---|
-| 节点协议 | heartbeat、lease、bundle、events、result 的请求与响应；协议版本整数，control 支持 N 与 N-1 | #11（消息表由 #2 写入） |
+| 节点协议 | heartbeat、lease、bundle、events、result 的请求与响应；协议版本整数，control 支持 N 与 N-1 | #11（消息表见 [节点协议](../node/protocol.md)） |
 | TaskSpec | task_id、lease_id、epoch、kind、执行器、资源、任务包摘要、omp 参数、模型列表、出网白名单、结果 schema、租约时长 | #11 |
 | catalog 文件契约 | 部署者提供的只读模型目录：provider、models、每个模型的 efforts；没有 efforts 的模型只提供 off 档位 | #13 |
 | RepoProfile 与 `.github/geek-bot.yml` | 每仓库规则画像的字段、来源与优先级 | #10 |

@@ -2,7 +2,7 @@
 
 > 可追溯的工程依据：记录采用了哪些官方说明、用在仓库哪里，不把外部建议、产品选择和已完成验收混为一谈。
 
-状态：`current` · 更新：2026-09-25 · 核对：2026-09-25 · 适用：规范、架构、安全与运维文档引用的外部事实
+状态：`current` · 更新：2026-09-26 · 核对：2026-09-25 · 适用：规范、架构、安全与运维文档引用的外部事实
 
 ## 适用范围
 
@@ -16,7 +16,7 @@
 | [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) | `MAJOR.MINOR.PATCH` 各位的升级含义 | [RELEASES](RELEASES.md) 的版本号一节；`-rc.N` 预发布后缀的形状由本项目的 tag 正则限定 |
 | [TypeScript module reference](https://www.typescriptlang.org/docs/handbook/modules/reference.html) | `.js` 对应 TS 源文件、tsconfig `paths` 与 `moduleResolution` 的真实解析 | `scripts/check-boundaries.mjs` 及跨包导入反例，见 [MODULAR-DEVELOPMENT](MODULAR-DEVELOPMENT.md) |
 | [Fastify Testing](https://fastify.dev/docs/latest/Guides/Testing/) | 构造与监听分离、inject 注册真实插件与路由、关闭资源 | [TESTING](TESTING.md) 的隔离一节；control 路由测试（计划中，#3） |
-| [Fastify Validation and Serialization](https://fastify.dev/docs/latest/Reference/Validation-and-Serialization/) | 运行时 HTTP Schema 与类型声明各有职责 | control 各路由模块的 `contracts.ts`（计划中，#3）；API 文档（#2、#3 写入） |
+| [Fastify Validation and Serialization](https://fastify.dev/docs/latest/Reference/Validation-and-Serialization/) | 运行时 HTTP Schema 与类型声明各有职责 | control 各路由模块的 `contracts.ts`（计划中，#3）；[API](../architecture/API.md) |
 | [W3C APG modal dialog](https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/) | 弹层名称、焦点进入/圈定/恢复、危险操作优先聚焦取消 | 管理后台的确认弹层与浏览器回归（计划中，#4），见 [DESIGN](../design/DESIGN.md) |
 | [WCAG 2.2](https://www.w3.org/TR/WCAG22/) | AA 级验收目标；文本对比度 4.5:1 与大文本 3:1（1.4.3）、焦点可见（2.4.7）、目标尺寸 24×24 CSS 像素及其间距例外（2.5.8） | [DESIGN](../design/DESIGN.md) 的无障碍目标；管理后台浏览器回归（计划中，#4） |
 | [Node.js previous releases](https://nodejs.org/en/about/previous-releases) | 各大版本的代号与支持状态；v22 为 LTS 版本线（代号 Jod） | [STACK](../design/STACK.md) 的环境一致性一节；`.nvmrc`、`.node-version`、`engines` |
@@ -25,7 +25,7 @@
 
 | 来源 | 采用范围 | 本项目落点 |
 |---|---|---|
-| [Authorizing OAuth apps](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps) | device flow 需要先在 OAuth App 设置里开启；轮询时的 `authorization_pending`、`slow_down`、`expired_token` 处理；web flow | 机器人账号登录与绑定（计划中，#5）；身份决策 ADR-0002（#2 写入） |
+| [Authorizing OAuth apps](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps) | device flow 需要先在 OAuth App 设置里开启；轮询时的 `authorization_pending`、`slow_down`、`expired_token` 处理；web flow | 机器人账号登录与绑定（计划中，#5）；身份决策 [ADR-0002](../decisions/0002-github-identity.md) |
 | [Scopes for OAuth apps](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps) | 各 scope 的含义；响应头 `X-OAuth-Scopes` 列出令牌实际拥有的 scope | [CODE-REVIEW](CODE-REVIEW.md) 第 12 项；绑定时的 scope 校验（计划中，#5） |
 | [Repository roles for an organization](https://docs.github.com/en/organizations/managing-user-access-to-your-organizations-repositories/managing-repository-roles/repository-roles-for-an-organization) | Read、Triage、Write、Maintain、Admin 各角色能做的操作 | 仓库权限到机器人能力的映射（计划中，#6） |
 | [Rate limits for the REST API](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api) | 主限额与二级限额（含创建内容类请求的限速）、`retry-after` 与重置头的处理 | 轮询预算（计划中，#8）；publisher 写入限速（计划中，#9） |

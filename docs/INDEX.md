@@ -38,9 +38,19 @@
 
 控制面：唯一的 SQLite 写入者和唯一的 GitHub 写入者，负责登录、令牌、仓库发现、轮询、调度和模型中继，并同源托管 console。
 
+| 文档 | 说明 | EN |
+|---|---|---|
+| [`behavior.md`](./services/control/behavior.md) | 机器人的每条默认行为规则（B-01…）：规则内容、配置项名、默认值、作用范围，以及哪几条同时是写入白名单的拒绝规则。 | — |
+| [`data-model.md`](./services/control/data-model.md) | control 的 SQLite 库：每张表的用途、主要列、索引、写入模块、保留期和密文列，以及迁移与兼容版本、备份与每日恢复校验、从 GitHub 重建状态的规则。 | — |
+| [`write-whitelist.md`](./services/control/write-whitelist.md) | 机器人对 GitHub 的每一种写入：允许清单 W-01…W-14、拒绝清单 D-01…D-64，以及输出中和、outbox 状态机与 `dedupe_key`、限速与熔断。 | — |
+
 ## services/node/
 
 工作节点代理：只向外连 control 领任务，不开入站端口；管理 issue 通道的无网 sandbox 容器和 PR 通道的一次性 QEMU/KVM VM。
+
+| 文档 | 说明 | EN |
+|---|---|---|
+| [`protocol.md`](./services/node/protocol.md) | 工作节点与 control 之间的 HTTP/JSON 协议：原则、消息表 N-01…，以及 sandbox 与 VM 怎样访问节点。 | — |
 
 ## services/protocol/
 
@@ -77,12 +87,13 @@
 
 ## architecture/
 
-长期有效的系统设计：架构、安全不变量、API 契约。改动系统边界、信任边界或数据之前先读这里。
+长期有效的系统设计：架构、安全不变量、后台 API 契约。改动系统边界、信任边界、接口或数据之前先读这里。
 
 | 文档 | 说明 | EN |
 |---|---|---|
+| [`API.md`](./architecture/API.md) | control 给管理后台的 HTTP 接口：路径、格式、会话与 CSRF、角色、校验、错误、幂等、分页、SSE 的约定，以及端点表 A-01…。 | — |
 | [`ARCHITECTURE.md`](./architecture/ARCHITECTURE.md) | 控制面加工作节点：control 单进程单写者、唯一 GitHub 写入方；节点只出站领任务，在无网 sandbox 或一次性 VM 里运行 omp。 | — |
-| [`SECURITY.md`](./architecture/SECURITY.md) | 任何实现都不能打破的安全约束清单：令牌怎么存、密钥在哪、执行环境里没有什么、谁能写 GitHub、规则从哪读。 | — |
+| [`SECURITY.md`](./architecture/SECURITY.md) | 信任边界、安全不变量（S-01…S-20）、每个密钥放在哪、谁能读、泄露后果、如何轮换，以及剩下的风险和验证办法。 | — |
 
 ## ops/
 
@@ -101,8 +112,16 @@
 | 文档 | 说明 | EN |
 |---|---|---|
 | [`0001-standalone-product.md`](./decisions/0001-standalone-product.md) | geek_bot 面向任何部署者，代码和文档不写死组织、仓库、主机、网段、网关和账号；env 模板只放占位符。 | — |
+| [`0002-github-identity.md`](./decisions/0002-github-identity.md) | 机器人以部署者绑定的那个 GitHub 账号本人的身份工作：OAuth App 用户令牌、device flow、scope `repo read:org`；令牌加密存放在 control，只有 publisher 和 GitHub 读取层能解密。 | — |
+| [`0003-single-writer-control.md`](./decisions/0003-single-writer-control.md) | control 是一个独占 SQLite 写入的 Fastify 进程，也是唯一写 GitHub 的地方；节点只主动连 control 领任务，不开入站端口，不持有 GitHub 凭据。 | — |
+| [`0004-execution-isolation.md`](./decisions/0004-execution-isolation.md) | 只读代码的 issue 任务在无网、根只读、不挂令牌的独立容器里跑；要执行代码的 PR 任务每个一台新的 QEMU/KVM 临时 VM，结束即删；方案以 #12 的实测为准，不通过时按退路改选。 | — |
+| [`0005-rules-from-base-branch.md`](./decisions/0005-rules-from-base-branch.md) | 仓库规则从 base 分支按 blob sha 读取，PR 改不了审查它自己的规则；影响写入的字段只取自结构化配置，能力开关以后台为基准、仓库只能调低；每条写入另带产品隐藏标记 `<!-- geek-bot v1 ... -->`，它和追踪记录头 `track v1` 是两回事。 | — |
+| [`0006-model-catalog-relay.md`](./decisions/0006-model-catalog-relay.md) | 可用模型只来自部署者挂载的只读 catalog 文件；模型网关密钥只在 control；sandbox 和 VM 用每任务令牌经节点、再经 control 中继访问模型；降级分 omp 进程内和 runner 外层两层。 | — |
+| [`0007-ghcr-pull-deploy.md`](./decisions/0007-ghcr-pull-deploy.md) | rc tag 构建一次镜像推到 ghcr，正式 tag 只给同一 digest 加别名；维护者获授权后在目标机运行仓库里的部署脚本，按 digest 拉取、过健康门、失败自动回滚；CI 不连目标机。 | — |
+| [`0008-sqlite-migrations-recovery.md`](./decisions/0008-sqlite-migrations-recovery.md) | control 的 SQLite 用编号的 SQL 迁移加 `PRAGMA user_version`，只扩不缩，让上一版镜像仍能读库；每条写入带隐藏标记，库丢了能从 GitHub 重建关键状态；备份每天自动恢复校验。 | — |
+| [`0009-tuffex-console.md`](./decisions/0009-tuffex-console.md) | console 是 Vue 3.5 + vue-router 4 + Tuffex 0.6.0 + Vite 的单页应用，版本钉死；构建产物打进 control 镜像，与后台 API 和 SSE 同源提供，不另起静态服务器。 | — |
 | [`0010-tracking-record-prefix.md`](./decisions/0010-tracking-record-prefix.md) | 本仓库 issue / PR 评论里的追踪记录统一用 `<!-- track v1 kind=… stage=… -->`，与产品内置的默认格式一致；产品代码里它只是可配置的默认值。 | — |
 
 ---
 
-共 28 篇文档（另有 4 篇英文版）。索引按目录分组，组内按文件名排序。
+共 41 篇文档（另有 4 篇英文版）。索引按目录分组，组内按文件名排序。

@@ -2,7 +2,7 @@
 
 > 本仓库 issue / PR 评论里的追踪记录统一用 `<!-- track v1 kind=… stage=… -->`，与产品内置的默认格式一致；产品代码里它只是可配置的默认值。
 
-状态：`accepted` · 更新：2026-09-25 · 适用：本仓库的 issue / PR 追踪记录、[TRACKING](../conventions/TRACKING.md)、`scripts/task.mjs`、`.github/workflows/issue-lifecycle.yml`，以及产品的默认记录格式
+状态：`accepted` · 更新：2026-09-26 · 适用：本仓库的 issue / PR 追踪记录、[TRACKING](../conventions/TRACKING.md)、`scripts/task.mjs`、`.github/workflows/issue-lifecycle.yml`，以及产品的默认记录格式
 
 ## 背景
 
@@ -16,7 +16,7 @@
 - 机器人写的记录可以在 `stage=` 之后追加可选属性 `actor=bot model=<id> effort=<档位> commit=<40 位 SHA>`，仍然是 v1；解析方必须忽略不认识的属性。
 - 本仓库的开发流程与产品内置的默认格式一致，用自己的仓库验证产品的默认格式。
 - 产品代码里这个记录头是可配置的默认值，不写死；目标仓库有自己的追踪格式时照它的格式写。
-- 产品每条写入另带一行隐藏标记 `<!-- geek-bot v1 ... -->`（ADR-0005，计划中，由 #2 写入）。这是产品标识，用于幂等和从 GitHub 重建状态，不属于追踪规范，两者不能互相替代。
+- 产品每条写入另带一行隐藏标记 `<!-- geek-bot v1 ... -->`（[ADR-0005](0005-rules-from-base-branch.md)）。这是产品标识，用于幂等和从 GitHub 重建状态，不属于追踪规范，两者不能互相替代。
 
 ## 替代方案
 
