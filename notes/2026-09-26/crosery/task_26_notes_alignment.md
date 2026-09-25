@@ -41,3 +41,22 @@
 - 做了什么：git commit：docs(docs): 规范只陈述本仓库的规则，去掉对别的项目的引用；提交前 pnpm verify、actionlint、node scripts/note.mjs check
 - 结果：pnpm verify 退出码 0（Tests 282 passed）；actionlint 无输出；执行记录检查通过
 - 下一步：主 agent 推送、开 PR，补记 PR 与审查
+
+## 03:15:37 +08:00 · 推送 · #26 · 推送 task/26/notes_alignment
+
+- 执行者：agent-claude-geek-bot-main（Claude Code，claude-opus-5-5）
+- 做了什么：git push -u origin task/26/notes_alignment（HEAD 55b57a5）
+- 结果：推送成功，pre-push 钩子通过
+
+## 03:15:37 +08:00 · PR · #26 · 开 PR #27 指向 stage
+
+- 执行者：agent-claude-geek-bot-main（Claude Code，claude-opus-5-5）
+- 做了什么：gh pr create --base stage；正文先经 node scripts/pr-contract.mjs check 本地核对
+- 结果：PR #27；本地 pr-contract 输出「PR 正文契约通过：分支 task/26/notes_alignment ↔ issue #26，9 个段落齐全，有验收证据。」
+
+## 03:15:37 +08:00 · 审查 · #26 · 主 agent 按 CODE-REVIEW 逐项复核 55b57a5，结论通过
+
+- 执行者：agent-claude-geek-bot-main（Claude Code，claude-opus-5-5）
+- 做了什么：对照移植代理的两个提交逐项核对 1–15 项；重跑 pnpm verify、actionlint、残留搜索
+- 结果：pnpm verify 退出码 0（Tests 282 passed）；残留搜索为空；审查结论写在 PR #27 正文「审查结论」段，结论：通过
+- 下一步：提交这三条记录，推送后看 CI 的执行记录检查
