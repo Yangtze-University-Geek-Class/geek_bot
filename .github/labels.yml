@@ -1,0 +1,65 @@
+# 仓库标签声明：issue 模板、ISSUES 规范和机器人默认规则引用的标签都在这里声明。
+#
+# 这个文件只是声明，不会自动同步到 GitHub。维护者先看要执行的命令：
+#   node scripts/labels.mjs                       # 或 pnpm labels:plan
+#   node scripts/labels.mjs --repo <owner>/<repo> # 显式指定仓库
+# 脚本只打印 gh label create ... --force 命令，不执行；确认后由仓库所有者执行。
+#
+# 写法（scripts/labels.mjs 只认这个子集）：顶层是列表，每项只有 name、color、description 三个键；
+# 值用双引号；color 是不带 # 的 6 位十六进制；description 不超过 100 个字符（GitHub 的上限）。
+# 新增标签后同步更新 issue 模板与 docs/conventions/ISSUES.md。
+# GitHub 默认的 documentation 与这里的 docs 重复，由所有者在 GitHub 上删掉 documentation。
+# 仓库里已经建好的标签沿用现有颜色（2026-09-25 gh label list），执行 --force 只会更新它们的说明。
+
+# 优先级
+- name: "P0"
+  color: "b60205"
+  description: "实例不可用、数据丢失或损坏风险、机器人越权写入、阻断全员开发"
+- name: "P1"
+  color: "d93f0b"
+  description: "主要功能受损但可绕过，或已明确排期"
+- name: "P2"
+  color: "fbca04"
+  description: "小缺陷、体验打磨、常规需求与优化"
+
+# 类型
+- name: "bug"
+  color: "d73a4a"
+  description: "缺陷：实际行为与文档或期望不符"
+- name: "enhancement"
+  color: "a2eeef"
+  description: "需求或改进"
+
+# 端（与 issue 模板的「端」下拉一致）
+- name: "control"
+  color: "1d76db"
+  description: "端：控制面 app/control（登录、仓库发现、调度、GitHub 写入）"
+- name: "console"
+  color: "c5def5"
+  description: "端：管理后台 app/console"
+- name: "node"
+  color: "0e8a16"
+  description: "端：工作节点代理 app/node（sandbox 容器与临时 VM）"
+- name: "runner"
+  color: "bfd4f2"
+  description: "端：在 sandbox 或 VM 里驱动 omp 的 app/runner"
+- name: "protocol"
+  color: "d4c5f9"
+  description: "端：共享类型与 JSON Schema packages/protocol"
+- name: "deploy"
+  color: "006b75"
+  description: "端：部署栈、env 模板与发布"
+- name: "docs"
+  color: "0075ca"
+  description: "端：规范与文档 docs/"
+- name: "tooling"
+  color: "5319e7"
+  description: "端：脚本、CI、模板、标签与工作区配置"
+
+# 机器人（产品默认规则使用；本仓库也用它们自测）
+- name: "bot:manual"
+  color: "c2e0c6"
+  description: "由人处理，机器人不接"
+- name: "bot:blocked"
+  color: "f9d0c4"
+  description: "机器人已追问，等回复（回复后由机器人去掉）"

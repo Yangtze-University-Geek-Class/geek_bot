@@ -1,0 +1,178 @@
+# geek_bot 持续集成（CI）
+#
+# 边界声明：
+#   * 只做机器验证——隔离安装、静态检查、测试、构建、工作流自检、分支不变量。
+#   * 机器 PASS 不等于人工试用；它不构成任何发版授权或验收记录。
+#   * 不部署任何实例（预发布实例和正式实例都不碰）：push stage / main 只跑本工作流。
+#     发版只由发布 tag 触发：vX.Y.Z-rc.N / vX.Y.Z → release.yml 构建并推送镜像（计划中，见 #7），
+#     部署由维护者获授权后在目标机拉取执行，CI 不部署。
+#   * 不创建/移动/删除 tag，不修改版本号，不写 approved 之类的放行状态。
+#   * 不挂载任何 secrets；顶层权限仅 contents: read；不使用 pull_request_target。
+#   * 不使用 continue-on-error 掩盖失败。
+#
+# 分支模型：长期分支只有 main（正式）与 stage（预发布）；task/<issue>/<slug> 从 stage 拉出、
+# PR 回 stage、合并后删除；dev/<username> 是个人分支，只验证、不部署，也不能作为进入 stage 的凭据。
+# 分支名不用 -，只用 / 分层（见 docs/conventions/BRANCHING.md）。
+# 硬不变量由 branch-guard 强制（scripts/check-branch-invariants.mjs）。
+#
+# 触发：pull_request → main/stage；push → main/stage；手工 dispatch。
+# PR 只能指向 stage：目标分支由 issue-lifecycle.yml 的 pr-base 核对（它监听 edited，改 base 后会重新判定；
+# 本工作流不监听 edited，改 PR 描述不该重跑整套构建）。main 只由维护者在预发布验收后本地快进
+# （docs/conventions/RELEASES.md「发布流程」第 7 步），不接受 PR。
+# 不对 task/**、dev/** 的 push 触发：task 分支的每次推送已由它的 PR（pull_request 事件）覆盖，
+# 再按 push 触发会让同一个提交跑两遍，私有仓库每月的 Actions 分钟数有限。
+# dev/** 个人分支需要机器验证时，本地跑 pnpm verify，或在该分支上手工 dispatch 本工作流
+# （前提是 ci.yml 已经进入默认分支 main：GitHub 只在工作流文件存在于默认分支时才接受 workflow_dispatch；
+# 第一次 stage→main 之前只能在本地跑 pnpm verify）。
+# push 只写了 branches、没写 tags：推送 tag 不会触发 CI（GitHub 对未声明的 ref 类型不运行）。
+#
+# 暂未包含、随后续 issue 加入的 job：
+#   * docker（镜像构建验证：只构建、不推送，断言健康检查与非 root）：随 #3（control 镜像）与 #7（发布与部署栈）加入；
+#   * env-contract（pnpm check:environments，env 模板 ↔ 环境契约 ↔ compose）：随 #7 加入。
+# 加入时同步写进 verify 的 needs 与汇总条件，否则它们变红也不会让 required check 变红。
+
+name: CI
+
+on:
+  pull_request:
+    branches: [main, stage]
+  push:
+    branches: [main, stage]
+  workflow_dispatch:
+
+# 最小权限：只读仓库内容。任何需要写权限的动作（tag、release、部署）都不属于本工作流。
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # 只对 pull_request 取消旧运行（PR 会频繁 force-push）。
+  # push 到长期分支的运行必须跑完，否则主线提交会缺少验证证据。
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # 显式声明 CI，供 core 及其余 job 的脚本使用（部分工具据此关闭交互与进度动画）。
+  CI: 'true'
+
+jobs:
+  # 分支不变量：stage 必须包含 main，main 不得领先 stage。
+  # 长期分支命名违规只告警（硬失败只针对上面两条不变量），见脚本内的分级说明。
+  # 不变量脚本只看 origin/main 与 origin/stage，不看 PR 指向哪里；PR 的目标分支由 issue-lifecycle.yml 的 pr-base 核对。
+  branch-guard:
+    name: branch-guard (main/stage 不变量)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 检出代码（取全部远端分支，不保留凭据）
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # 判定不变量需要 origin/main 与 origin/stage 两个远端 ref，浅克隆拿不到。
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: 判定分支不变量
+        shell: bash
+        run: node scripts/check-branch-invariants.mjs --require-remote-refs
+
+  # 核心工具链：Node 22（.nvmrc）+ pnpm 9.15.9（根 package.json packageManager）。
+  core:
+    name: core (Node 22 / pnpm 9)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # 不把 GITHUB_TOKEN 写进 .git/config：本 job 只读代码，不做任何 Git 写操作。
+          persist-credentials: false
+
+      # pnpm 必须先于 setup-node 安装：setup-node 的 pnpm 缓存需要调用 pnpm 解析 store 路径。
+      # 不传 version，由根 package.json 的 packageManager (pnpm@9.15.9) 决定，避免两处版本漂移。
+      - name: 安装 pnpm（读取根 packageManager）
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - name: 安装 Node（读取 .nvmrc）
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: 依赖安装（锁文件不可变）
+        shell: bash
+        run: pnpm install --frozen-lockfile
+
+      - name: 静态检查（pnpm check）
+        shell: bash
+        run: pnpm check
+
+      - name: 单元测试（pnpm test）
+        shell: bash
+        run: pnpm test
+
+      - name: 构建（pnpm build）
+        shell: bash
+        run: pnpm build
+
+  # 汇总 job：给 required check 用的单一名称（免费计划的私有仓库暂时配不了分支保护，
+  # 名称先固定下来，以后能配时直接引用）。
+  # if: always() 是必须的——若上游 job 被跳过或取消，required check 不能因“没跑”而算通过。
+  # 必须把 lint-workflows 也纳入 needs 与汇总条件：否则工作流自身的静态错误虽然让
+  # lint-workflows 变红，却不会让唯一的 required check 变红，等于没有强制力。
+  # 它只汇总机器结果，不代表人工验收，也不授权任何部署。
+  verify:
+    name: verify (required check)
+    needs: [branch-guard, core, lint-workflows]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 汇总上游 job 结果
+        shell: bash
+        env:
+          BRANCH_GUARD_RESULT: ${{ needs.branch-guard.result }}
+          CORE_RESULT: ${{ needs.core.result }}
+          LINT_WORKFLOWS_RESULT: ${{ needs.lint-workflows.result }}
+        run: |
+          set -u
+          echo "branch-guard=${BRANCH_GUARD_RESULT} core=${CORE_RESULT} lint-workflows=${LINT_WORKFLOWS_RESULT}"
+          if [ "$BRANCH_GUARD_RESULT" != "success" ] || [ "$CORE_RESULT" != "success" ] \
+             || [ "$LINT_WORKFLOWS_RESULT" != "success" ]; then
+            echo "机器验证未通过：failure / cancelled / skipped 一律视为失败。" >&2
+            exit 1
+          fi
+          echo "机器验证通过。这是自动化结论，不等于人工试用，也不是发版授权。"
+
+  # 工作流自检：把 CI 配置本身也纳入验证，避免 YAML/表达式/shell 错误只能靠线上试错发现。
+  lint-workflows:
+    name: lint-workflows (actionlint)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # 固定版本 + 固定 SHA-256。选择“直接下载二进制并核对内联摘要”而不是
+      # docker run rhysd/actionlint:<tag>：镜像 tag 可变，而这里的摘要一旦改动就必须走代码评审。
+      ACTIONLINT_VERSION: '1.7.12'
+      # actionlint_1.7.12_linux_amd64.tar.gz 的 SHA-256，取自上游 checksums.txt 并在本机复核过。
+      ACTIONLINT_SHA256: '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8'
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: 下载并校验 actionlint
+        shell: bash
+        run: |
+          set -u
+          url="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL --retry 3 --retry-all-errors -o actionlint.tar.gz "$url"
+          echo "${ACTIONLINT_SHA256}  actionlint.tar.gz" | sha256sum -c -
+          mkdir -p .tools/actionlint
+          tar -xzf actionlint.tar.gz -C .tools/actionlint actionlint
+          chmod +x .tools/actionlint/actionlint
+          rm -f actionlint.tar.gz
+          .tools/actionlint/actionlint --version
+
+      - name: 检查 .github/workflows 下的全部工作流
+        shell: bash
+        # ubuntu-latest 预装 shellcheck，actionlint 会顺带检查每个 run 块的 shell 代码。
+        run: .tools/actionlint/actionlint -no-color -oneline .github/workflows/*.yml

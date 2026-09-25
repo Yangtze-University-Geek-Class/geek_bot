@@ -1,0 +1,51 @@
+name: 维护 / 配置
+description: 调整仓库配置、CI、模板、标签或文档体系。提交前请先按 docs/conventions/ISSUES.md §1 查重。
+title: "tooling：<要改什么>"
+labels: ["P2", "tooling"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **提交前必做**：按 `docs/conventions/ISSUES.md` §1 完整读取开放 issue 列表与已关闭 issue，确认不是重复。
+
+        标题格式固定为 `<模块>：<要改什么>`。改脚本、CI、模板、标签写 `tooling`；只改规范文档时标题写 `docs：<要改什么>`，由维护者把标签 `tooling` 换成 `docs`（改标签需要 Triage 以上权限）。
+
+  - type: textarea
+    id: what
+    attributes:
+      label: 要改什么
+      description: 具体的配置项或模板文件。
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: 为什么
+      description: 当前的问题，以及改动后解决什么。
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 验收条件
+      description: 怎样算完成：要跑的命令、要看到的结果。
+    validations:
+      required: true
+
+  - type: textarea
+    id: implementation
+    attributes:
+      label: 实施
+      description: 开 issue 时留空。开 PR 的人回填分支名 `task/<issue>/<slug>` 和 PR 编号 `#n`；合并后补合并提交（docs/conventions/TRACKING.md §2）。
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 已按 docs/conventions/ISSUES.md §1 查重（含已关闭 issue）
+          required: true
