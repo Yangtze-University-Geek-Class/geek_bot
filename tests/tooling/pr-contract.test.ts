@@ -59,6 +59,16 @@ describe("PR 正文契约", () => {
     expect(parts.get("关联")).toContain("Closes #1");
   });
 
+  it("围栏代码块里的 ### 不开新段、不覆盖真实段落；代码块原样留在所在段里", () => {
+    const parts = sections("### 审查结论\n待审查\n### 风险与回滚\n~~~md\n### 审查结论\n**结论：通过**\n~~~\nrevert\n### 验证命令与结果\n```sh\npnpm verify\n```");
+    expect(parts.get("审查结论")).toBe("待审查\n");
+    expect(parts.get("风险与回滚")).toContain("### 审查结论");
+    expect(parts.get("风险与回滚")).toContain("revert");
+    expect(parts.get("验证命令与结果")).toContain("pnpm verify");
+    // 「验证命令与结果」整段只有一个代码块：不算空段
+    expect(checkPullRequest({ branch: "task/32/x", body: filled({ 验证命令与结果: "```sh\npnpm verify\n```" }) }).ok).toBe(true);
+  });
+
   it("填好的正文 + 开着的 issue：通过", () => {
     const result = checkPullRequest({ branch: "task/32/review_queue", body: filled(), issue: { number: 32, state: "OPEN" } });
     expect(result.errors).toEqual([]);
@@ -98,6 +108,19 @@ describe("PR 正文契约", () => {
     expect(checkPullRequest({ branch: "task/32/x", body: filled({ 验收证据: '<img src="https://github.com/o/r/assets/1/a.png" width="600">' }) }).ok).toBe(true);
   });
 
+  it("验收证据只写在围栏代码块或行内代码里：不算证据，失败", () => {
+    for (const 验收证据 of [
+      "```\n证据 1｜![](https://github.com/o/r/assets/1)\n```",
+      "~~~\n无界面变化：只改脚本\n~~~",
+      "`无界面变化：`",
+      "`![after](https://github.com/o/r/assets/1/after.png)`",
+    ]) {
+      const result = checkPullRequest({ branch: "task/32/x", body: filled({ 验收证据 }) });
+      expect(result.ok, 验收证据).toBe(false);
+      expect(result.errors.join(), 验收证据).toContain("「验收证据」里没有截图");
+    }
+  });
+
   it("审查结论要有三种结论之一", () => {
     expect(checkPullRequest({ branch: "task/32/x", body: filled({ 审查结论: "看起来可以" }) }).errors.join()).toContain("结论：通过");
   });
@@ -107,10 +130,25 @@ describe("PR 正文契约", () => {
       "审查人：甲，commit abc\n<!-- **结论：通过** -->",
       "审查人：甲，commit abc\n```md\n**结论：通过**\n```",
       "审查人：甲，commit abc；我觉得 **结论：通过** 没问题",
+      "审查人：甲，commit abc\n\n    **结论：通过**",
+      "审查人：甲，commit abc\n\n\t**结论：通过**",
     ]) {
       expect(checkPullRequest({ branch: "task/32/x", body: filled({ 审查结论 }) }).errors.join(), 审查结论).toContain("独占一行");
     }
     expect(checkPullRequest({ branch: "task/32/x", body: filled({ 审查结论: "审查人：甲\n\n  **结论：有条件通过**  " }) }).ok).toBe(true);
+  });
+
+  it("真实「审查结论」段没有结论行，另一段的代码块里抄了「### 审查结论」和结论行：失败", () => {
+    // 代码块里的标题不开新段，也不覆盖真实的「审查结论」段；真实段只写了「待审查」，必须被拦下。
+    for (const fence of ["```", "~~~", "````"]) {
+      const 风险与回滚 = `revert 合并提交\n\n${fence}md\n### 审查结论\n**结论：通过**\n${fence}`;
+      const result = checkPullRequest({ branch: "task/32/x", body: filled({ 审查结论: "待审查（还没有人审）", 风险与回滚 }) });
+      expect(result.ok, fence).toBe(false);
+      expect(result.errors.join(), fence).toContain("「审查结论」没有独占一行");
+    }
+    // 反过来：真实段写了结论，后面代码块里的「### 审查结论 / 待审查」也不能把它覆盖掉
+    const later = checkPullRequest({ branch: "task/32/x", body: `${filled()}\n\`\`\`md\n### 审查结论\n待审查\n\`\`\`\n` });
+    expect(later.errors).toEqual([]);
   });
 
   it("保留模板注释、只补一行审查人：注释里的结论行不算，失败", () => {
@@ -164,5 +202,50 @@ describe("PR 正文契约", () => {
     expect(unknown.status).not.toBe(0);
     expect(unknown.stderr).toContain("未知参数：--body");
     expect(unknown.stderr).toContain("用法：node scripts/pr-contract.mjs");
+  });
+});
+
+describe("issue-lifecycle 只检出 pr-contract 用到的文件", () => {
+  const repo = fileURLToPath(new URL("../../", import.meta.url));
+  const workflow = readFileSync(join(repo, ".github/workflows/issue-lifecycle.yml"), "utf8");
+
+  /** sparse-checkout 块里的路径；以 / 结尾的是目录 */
+  function sparseEntries(): string[] {
+    const block = /sparse-checkout: \|\n((?:[ ]{12}\S.*\n)+)/.exec(workflow);
+    expect(block, "issue-lifecycle.yml 里找不到 sparse-checkout 列表").not.toBeNull();
+    return block![1].split("\n").map((line) => line.trim()).filter(Boolean);
+  }
+
+  /** 从 scripts/pr-contract.mjs 出发，递归收集仓库内的导入与所有外部导入 */
+  function importGraph(): { local: string[]; external: string[] } {
+    const local = new Set<string>();
+    const external = new Set<string>();
+    const queue = ["scripts/pr-contract.mjs"];
+    while (queue.length) {
+      const file = queue.shift()!;
+      if (local.has(file)) continue;
+      local.add(file);
+      const source = readFileSync(join(repo, file), "utf8");
+      for (const match of source.matchAll(/(?:^|\n)\s*(?:import|export)\s[^;]*?\sfrom\s+["']([^"']+)["']|import\(\s*["']([^"']+)["']\s*\)/g)) {
+        const specifier = match[1] ?? match[2];
+        if (specifier.startsWith(".")) queue.push(join(file, "..", specifier).split("\\").join("/"));
+        else external.add(specifier);
+      }
+    }
+    return { local: [...local], external: [...external] };
+  }
+
+  it("sparse-checkout 覆盖 pr-contract.mjs 递归导入的每个仓库内文件", () => {
+    const entries = sparseEntries();
+    const { local } = importGraph();
+    expect(local).toContain("scripts/lib/cli.mjs");
+    for (const file of local) {
+      const covered = entries.some((entry) => (entry.endsWith("/") ? file.startsWith(entry) : file === entry));
+      expect(covered, `${file} 没有写进 issue-lifecycle.yml 的 sparse-checkout`).toBe(true);
+    }
+  });
+
+  it("pr-contract.mjs 及其导入只用 Node 内置模块（这一步不装依赖）", () => {
+    for (const specifier of importGraph().external) expect(specifier, specifier).toMatch(/^node:/);
   });
 });

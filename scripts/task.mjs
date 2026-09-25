@@ -81,9 +81,12 @@ export function isInside(cwd, worktree) {
 
 /**
  * 开工记录（docs/conventions/TRACKING.md 的 track v1 记录头）。纯函数，便于测试。
- * @param {{ issue: number | string, branch: string, base: string, worktree: string }} input worktree 是相对主工作区的路径
+ * 评论里提到提交一律写完整 SHA（TRACKING §2），所以 base 必须是 40 位，短 SHA 直接拒绝。
+ * @param {{ issue: number | string, branch: string, base: string, worktree: string }} input
+ *   base 是 worktree 拉出时 origin/stage 的完整 SHA；worktree 是相对主工作区的路径
  */
 export function startNote({ issue, branch, base, worktree }) {
+  if (!/^[0-9a-f]{40}$/.test(String(base))) throw new Error(`开工记录要写基线提交的完整 40 位 SHA（docs/conventions/TRACKING.md §2），收到 ${base}`);
   return [
     "<!-- track v1 kind=progress stage=dev -->",
     `**进展**｜开工：分支 \`${branch}\`，独立 worktree`,
@@ -148,12 +151,13 @@ function start(issue, slug) {
   if (existing) throw new Error(`issue #${issue} 已经有 worktree：${existing.path}（分支 ${existing.branch}）。`);
   run("git", ["-C", root, "fetch", "--quiet", "origin", "stage"]);
   run("git", ["-C", root, "worktree", "add", "--quiet", "-b", branch, path, "origin/stage"]);
-  const base = run("git", ["-C", path, "rev-parse", "--short=12", "HEAD"]);
+  // issue 上的记录写完整 SHA（TRACKING §2）；终端里只显示前 12 位，方便看。
+  const base = run("git", ["-C", path, "rev-parse", "HEAD"]);
   const note = startNote({ issue, branch, base, worktree: relative(root, path) });
   const commented = gh(["issue", "comment", String(issue), "--body", note]) !== null;
   console.log(`已建 task：${branch}`);
   console.log(`worktree：${path}`);
-  console.log(`基于：origin/stage ${base}`);
+  console.log(`基于：origin/stage ${base.slice(0, 12)}`);
   console.log(commented ? `已在 issue #${issue} 留开工记录` : `没能在 issue #${issue} 留言（gh 不可用），请手工补一条 progress 记录`);
   console.log(`下一步：cd ${path} && pnpm install --frozen-lockfile`);
 }

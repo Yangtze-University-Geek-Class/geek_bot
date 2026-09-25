@@ -2,20 +2,27 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { checkProject, specifiers } from "../../scripts/check-boundaries.mjs";
+import { checkProject, specifiers, workspaceProblems } from "../../scripts/check-boundaries.mjs";
 
 const roots: string[] = [];
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-/** 五个包的 package.json（包名与仓库一致），不装依赖：包名导入按 package.json 登记的目录判定。 */
+/** 每个包都有的两个脚本（与仓库一致）。 */
+const SCRIPTS = { typecheck: "tsc -p tsconfig.json --noEmit", build: "tsc -p tsconfig.json" };
+const manifest = (name: string, scripts: Record<string, string> = SCRIPTS) => JSON.stringify({ name, scripts });
+/** 五个包逐行登记（与仓库的 pnpm-workspace.yaml 一致）。 */
+const WORKSPACE = "packages:\n  - app/control\n  - app/console\n  - app/node\n  - app/runner\n  - packages/protocol\n";
+
+/** 五个包的 package.json（包名与仓库一致）与工作区登记，不装依赖：包名导入按 package.json 登记的目录判定。 */
 const MANIFESTS: Record<string, string> = {
-  "app/control/package.json": JSON.stringify({ name: "@geek-bot/control" }),
-  "app/console/package.json": JSON.stringify({ name: "@geek-bot/console" }),
-  "app/node/package.json": JSON.stringify({ name: "@geek-bot/node" }),
-  "app/runner/package.json": JSON.stringify({ name: "@geek-bot/runner" }),
-  "packages/protocol/package.json": JSON.stringify({ name: "@geek-bot/protocol" }),
+  "pnpm-workspace.yaml": WORKSPACE,
+  "app/control/package.json": manifest("@geek-bot/control"),
+  "app/console/package.json": manifest("@geek-bot/console"),
+  "app/node/package.json": manifest("@geek-bot/node"),
+  "app/runner/package.json": manifest("@geek-bot/runner"),
+  "packages/protocol/package.json": manifest("@geek-bot/protocol"),
   "packages/protocol/src/index.ts": "export type Channel = 'issue' | 'pr';\nexport const EXECUTORS = ['sandbox', 'vm'] as const;\n",
 };
 
@@ -178,5 +185,47 @@ describe("五个包的边界", () => {
   it("app/ 下出现没登记边界的新包：失败", () => {
     const found = violations({ "app/foo/src/index.ts": `export const foo = 1;` });
     expect(found.join("\n")).toContain("app/foo：没有登记边界的新包");
+  });
+});
+
+describe("工作区登记与包脚本", () => {
+  it("仓库自己的 pnpm-workspace.yaml 与五个包的脚本：通过", () => {
+    expect(workspaceProblems()).toEqual([]);
+    expect(workspaceProblems(fixture({}))).toEqual([]);
+  });
+
+  it("包缺 typecheck 脚本（例如写成了 type-check）：失败，并说出缺哪个", () => {
+    const found = violations({ "app/console/package.json": manifest("@geek-bot/console", { "type-check": "vue-tsc --noEmit", build: "vite build" }) });
+    expect(found).toHaveLength(1);
+    expect(found[0]).toContain("app/console/package.json：scripts 缺少 typecheck");
+  });
+
+  it("包缺 build 脚本、或脚本是空串：失败", () => {
+    const found = violations({
+      "app/runner/package.json": manifest("@geek-bot/runner", { typecheck: "tsc -p tsconfig.json --noEmit" }),
+      "packages/protocol/package.json": manifest("@geek-bot/protocol", { typecheck: " ", build: "tsc -p tsconfig.json" }),
+    }).join("\n");
+    expect(found).toContain("app/runner/package.json：scripts 缺少 build");
+    expect(found).toContain("packages/protocol/package.json：scripts 缺少 typecheck");
+  });
+
+  it("已登记边界的包没写进 pnpm-workspace.yaml：失败", () => {
+    const found = violations({ "pnpm-workspace.yaml": WORKSPACE.replace("  - app/node\n", "") });
+    expect(found).toHaveLength(1);
+    expect(found[0]).toContain("app/node：没有写进 pnpm-workspace.yaml");
+  });
+
+  it("pnpm-workspace.yaml 缺失、用通配、或登记了没划定边界的目录：失败", () => {
+    expect(violations({ "pnpm-workspace.yaml": "" }).join("\n")).toContain("没有 packages 列表");
+    const glob = violations({ "pnpm-workspace.yaml": "packages:\n  - 'app/*'\n  - packages/protocol\n" }).join("\n");
+    expect(glob).toContain("不支持通配或排除写法（app/*）");
+    expect(glob).toContain("app/control：没有写进 pnpm-workspace.yaml");
+    const extra = violations({ "pnpm-workspace.yaml": `${WORKSPACE}  - tools/gen\n` }).join("\n");
+    expect(extra).toContain("pnpm-workspace.yaml 登记了 tools/gen，但 scripts/check-boundaries.mjs 的 PACKAGES 里没有它");
+  });
+
+  it("引号、注释与不缩进的列表项照样认", () => {
+    const yaml = "# 工作区\npackages:\n- 'app/control' # 控制面\n- \"app/console\"\n- ./app/node/\n- app/runner\n- packages/protocol\n";
+    expect(violations({ "pnpm-workspace.yaml": yaml })).toEqual([]);
   });
 });

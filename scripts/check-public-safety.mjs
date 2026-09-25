@@ -15,8 +15,10 @@
  * 规则：
  *   1. 私网 IPv4（10/8、172.16/12、192.168/16）、CGNAT（100.64/10）、链路本地（169.254/16）；
  *   2. 主机名里带 `.mesh.` 这一段（组网内部主机名）；
- *   3. 被禁 token：文本转小写后按 [a-z0-9]+ 切成 token（驼峰写法另按大小写边界再切一次），逐个算 SHA-256，
- *      与 scripts/public-safety-denylist.json 比对；另把每个 IPv4 字面量整体算 SHA-256 比对（用于个别公网地址）。
+ *   3. 被禁 token：文本转小写后按 [a-z0-9]+ 切成 token；另按驼峰、全大写缩写接小写、字母与数字相连这几种边界
+ *      再切一次（fooBar、ABCbot、host01）。每个 token 本身，以及它长度不小于 4 的每个前缀和后缀，逐个算 SHA-256，
+ *      与 scripts/public-safety-denylist.json 比对，这样被禁词和别的词连写（<词>bot、<词>university）也能拦住；
+ *      夹在中间的连写拦不住。另把每个 IPv4 字面量整体算 SHA-256 比对（用于个别公网地址）。
  *      清单里只有哈希，没有明文；用 --hash 生成新条目（只接受单个 [a-z0-9]+ token 或 IPv4，其它输入永远匹配不上，直接拒绝）。
  *   4. 放行清单 scripts/public-safety-allow.json：逐条写 { path, value, reason }，不许有别的字段。value 对规则 1、2
  *      是命中的原文，对规则 3 是命中的 SHA-256。放行项必须写明理由；没有命中的放行项也算失败（清单要跟着文件一起清理）。
@@ -105,12 +107,31 @@ export function classifyIPv4(octets) {
   return null;
 }
 
-/** 一行文本里的 token：整行小写后按 [a-z0-9]+ 切；驼峰写法（fooBar）另按大小写边界再切一次。 */
+/**
+ * 一行文本里的 token：整行小写后按 [a-z0-9]+ 切；再按驼峰（fooBar）、全大写缩写接小写（ABCbot、ABCBot）、
+ * 字母与数字相连（host01、2026abc）这几种边界补切一次。
+ */
 export function tokensOf(line) {
   const tokens = new Set(line.toLowerCase().match(/[a-z0-9]+/g) ?? []);
-  const camel = line.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2");
-  for (const token of camel.toLowerCase().match(/[a-z0-9]+/g) ?? []) tokens.add(token);
+  const digits = (text) => text.replace(/([A-Za-z])([0-9])/g, "$1 $2").replace(/([0-9])([A-Za-z])/g, "$1 $2");
+  const lowerStart = line.replace(/([a-z0-9])([A-Z])/g, "$1 $2");
+  // 全大写串后面接小写有两种读法：ACMEBot 是 ACME + Bot，ACMEbot 是 ACME + bot。两种都切，token 取并集。
+  const variants = [lowerStart.replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2"), lowerStart.replace(/([A-Z]{2,})([a-z])/g, "$1 $2")];
+  for (const variant of variants) for (const token of digits(variant).toLowerCase().match(/[a-z0-9]+/g) ?? []) tokens.add(token);
   return tokens;
+}
+
+/** 连写检测的最短片段：被禁词里最短的是 4 个字符。 */
+export const MIN_AFFIX = 4;
+
+/** 一个 token 要比对的候选：它本身，以及长度不小于 MIN_AFFIX 的每个前缀和后缀。 */
+export function candidatesOf(token) {
+  const out = new Set([token]);
+  for (let length = MIN_AFFIX; length < token.length; length++) {
+    out.add(token.slice(0, length));
+    out.add(token.slice(token.length - length));
+  }
+  return out;
 }
 
 function maskIPv4(value) {
@@ -150,10 +171,14 @@ export function scanText(file, text, { denylist, hashCache = new Map() }) {
     for (const match of content.matchAll(MESH_HOST_RE)) {
       findings.push({ file, line, rule: "组网主机名（含 .mesh. 段）", value: match[0], shown: "*.mesh.*" });
     }
+    const hits = new Set();
     for (const token of tokensOf(content)) {
-      const digest = hashed(token);
-      if (denylist.has(digest)) findings.push({ file, line, rule: "被禁 token（哈希命中）", value: digest, shown: `sha256:${digest.slice(0, 12)}` });
+      for (const candidate of candidatesOf(token)) {
+        const digest = hashed(candidate);
+        if (denylist.has(digest)) hits.add(digest);
+      }
     }
+    for (const digest of hits) findings.push({ file, line, rule: "被禁 token（哈希命中）", value: digest, shown: `sha256:${digest.slice(0, 12)}` });
   });
   return findings;
 }

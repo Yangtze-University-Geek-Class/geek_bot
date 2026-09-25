@@ -85,9 +85,9 @@ body:
     attributes:
       label: 环境
       description: |
-        必填：分支与完整 commit SHA、实例版本（正式 X.Y.Z / 预发布 X.Y.Z-rc.N@sha12）、部署方式（本机 / 预发布实例 / 正式实例，Docker 栈或其它）。只写环境名，不写实例的内部地址或主机名。
-        按问题类型补充（docs/conventions/ISSUES.md §3）：涉及对 GitHub 的读写，写机器人账号在目标仓库的权限（Read / Triage / Write / Maintain / Admin），目标 issue 或 PR 写成 `<org>/<repo>#n` 这类占位，不贴私有仓库的内容；涉及某次任务，写任务 ID；涉及 PR 通道或 VM，写执行节点是否有 KVM；涉及模型输出，写所用模型与思考档位。与问题无关的不写。
-      placeholder: stage @ <完整 SHA>，预发布 0.1.0-rc.1@a1b2c3d4e5f6，预发布实例 Docker 栈；机器人在目标仓库是 Write；任务 ID 取自后台任务页；节点有 KVM；模型 <catalog id>，档位 medium
+        必填：分支与完整 commit SHA、实例版本（正式 X.Y.Z / 预发布 X.Y.Z-rc.N@sha12；本机开发写分支与 SHA 即可）、部署方式（本机 / 预发布实例 / 正式实例，Docker 栈或其它）、control 与出问题的 node 各自的版本（节点单独升级，版本可能与 control 不同）。只写环境名，不写实例的内部地址或主机名。
+        按问题类型补充（docs/conventions/ISSUES.md §3）：涉及对 GitHub 的读写，写机器人账号在目标仓库的权限（Read / Triage / Write / Maintain / Admin），目标 issue 或 PR 写成 `<org>/<repo>#n` 这类占位，不贴私有仓库的内容；涉及某次任务，写任务 ID；涉及 PR 通道的 VM、issue 通道的 sandbox 或节点本身，写执行节点的 CPU 核数、内存、是否有 `/dev/kvm`、节点版本；涉及模型输出，写所用模型与思考档位。与问题无关的不写。
+      placeholder: stage @ <完整 SHA>，预发布实例 Docker 栈，control 0.1.0-rc.1@a1b2c3d4e5f6，node 0.1.0-rc.1@a1b2c3d4e5f6（2 核 / 4 GiB，有 /dev/kvm）；机器人在目标仓库是 Write；任务 ID 取自后台任务页；模型 <catalog id>，档位 medium
     validations:
       required: true
 

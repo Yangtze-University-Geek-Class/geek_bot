@@ -36,13 +36,13 @@ export function projectName(root = ROOT) {
 }
 
 export function inside(root, path) {
-  if (isAbsolute(path) || path.includes('\\') || path.split('/').includes('..')) throw new Error(`Unsafe relative path: ${path}`);
+  if (isAbsolute(path) || path.includes('\\') || path.split('/').includes('..')) throw new Error(`不安全的相对路径：${path}`);
   const target = resolve(root, path);
-  if (!target.startsWith(`${resolve(root)}${sep}`)) throw new Error(`Path escapes root: ${path}`);
+  if (!target.startsWith(`${resolve(root)}${sep}`)) throw new Error(`路径跑出了文档库根目录：${path}`);
   let current = resolve(root);
   for (const part of path.split('/')) {
     current = join(current, part);
-    if (existsSync(current) && lstatSync(current).isSymbolicLink()) throw new Error(`Symlink is not allowed: ${path}`);
+    if (existsSync(current) && lstatSync(current).isSymbolicLink()) throw new Error(`路径里不允许有符号链接：${path}`);
   }
   return target;
 }
@@ -140,44 +140,44 @@ function listEntries(root, dir) {
 
 export function verifyLibrary(root = LIBRARY) {
   const manifest = JSON.parse(read(inside(root, 'manifest.json')));
-  if (manifest.schemaVersion !== 1 || !/^[a-f0-9]{40}$/.test(manifest.commit)) throw new Error('Invalid snapshot manifest');
-  if (!Array.isArray(manifest.files) || !manifest.files.length) throw new Error('Empty snapshot manifest');
+  if (manifest.schemaVersion !== 1 || !/^[a-f0-9]{40}$/.test(manifest.commit)) throw new Error('快照清单格式不对（schemaVersion 或 commit）');
+  if (!Array.isArray(manifest.files) || !manifest.files.length) throw new Error('快照清单里没有文件');
   const failures = [];
   const seen = new Set();
   for (const item of manifest.files) {
     const path = inside(root, item.path);
-    if (seen.has(item.path)) failures.push(`duplicate ${item.path}`);
+    if (seen.has(item.path)) failures.push(`重复登记 ${item.path}`);
     seen.add(item.path);
-    if (!existsSync(path)) failures.push(`missing ${item.path}`);
-    else if (sha256(readFileSync(path)) !== item.sha256) failures.push(`modified ${item.path}`);
+    if (!existsSync(path)) failures.push(`缺少文件 ${item.path}`);
+    else if (sha256(readFileSync(path)) !== item.sha256) failures.push(`内容与哈希不符 ${item.path}`);
   }
-  for (const dir of MANAGED_DIRS) for (const path of listEntries(root, dir)) if (!seen.has(path)) failures.push(`unlisted ${path}`);
+  for (const dir of MANAGED_DIRS) for (const path of listEntries(root, dir)) if (!seen.has(path)) failures.push(`没有登记在清单里 ${path}`);
   const catalog = JSON.parse(read(inside(root, 'catalog.json')));
-  if (catalog.commit !== manifest.commit || catalog.pages.length !== manifest.counts.pages) failures.push('catalog/version/count mismatch');
+  if (catalog.commit !== manifest.commit || catalog.pages.length !== manifest.counts.pages) failures.push('catalog 的提交或页数与 manifest 不一致');
   for (const page of catalog.pages) {
-    for (const path of [page.path, page.raw, ...page.examples.map(item => item.path), ...page.sources]) if (!seen.has(path)) failures.push(`untracked reference ${page.slug}: ${path}`);
+    for (const path of [page.path, page.raw, ...page.examples.map(item => item.path), ...page.sources]) if (!seen.has(path)) failures.push(`页面 ${page.slug} 引用了没登记的文件：${path}`);
     const content = read(inside(root, page.path));
-    if (JSON.stringify(sectionRanges(content)) !== JSON.stringify(page.sections)) failures.push(`stale sections ${page.slug}`);
-    if (/^:{2,}(?:TuffDemoWrapper|TuffCodeBlock|TuffPropsTable|DocApiTable)/m.test(content)) failures.push(`unconverted MDC ${page.slug}`);
+    if (JSON.stringify(sectionRanges(content)) !== JSON.stringify(page.sections)) failures.push(`页面 ${page.slug} 的章节索引过期`);
+    if (/^:{2,}(?:TuffDemoWrapper|TuffCodeBlock|TuffPropsTable|DocApiTable)/m.test(content)) failures.push(`页面 ${page.slug} 还有没转换的 MDC 组件`);
   }
   if (failures.length) throw new Error(failures.slice(0, 30).join('\n'));
   return { ...manifest.counts, files: manifest.files.length, commit: manifest.commit, packageVersion: manifest.packages.tuffex.version };
 }
 
 function syncLibrary(source, expectedCommit) {
-  if (!source) throw new Error('sync requires --source with an isolated upstream checkout');
-  if (!/^[a-f0-9]{40}$/.test(expectedCommit ?? '')) throw new Error('sync requires --commit with the exact 40-character upstream commit');
+  if (!source) throw new Error('sync 需要 --source 指向一份单独的上游 checkout');
+  if (!/^[a-f0-9]{40}$/.test(expectedCommit ?? '')) throw new Error('sync 需要 --commit 写上游的完整 40 位提交');
   source = resolve(source);
   const git = (...args) => execFileSync('git', ['-C', source, ...args], { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 }).trim();
   const commit = git('rev-parse', 'HEAD');
-  if (commit !== expectedCommit) throw new Error('Upstream HEAD differs from --commit; refusing a mixed snapshot');
+  if (commit !== expectedCommit) throw new Error('上游 HEAD 与 --commit 不一致，拒绝生成混合快照');
   const priorManifest = existsSync(join(LIBRARY, 'manifest.json')) ? JSON.parse(read(join(LIBRARY, 'manifest.json'))) : null;
   const snapshotDate = priorManifest?.commit === commit ? priorManifest.snapshotDate : new Date().toISOString().slice(0, 10);
-  if (git('status', '--porcelain', '--untracked-files=no')) throw new Error('Upstream checkout has tracked modifications');
+  if (git('status', '--porcelain', '--untracked-files=no')) throw new Error('上游 checkout 有未提交的改动');
   const paths = git('ls-tree', '-r', '--name-only', commit).split('\n');
   const docPaths = paths.filter(path => path.startsWith(`${DOC_ROOT}/`) && path.endsWith('.zh.mdc'));
   docPaths.push('apps/nexus/content/docs/dev/getting-started/tuffex-composition.zh.mdc', 'apps/nexus/content/docs/dev/tools/tuffex.zh.mdc');
-  if (docPaths.length < 50) throw new Error('Unexpected or incomplete documentation tree');
+  if (docPaths.length < 50) throw new Error('上游文档目录不完整或结构不对');
   const map = new Map(docPaths.map(path => [path, path.startsWith(`${DOC_ROOT}/`) ? path.split('/').at(-1).replace('.zh.mdc', '') : path.includes('/getting-started/') ? 'tuffex-composition' : 'tuffex-tooling']));
   const artifact = new Map();
   const snapshots = new Map();
@@ -185,7 +185,7 @@ function syncLibrary(source, expectedCommit) {
   const addSnapshot = path => {
     if (snapshots.has(path)) return snapshotPath(path);
     const content = readFileSync(inside(source, path));
-    if (content.length > 2_000_000) throw new Error(`Unexpected source size: ${path}`);
+    if (content.length > 2_000_000) throw new Error(`源文件大小异常：${path}`);
     artifact.set(snapshotPath(path), content);
     snapshots.set(path, { upstreamPath: path, license: licenseFor(path) });
     return snapshotPath(path);
@@ -236,7 +236,7 @@ function syncLibrary(source, expectedCommit) {
   if (existsSync(existingManifest)) { verifyLibrary(); previous = JSON.parse(read(existingManifest)).files; }
   // Preflight the entire output before mutating: do not overwrite human or unknown files.
   const owned = new Set(previous.map(item => item.path));
-  for (const path of artifact.keys()) if (existsSync(inside(LIBRARY, path)) && !owned.has(path)) throw new Error(`Unmanaged destination exists: ${path}`);
+  for (const path of artifact.keys()) if (existsSync(inside(LIBRARY, path)) && !owned.has(path)) throw new Error(`目标位置已有不受管理的文件：${path}`);
   const files = [...artifact.entries()].sort(([a], [b]) => a.localeCompare(b, 'en')).map(([path, content]) => ({ path, sha256: sha256(content), bytes: Buffer.byteLength(content), ...(path.startsWith('snapshot/') ? snapshots.get(path.slice(9, -4)) : { generated: true }) }));
   for (const [path, content] of artifact) writeAtomic(LIBRARY, path, content);
   for (const file of previous) if (!artifact.has(file.path)) unlinkSync(inside(LIBRARY, file.path));
@@ -252,7 +252,7 @@ function syncLibrary(source, expectedCommit) {
  */
 export function searchCatalog(catalog, query, limit = 8, loadContent = null) {
   const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
-  if (!tokens.length) throw new Error('A non-empty search query is required');
+  if (!tokens.length) throw new Error('检索词不能为空');
   const compact = value => value.toLowerCase().replace(/^tx/, '').replace(/[-_]/g, '');
   return catalog.pages.map(page => {
     const name = `${page.slug} ${page.title} ${page.symbols.join(' ')}`.toLowerCase();
@@ -287,34 +287,34 @@ export function main(args) {
   if (!Object.hasOwn(COMMANDS, command)) throw new UsageError(`未知子命令：${command}`);
   const { flags, values, positionals } = parseFlags(rest, COMMANDS[command]);
   if (command === 'sync') return syncLibrary(values['--source'], values['--commit']);
-  if (command === 'check') return console.log('Tuffex reference integrity passed:', json(verifyLibrary()));
+  if (command === 'check') return console.log('Tuffex 参考文档完整性通过：', json(verifyLibrary()));
   const catalog = JSON.parse(read(join(LIBRARY, 'catalog.json')));
   if (command === 'search') {
     const query = positionals.join(' ');
     if (!query.trim()) throw new UsageError('search 需要检索词');
     const limit = values['--limit'] === undefined ? 8 : Number(values['--limit']);
-    if (!Number.isInteger(limit) || limit < 1 || limit > 30) throw new Error('limit must be 1..30');
+    if (!Number.isInteger(limit) || limit < 1 || limit > 30) throw new Error('--limit 只能是 1 到 30 的整数');
     const results = searchCatalog(catalog, query, limit, flags.has('--text') ? page => read(inside(LIBRARY, page.path)) : null);
     if (flags.has('--json')) console.log(json(results));
     else for (const result of results) console.log(`${result.slug} | ${result.title} | ${result.suite ?? 'guide'}\n  ${result.path}\n  ${result.description}${result.match ? `\n  L${result.match.line}: ${result.match.text}` : ''}\n`);
-    if (!results.length) { console.error('No matching reference; do not invent a component/API.'); process.exitCode = 2; }
+    if (!results.length) { console.error('没有匹配的参考文档；不要自己编组件或 API。'); process.exitCode = 2; }
     return;
   }
   if (!positionals.length) throw new UsageError('read 需要页面 slug');
   const page = catalog.pages.find(item => item.slug === positionals[0]);
-  if (!page) throw new Error('Unknown page slug; run search first');
+  if (!page) throw new Error('没有这个页面 slug，先用 search 查');
   const max = values['--max-lines'] === undefined ? 180 : Number(values['--max-lines']);
-  if (!Number.isInteger(max) || max < 1 || max > 1200) throw new Error('max-lines must be 1..1200');
+  if (!Number.isInteger(max) || max < 1 || max > 1200) throw new Error('--max-lines 只能是 1 到 1200 的整数');
   const wanted = values['--section'];
   const section = wanted === undefined ? null : page.sections.find(item => item.title.toLowerCase() === wanted.toLowerCase());
-  if (wanted !== undefined && !section) throw new Error('Unknown section; inspect search --json for exact headings');
+  if (wanted !== undefined && !section) throw new Error('没有这个章节，用 search --json 查准确的章节名');
   const lines = read(inside(LIBRARY, page.path)).split('\n');
   const start = section?.startLine ?? (values['--from'] === undefined ? 1 : Number(values['--from']));
-  if (!Number.isInteger(start) || start < 1 || start > lines.length) throw new Error('Invalid starting line');
+  if (!Number.isInteger(start) || start < 1 || start > lines.length) throw new Error('起始行超出范围');
   const end = Math.min(section?.endLine ?? lines.length, start + max - 1);
-  console.log(`${page.path} | commit ${catalog.commit} | lines ${start}-${end}/${lines.length}`);
+  console.log(`${page.path} | 提交 ${catalog.commit} | 第 ${start}-${end} 行，共 ${lines.length} 行`);
   console.log(lines.slice(start - 1, end).map((line, index) => `${start + index} | ${line}`).join('\n'));
-  if (end < (section?.endLine ?? lines.length)) console.log(`\nCONTINUE: read ${page.slug} --from ${end + 1} --max-lines ${max}`);
+  if (end < (section?.endLine ?? lines.length)) console.log(`\n接着读：read ${page.slug} --from ${end + 1} --max-lines ${max}`);
 }
 
 // 入口判定走 isDirectRun（比较 realpath）：经符号链接路径启动时 check 不会静默退出 0。

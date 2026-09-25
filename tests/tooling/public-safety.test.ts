@@ -25,6 +25,8 @@ import {
   scanText,
   sha256,
   tokensOf,
+  candidatesOf,
+  MIN_AFFIX,
 } from "../../scripts/check-public-safety.mjs";
 
 const script = fileURLToPath(new URL("../../scripts/check-public-safety.mjs", import.meta.url));
@@ -126,7 +128,22 @@ describe("规则 3：被禁 token 与 IPv4 的哈希", () => {
       expect(found[0].shown).not.toContain(FAKE_ORG);
     }
     expect(scan("acme corp")).toEqual([]);
-    expect(scan("acmecorporation")).toEqual([]);
+  });
+
+  it("被禁词和别的词、数字连写时按前缀、后缀和字母数字边界命中", () => {
+    const upper = FAKE_ORG.toUpperCase();
+    for (const text of [`${FAKE_ORG}oration`, `${FAKE_ORG}bot`, `my${FAKE_ORG}`, `${FAKE_ORG}01`, `2026${FAKE_ORG}`, `${upper}bot`, `${upper}2026`, `host-${FAKE_ORG}9`]) {
+      const found = scan(text);
+      expect(found, text).toHaveLength(1);
+      expect(found[0].value, text).toBe(hashTerm(FAKE_ORG));
+    }
+  });
+
+  it("连写检测按前缀和后缀取片段，片段至少 4 个字符", () => {
+    expect([...candidatesOf("abcdef")].sort()).toEqual(["abcd", "abcde", "abcdef", "bcdef", "cdef"]);
+    expect([...candidatesOf("abc")]).toEqual(["abc"]);
+    expect(MIN_AFFIX).toBe(4);
+    expect([...tokensOf("ABCbot host01 2026abc")]).toEqual(expect.arrayContaining(["abc", "bot", "host", "01", "2026"]));
   });
 
   it("被禁的公网 IPv4 按整体哈希命中", () => {

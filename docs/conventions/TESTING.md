@@ -31,10 +31,10 @@
 |---|---|---|
 | 入口判断（`scripts/lib/cli.mjs` 的 `isDirectRun`） | `tests/tooling/cli-entry.test.ts` | 经符号链接路径启动 `task.mjs`、`pr-contract.mjs`（不带参数）或 `check-boundaries.mjs`（带不认识的参数）时静默退出 0；任一 CLI 带不认识的参数时不把用法写到 stderr、或以 0 退出 |
 | 服务文档对齐（`check-docs`） | `tests/tooling/docs-check.test.ts` | 新增 `app/foo` 或 `packages/<name>` 但缺少 `docs/services/<name>/README.md`；缺 `AGENTS.md`、`README.md` 或 `docs/README.md`；技能目录是复制品而不是符号链接，或链接指向别处、悬空；相对链接指向不存在的文件；`docs/history` 下的文档没标 `historical` |
-| 模块边界（`check-boundaries`） | `tests/tooling/boundaries.test.ts` | `app/control` 导入 `app/node`；console、node 与 control 互相导入；protocol 导入任何 app；runner 导入 npm 包或在运行时导入 protocol；本地导入或已声明别名解析失败；非字面量的动态导入；`app/` 下出现没登记边界的新包；`.d.ts` 声明文件跨包导入，runner 的 `.d.ts` 导入 npm 包；经点开头目录里的文件转手 re-export 另一个包 |
-| 公开安全（`check-public-safety`） | `tests/tooling/public-safety.test.ts` | 已跟踪或未跟踪（未被忽略）的文件里出现私网、CGNAT、链路本地地址，组网（mesh）主机名，或登记过哈希的被禁 token 与 IPv4；文件名、目录名或符号链接目标里含被禁词；放行清单的 `reason`、`path` 含被禁词或私网地址；快照目录（`reference/`、`snapshot/`）里没登记进清单的文件；放行项缺路径、原文或理由；被禁清单格式不对；`--hash` 收到多个 token、汉字或越界 IPv4（必须以非 0 退出，不打印哈希） |
+| 模块边界（`check-boundaries`） | `tests/tooling/boundaries.test.ts` | `app/control` 导入 `app/node`；console、node 与 control 互相导入；protocol 导入任何 app；`app/runner/src` 导入 npm 包或在运行时导入 protocol；本地导入或已声明别名解析失败；非字面量的动态导入；`app/` 下出现没登记边界的新包；`.d.ts` 声明文件跨包导入，runner 的 `.d.ts` 导入 npm 包；经点开头目录里的文件转手 re-export 另一个包 |
+| 公开安全（`check-public-safety`） | `tests/tooling/public-safety.test.ts` | 已跟踪或未跟踪（未被忽略）的文件里出现私网、CGNAT、链路本地地址，组网（mesh）主机名，或登记过哈希的被禁 token 与 IPv4（包括被禁词与别的词、数字连写，如 `<词>bot`、`<词>01`、全大写缩写接小写）；文件名、目录名或符号链接目标里含被禁词；放行清单的 `reason`、`path` 含被禁词或私网地址；快照目录（`reference/`、`snapshot/`）里没登记进清单的文件；放行项缺路径、原文或理由；被禁清单格式不对；`--hash` 收到多个 token、汉字或越界 IPv4（必须以非 0 退出，不打印哈希） |
 | 密钥（`check-secrets`） | `tests/tooling/secrets.test.ts` | env 模板里 `MODEL_GATEWAY_API_KEY`、`SETUP_KEY`、`JOIN_KEY`、`MASTER_KEY` 有值；出现 GitHub 令牌、私钥材料或 `sk-` 开头的长串形态（包括 `Dockerfile`、`.npmrc`、没有扩展名的文件里）；未被忽略的私有 env 与数据库文件；`*.pem`、`id_ed25519` 这类私钥文件；`.db.bak`、`.sqlite-wal` 这类附属与备份库文件；仓库的 `.gitignore` 把 `repo.db.ts`、`schema.dbml` 这类源码和文档静默忽略 |
-| PR 正文（`pr-contract`） | `tests/tooling/pr-contract.test.ts` | 缺少九段中的任一段或段落为空；`Closes` 的 issue 号与分支号不一致；验收证据没有截图、录屏、附件或无界面变化的理由；审查结论不是三种之一；结论行或 `Closes` 只写在注释、代码块里 |
+| PR 正文（`pr-contract`） | `tests/tooling/pr-contract.test.ts` | 缺少九段中的任一段或段落为空；`Closes` 的 issue 号与分支号不一致；验收证据没有截图、录屏、附件或无界面变化的理由；审查结论不是三种之一；结论行或 `Closes` 只写在注释、代码块里；另一段的代码块里写了 `### 审查结论` 和结论行；验收证据只写在代码块或行内代码里；`issue-lifecycle.yml` 的 sparse-checkout 漏了 `pr-contract.mjs` 递归导入的仓库内文件，或它导入了 Node 内置模块以外的包 |
 | 任务 worktree（`task.mjs`） | `tests/tooling/task-worktree.test.ts` | PR 未合并、issue 未放弃或工作区不干净时清理 worktree；按路径前缀把 `task-3` 误当成 `task-35`；`start`、`finish` 收到非数字的 issue 号（必须打印用法并以 2 退出） |
 | 分支与 tag（`check-branch-invariants`、`release-tags`） | `tests/tooling/branch-invariants.test.ts`、`tests/tooling/branch-regex-parity.test.ts`、`tests/tooling/release-tags.test.ts` | 见下文「分支、环境与发布门禁回归」；`task.mjs`、`pr-contract.mjs` 的 `TASK_BRANCH_RE` 去掉捕获组后与 `check-branch-invariants.mjs` 不一致 |
 | 组件文档快照（`tuffex-docs`） | `tests/tooling/tuffex-docs.test.ts` | 快照文件被改动；`reference/`、`snapshot/` 下有清单没登记的文件；路径穿越、绝对路径或符号链接目标；生成文件里写死项目名 |
@@ -65,7 +65,7 @@
 | runner | 降级分类器夹具（成功、429、5xx、超时、缺少结束事件；上下文溢出与取消不降级）；剔除 `.omp`、`.claude`、`mcp.json`、`.env*`；恶意夹具的标记文件不存在 | #14 |
 | protocol | 节点消息、TaskSpec、结果、catalog 的 JSON Schema 与 TypeScript 类型一致 | #11、#13 |
 
-工程检查要覆盖真实导入解析（静态、动态、type、re-export、`require`）、Vue 单文件组件只解析 `<script>`、tsconfig 路径别名、反向依赖（任何 app 互相导入、protocol 导入 app、runner 导入 npm 包），以及文档同步。
+工程检查要覆盖真实导入解析（静态、动态、type、re-export、`require`）、Vue 单文件组件只解析 `<script>`、tsconfig 路径别名、反向依赖（任何 app 互相导入、protocol 导入 app、`app/runner/src` 导入 npm 包），以及文档同步。
 
 ## 分支、环境与发布门禁回归
 

@@ -20,11 +20,14 @@ export const TASK_BRANCH_RE = /^task\/([0-9]+)\/[a-z0-9]+(?:_[a-z0-9]+)*$/;
  */
 export const REQUIRED_SECTIONS = ["目的", "关联", "变更范围", "解决链路", "验证命令与结果", "验收证据", "人工验收步骤", "审查结论", "风险与回滚"];
 
-/** 验收证据里算作「证据」的东西：图片、视频、GitHub 附件链接、或明确写出的「无界面变化」理由 */
+/** 验收证据里算作「证据」的东西：图片、视频、GitHub 附件链接、或明确写出的「无界面变化」理由；只看代码块与行内代码以外的文字 */
 const EVIDENCE_RE = /!\[[^\]]*\]\([^)]+\)|<img\s[^>]*src=|<video\s|https:\/\/github\.com\/[^\s)]+\/(?:assets|files)\/|https:\/\/user-images\.githubusercontent\.com\/|\.(?:png|jpe?g|webp|gif|mp4|webm|mov)\b|无界面变化[:：]/i;
 
-/** 审查结论行：独占一行，三种结论之一，逐字匹配。 */
-const CONCLUSION_LINE_RE = /^[ \t]*\*\*结论：(?:通过|有条件通过|阻塞)\*\*[ \t]*$/m;
+/**
+ * 审查结论行：独占一行，三种结论之一，逐字匹配。行首最多 3 个空格：缩进 4 格或 Tab 在 Markdown 里是缩进代码块
+ * （紧跟在一段文字后面时是那段的续行），渲染出来都不是独占一行的结论。
+ */
+const CONCLUSION_LINE_RE = /^[ ]{0,3}\*\*结论：(?:通过|有条件通过|阻塞)\*\*[ \t]*$/m;
 
 /**
  * 去掉 HTML 注释：GitHub 渲染后看不到，也不据此关闭 issue。没闭合的 `<!--` 一直隐藏到正文末尾。
@@ -34,28 +37,48 @@ export function stripComments(text) {
   return String(text ?? "").replace(/<!--[\s\S]*?(?:-->|$)/g, "");
 }
 
-/** 去掉围栏代码块与行内代码：代码里的 Closes #n、结论行都只是示例文字。 */
+const linesOf = (text) => String(text ?? "").replace(/\r\n/g, "\n").split("\n");
+
+/**
+ * 围栏代码块的开合判定（stripCode 与 sections 共用同一套）：``` 或 ~~~ 开头（前面最多 3 个空格）的行是围栏线；
+ * 同一种字符、长度不短于开头的围栏线才关闭。没闭合的围栏一直到正文末尾。
+ * @param {string} line
+ * @param {string | null} fence 当前打开的围栏串，不在围栏里为 null
+ * @returns {{ marker: boolean, fence: string | null }} marker：这一行是不是围栏线；fence：这一行之后的状态
+ */
+function fenceStep(line, fence) {
+  const mark = /^[ ]{0,3}(`{3,}|~{3,})/.exec(line);
+  if (!mark) return { marker: false, fence };
+  if (!fence) return { marker: true, fence: mark[1] };
+  if (mark[1][0] === fence[0] && mark[1].length >= fence.length) return { marker: true, fence: null };
+  return { marker: true, fence };
+}
+
+/** 去掉围栏代码块与行内代码：代码里的 Closes #n、结论行、证据都只是示例文字。 */
 export function stripCode(text) {
   const out = [];
   let fence = null;
-  for (const line of String(text ?? "").replace(/\r\n/g, "\n").split("\n")) {
-    const mark = /^[ ]{0,3}(`{3,}|~{3,})/.exec(line);
-    if (mark) {
-      if (!fence) fence = mark[1];
-      else if (mark[1][0] === fence[0] && mark[1].length >= fence.length) fence = null;
-      continue;
-    }
-    if (!fence) out.push(line.replace(/(`+)[^`]*?\1/g, ""));
+  for (const line of linesOf(text)) {
+    const inside = fence !== null;
+    const step = fenceStep(line, fence);
+    fence = step.fence;
+    if (!inside && !step.marker) out.push(line.replace(/(`+)[^`]*?\1/g, ""));
   }
   return out.join("\n");
 }
 
-/** 把正文按 `### 标题` 切成段落；标题里括号及之后的说明去掉，只留名字 */
+/**
+ * 把正文按 `### 标题` 切成段落；标题里括号及之后的说明去掉，只留名字。
+ * 围栏代码块里的 `### ...` 只是代码，不开新段，也不覆盖同名的真实段落；代码块本身原样留在所在段里
+ * （「验证命令与结果」整段是代码块时不算空段），各项检查再按需用 stripCode 去掉代码。
+ */
 export function sections(body) {
   const out = new Map();
   let current = null;
-  for (const line of String(body ?? "").replace(/\r\n/g, "\n").split("\n")) {
-    const heading = /^###\s+(.+?)\s*$/.exec(line);
+  let fence = null;
+  for (const line of linesOf(body)) {
+    const heading = fence === null ? /^###\s+(.+?)\s*$/.exec(line) : null;
+    fence = fenceStep(line, fence).fence;
     if (heading) {
       current = heading[1].replace(/[（(].*$/, "").trim();
       out.set(current, "");
@@ -103,8 +126,8 @@ export function checkPullRequest({ branch, body, issue = null }) {
     else if (!text.trim()) errors.push(`段落「### ${name}」是空的：删掉模板里的注释后要写实际内容。`);
   }
   const evidence = parts.get("验收证据");
-  if (evidence !== undefined && evidence.trim() && !EVIDENCE_RE.test(evidence)) {
-    errors.push("「验收证据」里没有截图、录屏或附件链接：界面改动要放改前改后截图（或逐帧图、录屏）；确实没有界面变化时写「无界面变化：<理由>」。");
+  if (evidence !== undefined && evidence.trim() && !EVIDENCE_RE.test(stripCode(evidence))) {
+    errors.push("「验收证据」里没有截图、录屏或附件链接（代码块和行内代码里的不算）：界面改动要放改前改后截图（或逐帧图、录屏）；确实没有界面变化时写「无界面变化：<理由>」。");
   }
   const review = parts.get("审查结论") ?? "";
   if (review.trim() && !CONCLUSION_LINE_RE.test(stripCode(review))) errors.push("「审查结论」没有独占一行的 `**结论：通过**`／`**结论：有条件通过**`／`**结论：阻塞**`（注释和代码块里的不算，docs/conventions/CODE-REVIEW.md）。");

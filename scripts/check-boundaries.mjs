@@ -10,7 +10,10 @@
  *   2. 每个 app 都可以导入 @geek-bot/protocol（或指向 packages/protocol 的相对路径）；
  *   3. packages/protocol 不导入任何 app；
  *   4. app/runner/src 只用 Node 标准库：不许导入任何 npm 包，唯一例外是对 @geek-bot/protocol 的 type 导入；
- *   5. app/ 与 packages/ 下出现没登记的目录时失败：新增包要先在 PACKAGES 里划定边界。
+ *   5. app/ 与 packages/ 下出现没登记的目录时失败：新增包要先在 PACKAGES 里划定边界；
+ *   6. PACKAGES 与 pnpm-workspace.yaml 的 packages 列表一一对应（只认逐行列出目录，不认通配与排除），
+ *      每个包的 package.json 都有非空的 typecheck 与 build 脚本：根 typecheck、build 用 `pnpm -r --if-present run`
+ *      调用它们，包没登记进工作区或缺了脚本时会被静默跳过、退出码仍是 0，这里把它拦下。
  *
  * 用 TypeScript AST 解析静态 import、动态 import、re-export、import-type 与 require；Vue 单文件组件只解析 <script>；
  * 按各包 tsconfig 解析 .js → .ts 与路径别名，按解析后的真实文件路径判断所属包，不以导入名称判断。
@@ -36,6 +39,10 @@ export const PACKAGES = Object.freeze({
   "app/runner": "runner",
   "packages/protocol": "protocol",
 });
+/** 工作区登记文件：pnpm -r 只检查、构建这里列出的目录。 */
+export const WORKSPACE_FILE = "pnpm-workspace.yaml";
+/** 每个工作区包必须有的脚本（根 typecheck、build 经 pnpm -r --if-present 调用，缺了会被静默跳过）。 */
+export const REQUIRED_SCRIPTS = Object.freeze(["typecheck", "build"]);
 /** 放包的顶层目录。 */
 const PACKAGE_PARENTS = Object.freeze(["app", "packages"]);
 /** 所有包共享的契约包：任何 app 都可以导入它。 */
@@ -47,6 +54,7 @@ const BUILTINS = new Set(builtinModules.flatMap((name) => [name, `node:${name}`]
 const USAGE = [
   "用法：node scripts/check-boundaries.mjs [--root <仓库根目录>]",
   "  五个包互不导入实现；都可以导入 @geek-bot/protocol；protocol 不导入任何 app；runner 只用 Node 标准库。",
+  "  每个包都登记在 pnpm-workspace.yaml，且 package.json 有 typecheck 与 build 脚本。",
 ].join("\n");
 
 const toPosix = (path) => path.split(sep).join("/");
@@ -126,6 +134,73 @@ export function unregisteredPackages(root = ROOT) {
   });
 }
 
+/**
+ * 读 pnpm-workspace.yaml 的 packages 列表。只认块状写法、逐行一个目录（`- app/control`，可加引号）；
+ * 通配、排除、行内数组这类写法报成问题，不猜它会展开成哪些目录。
+ * @returns {{ entries: string[], problems: string[] }}
+ */
+export function workspaceEntries(root = ROOT) {
+  const file = join(root, WORKSPACE_FILE);
+  if (!existsSync(file)) return { entries: [], problems: [`${WORKSPACE_FILE} 不存在：各包要在这里登记，pnpm -r 才会检查、构建它们`] };
+  const entries = [];
+  const problems = [];
+  let found = false;
+  let inPackages = false;
+  readFileSync(file, "utf8").replace(/\r\n/g, "\n").split("\n").forEach((raw, index) => {
+    const line = raw.replace(/(^|\s)#.*$/, "").trimEnd();
+    if (!line.trim()) return;
+    const at = `${WORKSPACE_FILE}:${index + 1}`;
+    if (inPackages) {
+      const item = /^\s*-\s+(.+)$/.exec(line);
+      if (item) {
+        const dir = item[1].trim().replace(/^(['"])(.*)\1$/, "$2").replace(/^\.\//, "").replace(/\/+$/, "");
+        if (/[*?[\]{}!]/.test(dir)) problems.push(`${at}：packages 不支持通配或排除写法（${dir}），逐个列出包目录`);
+        else entries.push(dir);
+        return;
+      }
+      if (/^\s/.test(line)) {
+        problems.push(`${at}：看不懂 packages 里的这一行，逐行写成「- <目录>」`);
+        return;
+      }
+    }
+    inPackages = false;
+    const key = /^packages\s*:(.*)$/.exec(line);
+    if (!key) return;
+    found = true;
+    if (key[1].trim()) problems.push(`${at}：packages 只认逐行「- <目录>」的写法，不认行内数组`);
+    else inPackages = true;
+  });
+  if (!found) problems.push(`${WORKSPACE_FILE}：没有 packages 列表`);
+  return { entries, problems };
+}
+
+/**
+ * 规则 6：PACKAGES 里的每个包都登记在 pnpm-workspace.yaml、package.json 有非空的 typecheck 与 build；
+ * pnpm-workspace.yaml 里也不许有 PACKAGES 以外的目录（那样的包不受边界检查）。
+ * @returns {string[]}
+ */
+export function workspaceProblems(root = ROOT) {
+  const { entries, problems } = workspaceEntries(root);
+  const listed = new Set(entries);
+  for (const dir of Object.keys(PACKAGES)) {
+    if (!listed.has(dir)) problems.push(`${dir}：没有写进 ${WORKSPACE_FILE} 的 packages，根 pnpm typecheck、pnpm build 不会检查、构建它`);
+    const manifest = join(root, dir, "package.json");
+    if (!existsSync(manifest)) {
+      problems.push(`${dir}：缺少 package.json`);
+      continue;
+    }
+    const scripts = JSON.parse(readFileSync(manifest, "utf8")).scripts;
+    const missing = REQUIRED_SCRIPTS.filter((name) => typeof scripts?.[name] !== "string" || !scripts[name].trim());
+    if (missing.length) {
+      problems.push(`${dir}/package.json：scripts 缺少 ${missing.join("、")}（根 pnpm typecheck、pnpm build 用 pnpm -r --if-present 调用，缺了会被静默跳过；名字必须逐字是 ${REQUIRED_SCRIPTS.join("、")}）`);
+    }
+  }
+  for (const entry of new Set(entries)) {
+    if (!Object.hasOwn(PACKAGES, entry)) problems.push(`${WORKSPACE_FILE} 登记了 ${entry}，但 scripts/check-boundaries.mjs 的 PACKAGES 里没有它：先划定边界，并补 docs/services/<name>/README.md`);
+  }
+  return problems;
+}
+
 /** 各包 package.json 里的包名 → 包目录（不依赖 node_modules，未安装依赖时也能判定包名导入）。 */
 export function workspaceNames(root = ROOT) {
   const names = new Map();
@@ -196,6 +271,7 @@ export function checkProject(root = ROOT) {
   const violations = unregisteredPackages(root).map(
     (dir) => `${dir}：没有登记边界的新包，先在 scripts/check-boundaries.mjs 的 PACKAGES 里登记，并补 docs/services/<name>/README.md`,
   );
+  violations.push(...workspaceProblems(root));
   const names = workspaceNames(root);
   // 待扫描队列：先是各包目录下的源文件，扫描中再追加被导入、但 walk 没收进来的包内文件（例如点开头目录里的转手 re-export）。
   const files = Object.keys(PACKAGES).flatMap((dir) => walk(join(root, dir)));
@@ -273,7 +349,7 @@ function main(argv) {
     process.exitCode = 1;
     return;
   }
-  console.log(`模块边界检查通过：${report.files} 个文件，${report.imports} 处导入（静态、动态、re-export、import-type、require）。`);
+  console.log(`模块边界检查通过：${report.files} 个文件，${report.imports} 处导入（静态、动态、re-export、import-type、require）；${Object.keys(PACKAGES).length} 个包都登记在 ${WORKSPACE_FILE}，都有 ${REQUIRED_SCRIPTS.join("、")} 脚本。`);
 }
 
 // 入口判定走 isDirectRun（比较 realpath）：经符号链接路径启动时不会静默退出 0 而让门禁假绿。

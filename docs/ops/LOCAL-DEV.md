@@ -47,8 +47,8 @@ pnpm install --frozen-lockfile
 另外几条命令不在 `verify` 里：
 
 - `pnpm docs:index`：改了文档标题、摘要或路径后重新生成 `docs/INDEX.md`，不要手工编辑它。
-- `pnpm check:branch-invariants`：核对 `stage` 包含 `main`、`main` 不领先 `stage` 和分支命名；CI 的 `branch-guard` 用 `--require-remote-refs` 跑同一脚本。
-- `node scripts/check-public-safety.mjs --hash <词>`：打印一个词的 SHA-256，维护者用它往被禁词表里追加条目；表里只存哈希，不存明文。只接受单个 `[a-z0-9]+` token（大小写不限）或 IPv4；带连字符、空格的词要拆开分别登记；汉字词不支持，会以 2 退出。
+- `pnpm check:branch-invariants`：核对 `stage` 包含 `main`、`main` 不领先 `stage`，违反就以非 0 退出；分支命名不合规默认只告警（加 `--strict-long-lived` 才算失败）。CI 的 `branch-guard` 用 `--require-remote-refs` 跑同一脚本。
+- `node scripts/check-public-safety.mjs --hash <词>`：打印一个词的 SHA-256，维护者用它往被禁词表里追加条目；表里只存哈希，不存明文。只接受单个 `[a-z0-9]+` token（大小写不限）或 IPv4；带连字符、空格的词要拆开分别登记；汉字词不支持，会以 2 退出。扫描时每个 token 连同它长度不小于 4 的前缀、后缀一起比对，所以登记一个词就能拦住它和别的词、数字连写的形式（夹在两个词中间的拦不住）。
 - `pnpm labels:plan`：只打印创建标签的 `gh label create` 命令，不执行，由所有者决定是否运行（见 [CICD](CICD.md)）。
 - 还没有的命令：`dev:control`（#3）、`dev:console` 与 `test:e2e`（#4）、`check:environments` 与 `release:plan`（#7）、`test:vm`（#12）。
 
@@ -59,7 +59,12 @@ pnpm hooks:enable          # 等于 git config core.hooksPath .githooks
 ```
 
 - 每个克隆运行一次；task worktree 共用所在克隆的 Git 配置，不用再设。停用：`git config --unset core.hooksPath`。
-- `.githooks/pre-push` 在每次推送前运行 `check-branch-invariants --push`：核对两条分支不变量、`main` 与 `stage` 的写入来源、分支命名和发布 tag 规则，不通过就拒绝推送。
+- `.githooks/pre-push` 在每次推送前运行 `check-branch-invariants --push`，下列情况拒绝推送：
+  - 推 `main`：被推的提交不在 `stage`（本地或 `origin/stage`）里，或本地两者都找不到；
+  - 推 `stage`：来源不是 `stage` 自身或合规的 `task/<issue>/<slug>`，或被推的 `stage` 不包含 `main`；
+  - 删除远端 `main` 或 `stage`；
+  - 发布 tag：格式不对、删除或移动已有发布 tag、rc tag 不在 `stage` 的提交上、正式 tag 不在 `main` 的提交上、tag 版本与该提交 `package.json` 的 `version` 不一致、已有正式 tag 的版本再打 rc。
+- 推到其它分支时，命名不合规（例如 `task/12-foo`、`dev-alice`）只告警，推送照常放行；以不合规分支为来源推 `stage` 才会被上面第二条拒绝（命名规则见 [BRANCHING](../conventions/BRANCHING.md)）。
 - 本仓库是免费计划下的私有仓库，GitHub 没有分支保护（见 [CICD](CICD.md)）。分支不变量由两道机器检查核对：这个钩子和 CI 的 `branch-guard`；合并前再由审查者和 CI 的 `pr-contract` 把关。发布 tag 在 `release.yml`（#7）加入之前只有本地钩子这一道（见 [RELEASES](../conventions/RELEASES.md)「tag 不可变」）。不要用 `--no-verify` 绕过钩子。
 
 ## task worktree：开工与收尾

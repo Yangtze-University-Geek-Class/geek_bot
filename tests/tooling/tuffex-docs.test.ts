@@ -61,7 +61,7 @@ it('fails closed on a modified snapshot file in an isolated fixture', () => {
   writeFileSync(join(root, 'manifest.json'), JSON.stringify({ schemaVersion: 1, commit: 'a'.repeat(40), counts: { pages: 0 }, packages: { tuffex: { version: 'test' } }, files: [{ path: 'source.txt', sha256: 'b'.repeat(64) }] }));
   writeFileSync(join(root, 'catalog.json'), JSON.stringify({ commit: 'a'.repeat(40), pages: [] }));
   writeFileSync(join(root, 'source.txt'), 'changed');
-  expect(() => verifyLibrary(root)).toThrow('modified source.txt');
+  expect(() => verifyLibrary(root)).toThrow('内容与哈希不符 source.txt');
 });
 it('fails closed on files under reference/ or snapshot/ that the manifest does not list', () => {
   const root = mkdtempSync(join(tmpdir(), 'tuffex-doc-unlisted-')); temporary.push(root);
@@ -76,9 +76,9 @@ it('fails closed on files under reference/ or snapshot/ that the manifest does n
   writeFileSync(join(root, 'snapshot', 'nested', 'extra.txt'), 'not listed');
   symlinkSync(join(root, 'reference', 'a.md'), join(root, 'snapshot', 'link.txt'));
   const failure = (() => { try { verifyLibrary(root); return ''; } catch (error) { return String(error); } })();
-  expect(failure).toContain('unlisted reference/zz-extra.md');
-  expect(failure).toContain('unlisted snapshot/nested/extra.txt');
-  expect(failure).toContain('unlisted snapshot/link.txt');
+  expect(failure).toContain('没有登记在清单里 reference/zz-extra.md');
+  expect(failure).toContain('没有登记在清单里 snapshot/nested/extra.txt');
+  expect(failure).toContain('没有登记在清单里 snapshot/link.txt');
 });
 it('names the project in generated files from the root package.json, not a hard-coded name', () => {
   expect(projectName()).toBe('geek_bot');
@@ -91,7 +91,7 @@ it('names the project in generated files from the root package.json, not a hard-
 it('passes check through the CLI and rejects unknown arguments with the usage on stderr', () => {
   const check = spawnSync(process.execPath, [script, 'check'], { encoding: 'utf8' });
   expect(check.status).toBe(0);
-  expect(check.stdout).toContain('Tuffex reference integrity passed');
+  expect(check.stdout).toContain('Tuffex 参考文档完整性通过');
   for (const args of [['check', '--force'], ['nonsense'], []]) {
     const result = spawnSync(process.execPath, [script, ...args], { encoding: 'utf8' });
     expect(result.status, args.join(' ')).not.toBe(0);

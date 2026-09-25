@@ -16,7 +16,7 @@ node scripts/tuffex-docs.mjs read button --section Props --max-lines 100
 node scripts/tuffex-docs.mjs read button --section Events --max-lines 100
 ```
 
-JSON 查询结果包含准确的章节名称和行号；输出截断时会给出 CONTINUE 命令。需要插槽、复杂交互或样式时，读页面末尾链接的完整 Demo，再核对类型和组件实现。不要只看展示代码，也不要一次读取整个 snapshot。
+JSON 查询结果包含准确的章节名称和行号；输出截断时会在末尾给出「接着读」命令。需要插槽、复杂交互或样式时，读页面末尾链接的完整 Demo，再核对类型和组件实现。不要只看展示代码，也不要一次读取整个 snapshot。
 
 ## API 证据
 

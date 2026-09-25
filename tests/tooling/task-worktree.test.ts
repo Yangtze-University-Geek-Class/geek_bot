@@ -67,14 +67,23 @@ describe("task worktree", () => {
     }
   });
 
-  it("开工记录用 track v1 记录头，只写分支、基线与清理命令", () => {
-    const note = startNote({ issue: "12", branch: "task/12/review_queue", base: "a620ea49d90c", worktree: ".claude/worktrees/task-12" });
+  it("开工记录用 track v1 记录头，只写分支、基线与清理命令；提到提交写完整 SHA", () => {
+    const base = "a620ea49d90c3f5e8b17c2d4a6e9f0b1c3d5e7f9";
+    const note = startNote({ issue: "12", branch: "task/12/review_queue", base, worktree: ".claude/worktrees/task-12" });
     const [header] = note.split("\n");
     expect(header).toBe("<!-- track v1 kind=progress stage=dev -->");
     expect(header).toMatch(/^<!-- track v1 kind=[a-z]+ stage=[a-z]+ -->$/);
     expect(note).toContain("`task/12/review_queue`");
-    expect(note).toContain("`origin/stage`（a620ea49d90c）");
+    expect(note).toContain(`\`origin/stage\`（${base}）`);
     expect(note).toContain("`node scripts/task.mjs finish 12`");
-    expect(note).toContain("**引用**：#12 · a620ea49d90c");
+    const reference = note.split("\n").find((line) => line.startsWith("**引用**："));
+    expect(reference).toBe(`**引用**：#12 · ${base}`);
+    expect(reference).toMatch(/ [0-9a-f]{40}$/);
+  });
+
+  it("开工记录收到短 SHA：拒绝，不会把短 SHA 写进 issue", () => {
+    for (const base of ["a620ea49d90c", "a620ea4", "", "A620EA49D90C3F5E8B17C2D4A6E9F0B1C3D5E7F9"]) {
+      expect(() => startNote({ issue: 12, branch: "task/12/review_queue", base, worktree: ".claude/worktrees/task-12" }), base).toThrow(/完整 40 位 SHA/);
+    }
   });
 });

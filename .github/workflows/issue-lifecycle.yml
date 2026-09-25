@@ -53,6 +53,8 @@ jobs:
           ref: ${{ github.event.pull_request.base.ref }}
           persist-credentials: false
           # pr-contract.mjs 经 scripts/lib/cli.mjs 判断是否直接运行，两者要一起检出。
+          # 这份列表必须覆盖 pr-contract.mjs 递归导入的全部仓库内文件，且它不能导入 npm 包（这里不装依赖）。
+          # 漏了的话，改动它的 PR 仍用 base 上的旧脚本、照样通过；合并之后每个 PR 的这一步都会 ERR_MODULE_NOT_FOUND。
           sparse-checkout: |
             scripts/pr-contract.mjs
             scripts/lib/
