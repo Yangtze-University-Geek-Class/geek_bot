@@ -28,3 +28,16 @@
 - 做了什么：git commit：feat(tooling): 补上执行记录规范与 note.mjs，task.mjs 接入开工和收尾；提交前 pnpm verify
 - 结果：pnpm verify 退出码 0（Tests 280 passed）；node scripts/note.mjs check 通过
 - 下一步：清除对其它项目的引用，加残留回归测试，第二个提交
+
+## 03:11:55 +08:00 · 开发 · #26 · 规范里的来历与外部引用改写成直接陈述，加残留回归测试
+
+- 执行者：agent-claude-geek-bot-26（Claude Code，claude-opus-5-5）
+- 做了什么：第一个提交 feac9f4 之后：改写 ADR-0001 背景、决策、替代方案、后果，ADR-0010 背景、替代方案、重新评估条件，AGENTS §3，CODE-REVIEW 第 4 项，RELEASES 与 BRANCHING 状态行，AGENT-START 一处指代；新增 tests/tooling/standalone-refs.test.ts 并登记进 TESTING；按任务给的词表对入库文件（不含 Tuffex 快照）重新搜索；用临时仓库和假 gh 走通 task.mjs start、提交合并、finish、下一个 start 并入收尾，以及 gh TLS 失败与查不到两种报错
+- 结果：改写前 standalone-refs 测试失败 3 处（ADR-0001 第 9、10 行），改写后通过；词表搜索只剩 Tuffex 上游的主仓库、泛指的照搬与沿用；pnpm verify 退出码 0（Test Files 19 passed，Tests 282 passed）；actionlint 1.7.12 退出码 0；沙盒里 gh TLS 失败报查 issue 状态失败并以 1 退出、不建分支
+
+## 03:11:55 +08:00 · 提交 · #26 · docs(docs): 残留清理与回归测试一起提交
+
+- 执行者：agent-claude-geek-bot-26（Claude Code，claude-opus-5-5）
+- 做了什么：git commit：docs(docs): 规范只陈述本仓库的规则，去掉对别的项目的引用；提交前 pnpm verify、actionlint、node scripts/note.mjs check
+- 结果：pnpm verify 退出码 0（Tests 282 passed）；actionlint 无输出；执行记录检查通过
+- 下一步：主 agent 推送、开 PR，补记 PR 与审查
