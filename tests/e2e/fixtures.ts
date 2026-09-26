@@ -87,12 +87,12 @@ export async function pageOverflow(page: Page): Promise<{ scrollWidth: number; c
 }
 
 /**
- * 外壳里（含侧栏与主内容区）被 overflow: hidden / clip 截掉的元素：内容比盒子宽，又不能滚动。
+ * 外壳里（含侧栏、主内容区和挂到 body 下的抽屉）被 overflow: hidden / clip 截掉的元素：内容比盒子宽，又不能滚动。
  * 单行省略（text-overflow: ellipsis）且带 title、能看到完整值的，按 DESIGN 允许。
  */
 export async function clippedElements(page: Page): Promise<string[]> {
   return page.evaluate(() =>
-    Array.from(document.querySelectorAll<HTMLElement>(".shell, .shell *"))
+    Array.from(document.querySelectorAll<HTMLElement>(".shell, .shell *, .tx-drawer, .tx-drawer *"))
       .filter(element => {
         const style = getComputedStyle(element);
         if (style.overflowX !== "hidden" && style.overflowX !== "clip") return false;

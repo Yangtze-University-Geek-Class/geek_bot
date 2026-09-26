@@ -57,3 +57,21 @@
 - 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
 - 做了什么：git commit：fix(console): 按审查意见收紧 API 路径、SSE 重连与浏览器回归；提交前 pnpm verify、pnpm test:e2e、actionlint
 - 结果：pnpm verify 退出码 0（Tests 318 passed）；pnpm test:e2e 42 passed
+
+## 11:18:48 +08:00 · 审查 · #4 · 独立审查员复核 3939d26：通过，另有 4 条建议
+
+- 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
+- 做了什么：同一名独立审查代理只读复核 99f18b0..3939d26，跑了 pnpm verify、vitest、pnpm test:e2e 与 note.mjs check --pr --for-review
+- 结果：结论：通过；5 条应修已修、7 条建议已处理；新建议 4 条：重建连接只在首次 open 时 onReset、写明 401 由调用方 close、被禁符号补 2600–26FF 与 24B6–24FF、截断检查纳入抽屉
+
+## 11:18:48 +08:00 · 返工 · #4 · 采纳复核的 4 条建议并改顺一句文案
+
+- 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
+- 做了什么：sse：重建后只在第一次连上时 onReset，补用例；注明会话过期后调用方关闭连接；被禁符号加杂项符号与圈字母并补自测样例；clippedElements 纳入 .tx-drawer；成功状态文案改为「取到 N 条记录（来源：…）」
+- 结果：pnpm verify 退出码 0（Test Files 23 passed，Tests 319 passed）；pnpm test:e2e 42 passed
+
+## 11:18:48 +08:00 · 提交 · #4 · 第二轮返工一起提交
+
+- 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
+- 做了什么：git commit：fix(console): 按复核建议收紧重连与被禁符号扫描；提交前 pnpm verify、pnpm test:e2e
+- 结果：pnpm verify 退出码 0（Tests 319 passed）；pnpm test:e2e 42 passed

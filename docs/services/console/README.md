@@ -26,7 +26,7 @@
 | `src/components/context.ts`、`use-environment.ts` | 注入 API 客户端与运行模式；在线状态与窄屏断点的组合函数 |
 | `src/lib/api.ts` | API 客户端：只接受 `/api/v1/*` 与 `/api/release`（`isApiPath`：拒绝完整 URL、协议相对地址和任何写法的点段，按浏览器规则规范化后必须原样不变），同源带 cookie；错误统一成 `ApiError`（`http`、`network`、`invalid_response`，带状态码、机器码、`X-Request-Id`）；`describeError` 生成 `HTTP 状态 · 机器码 · request id`。`fetch` 由调用方注入 |
 | `src/lib/page-state.ts` | 页面状态：列表没有条目算空；401 → 未登录，403 → 无权限，没有响应 → 离线，其余 → 失败 |
-| `src/lib/sse.ts` | SSE 客户端（A-56）：`EventSource` 连接、监听事件表里的全部类型、断线后每 5 秒轮询、重新连上后停止轮询、`reset` 时让页面重新拉取、`session_expired` 时关闭。响应不是 200 时浏览器会放弃重连（CLOSED），这时按 5 秒起、翻倍、最长 60 秒退避自己重建；重建的连接不带 Last-Event-ID，连上后让页面重新拉取。服务端 SSE 由 #14 实现，在那之前外壳不建立连接 |
+| `src/lib/sse.ts` | SSE 客户端（A-56）：`EventSource` 连接、监听事件表里的全部类型、断线后每 5 秒轮询、重新连上后停止轮询、`reset` 时让页面重新拉取、`session_expired` 时关闭。响应不是 200 时浏览器会放弃重连（CLOSED），这时按 5 秒起、翻倍、最长 60 秒退避自己重建；重建的连接不带 Last-Event-ID，第一次连上时让页面重新拉取；会话过期后重建会一直拿到 401，调用方的轮询收到 401 时要关闭连接（#14 接入时处理）。服务端 SSE 由 #14 实现，在那之前外壳不建立连接 |
 | `src/lib/format.ts` | `formatDuration(ms)`：毫秒格式化成中文时长，最多两级单位 |
 | `src/mocks/` | 样板数据模式：替代 `fetch`，全部虚构、不发网络请求；地址栏的 `?sample=` 切换数据端点的响应（`ok`、`empty`、`slow`、`error`、`forbidden`、`unauthenticated`、`offline`），外壳用的 `/api/v1/me`、`/api/release` 不受影响 |
 | `src/pages/NotFoundPage.vue` | 未知地址 |

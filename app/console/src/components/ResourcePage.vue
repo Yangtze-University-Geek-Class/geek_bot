@@ -33,8 +33,8 @@ async function load() {
 const readyDescription = computed(() => {
   const data = state.value.kind === "ready" ? state.value.data : null;
   const items = typeof data === "object" && data !== null && "items" in data ? (data as { items: unknown }).items : null;
-  const received = Array.isArray(items) ? `${source}返回了 ${items.length} 条记录` : `${source}已返回数据`;
-  return `${received}；这一页的列表与操作还在开发中。`;
+  const received = Array.isArray(items) ? `取到 ${items.length} 条记录` : "已取到数据";
+  return `${received}（来源：${source}）；这一页的列表与操作还在开发中。`;
 });
 
 watch(() => props.page.endpoint, load, { immediate: true });

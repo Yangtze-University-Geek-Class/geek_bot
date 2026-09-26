@@ -5,7 +5,8 @@
  * - 连接出错后退回每 5 秒轮询一次（由调用方提供 poll，调对应的 GET 端点），重新连上后停止轮询。
  * - 浏览器只在网络断开时自己重连；响应不是 200（control 重启时的 503、反代的 502、会话过期后的 401）时
  *   EventSource 进入 CLOSED、不再重连。这时本模块按 5 秒起、翻倍、最长 60 秒退避，自己重建连接；
- *   重建的连接不带 Last-Event-ID，连上后调 onReset 让页面重新拉取。
+ *   重建的连接不带 Last-Event-ID，第一次连上时调 onReset 让页面重新拉取。
+ * - 会话过期后重建会一直拿到 401，EventSource 看不到状态码：调用方的 poll 收到 401 时要调 handle.close()。
  * - 收到 `reset` 表示补发不了，调用方要重新拉取当前页的数据；收到 `session_expired` 关闭连接、不再重连。
  * - 事件里的文本已由 control 打码，渲染时仍按纯文本处理（S-05）。
  *
@@ -144,6 +145,8 @@ export function openStream(options: StreamOptions): StreamHandle {
     const current = create(url);
     source = current;
     const active = () => source === current && status !== "closed";
+    // 只有重建后的第一次连上需要整页重新拉取；之后浏览器自己重连会带 Last-Event-ID，补发得回来。
+    let resetOnOpen = rebuilt;
 
     current.onopen = () => {
       if (!active()) return;
@@ -151,7 +154,10 @@ export function openStream(options: StreamOptions): StreamHandle {
       stopPolling();
       setStatus("live");
       // 重建的连接没带 Last-Event-ID，断开期间的事件补发不回来，让页面重新拉取。
-      if (rebuilt) options.onReset();
+      if (resetOnOpen) {
+        resetOnOpen = false;
+        options.onReset();
+      }
     };
     // 出错后先退回轮询，页面顶部只显示一条提示，不换成错误页；浏览器放弃重连（CLOSED）时自己退避重建。
     current.onerror = () => {

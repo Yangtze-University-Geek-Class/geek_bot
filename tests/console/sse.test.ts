@@ -136,6 +136,17 @@ describe("openStream", () => {
     expect(fireReconnect()).toBe(RECONNECT_BASE_MS);
   });
 
+  it("重建后的连接只在第一次连上时让页面重新拉取；之后浏览器自己重连不再触发", () => {
+    const { source, sources, options, fireReconnect } = setup();
+    source.failHard();
+    fireReconnect();
+    const rebuilt = sources.at(-1)!;
+    rebuilt.onopen?.(new Event("open"));
+    rebuilt.onerror?.(new Event("error"));
+    rebuilt.onopen?.(new Event("open"));
+    expect(options.onReset).toHaveBeenCalledTimes(1);
+  });
+
   it("旧连接上迟到的事件与回调被忽略", () => {
     const { source, sources, events, statuses, fireReconnect } = setup();
     source.failHard();
