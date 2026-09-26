@@ -4,9 +4,11 @@
  * - 迁移文件：`src/db/migrations/NNNN_<slug>.sql`，编号从 0001 起连续；第一行声明 `-- geek-bot-migration shrink=false|true`。
  * - 库里两个数：`PRAGMA user_version` 是执行到第几号迁移（D）；兼容版本（K）是 schema_migrations 里编号最大那一行的
  *   compat_version，只有收缩类迁移才抬高它。代码认识的最高编号是 C。
- * - 启动检查：已应用且不大于 C 的迁移 sha256 必须与代码里的文件一致；K > C 拒绝启动；D < C 先做迁移前备份再逐个执行；
- *   D > C 而 K ≤ C 是回滚到上一版镜像，正常启动、不执行迁移。
+ * - 启动检查：schema_migrations 的编号从 1 起连续，最大编号等于 D；已应用且不大于 C 的迁移 sha256 必须与代码里的文件一致；
+ *   K > C 拒绝启动；D < C 先做迁移前备份再逐个执行；D > C 而 K ≤ C 是回滚到上一版镜像，正常启动、不执行迁移。
  * - 每个文件在自己的事务里执行，同一个事务里写 schema_migrations、设 user_version、跑 foreign_key_check；任何一步失败就回滚这个文件。
+ * - 声明 shrink=false 的文件，执行前后比较库的真实结构（shrinkFound）：已有的表、列、索引、触发器、视图少了或变了就回滚并拒绝。
+ *   改列的含义、收紧 CHECK 这类语义上的收缩从结构上看不出来，仍靠审查。
  */
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
@@ -120,6 +122,10 @@ export function planMigrations(db: Db, migrations: readonly Migration[]): Migrat
     throw new MigrationError(`库的 user_version 是 ${d}，却没有 schema_migrations 表：库被手工改过，拒绝启动`);
   }
   const applied = db.prepare("SELECT version, name, sha256 FROM schema_migrations ORDER BY version").all() as Array<Pick<AppliedMigration, "version" | "name" | "sha256">>;
+  const gap = applied.findIndex((row, index) => row.version !== index + 1);
+  if (gap >= 0) {
+    throw new MigrationError(`schema_migrations 里的迁移编号不是从 1 起连续的（缺第 ${gap + 1} 号）：库被手工改过，拒绝启动`);
+  }
   const top = applied.at(-1)?.version ?? 0;
   if (top !== d) {
     throw new MigrationError(`库的 user_version 是 ${d}，schema_migrations 里最大的编号却是 ${top}：两者对不上，库被手工改过，拒绝启动`);
@@ -143,6 +149,78 @@ export function planMigrations(db: Db, migrations: readonly Migration[]): Migrat
   return Object.freeze({ state, pending, databaseNewer: d > codeVersion });
 }
 
+/** 一列的形状：声明类型（大写）、NOT NULL、在主键里的位置（0 表示不在主键里）。 */
+interface ColumnShape {
+  readonly type: string;
+  readonly notnull: number;
+  readonly pk: number;
+}
+
+/** 索引、触发器、视图：建它的原文（自动索引没有原文，为 null，只比名字）。 */
+interface SchemaObject {
+  readonly type: string;
+  readonly name: string;
+  readonly sql: string | null;
+}
+
+/** 迁移前后要比较的结构。 */
+interface SchemaShape {
+  readonly tables: ReadonlyMap<string, ReadonlyMap<string, ColumnShape>>;
+  readonly objects: ReadonlyMap<string, SchemaObject>;
+}
+
+const OBJECT_LABEL: Readonly<Record<string, string>> = Object.freeze({ index: "索引", trigger: "触发器", view: "视图" });
+
+function schemaShape(db: Db): SchemaShape {
+  const tables = new Map<string, Map<string, ColumnShape>>();
+  const objects = new Map<string, SchemaObject>();
+  const columnsOf = db.prepare('SELECT name, type, "notnull" AS "notnull", pk FROM pragma_table_xinfo(?)');
+  for (const row of db.prepare("SELECT type, name, sql FROM sqlite_master").all() as SchemaObject[]) {
+    if (row.type !== "table") {
+      objects.set(`${row.type}\0${row.name}`, row);
+      continue;
+    }
+    // sqlite_sequence、sqlite_stat1 这类内部表由 SQLite 自己维护，不比较。
+    if (row.name.startsWith("sqlite_")) continue;
+    const columns = new Map<string, ColumnShape>();
+    for (const column of columnsOf.all(row.name) as Array<{ name: string } & ColumnShape>) {
+      columns.set(column.name, { type: column.type.toUpperCase(), notnull: column.notnull, pk: column.pk });
+    }
+    tables.set(row.name, columns);
+  }
+  return { tables, objects };
+}
+
+/**
+ * 声明 shrink=false 的迁移执行之后，已有的结构必须一个不少、一样不变：表还在；列还在，声明类型、NOT NULL、主键位置不变；
+ * 索引、触发器、视图还在，建它的原文不变。比较的是 SQLite 执行之后的真实结构，所以大小写、注释、一个文件里写多条语句
+ * 都不影响判断；按官方步骤重建表来放宽 CHECK（列、索引、触发器原样重建）不算收缩。返回找到的收缩，空数组表示没有。
+ */
+function shrinkFound(before: SchemaShape, after: SchemaShape): string[] {
+  const found: string[] = [];
+  for (const [table, columns] of before.tables) {
+    const now = after.tables.get(table);
+    if (!now) {
+      found.push(`删掉或改名了表 ${table}`);
+      continue;
+    }
+    for (const [name, shape] of columns) {
+      const column = now.get(name);
+      if (!column) found.push(`删掉或改名了列 ${table}.${name}`);
+      else if (column.type !== shape.type) found.push(`改了列 ${table}.${name} 的类型（${shape.type || "无"} → ${column.type || "无"}）`);
+      else if (column.notnull > shape.notnull) found.push(`给已有列 ${table}.${name} 加了 NOT NULL`);
+      else if (column.pk !== shape.pk) found.push(`改了列 ${table}.${name} 在主键里的位置`);
+    }
+  }
+  for (const [key, object] of before.objects) {
+    const label = `${OBJECT_LABEL[object.type] ?? object.type} ${object.name}`;
+    const now = after.objects.get(key);
+    if (!now) found.push(`删掉或改名了${label}`);
+    else if (now.sql !== object.sql) found.push(`改了${label}的定义`);
+  }
+  return found;
+}
+
 export interface ApplyOptions {
   readonly clock: () => number;
   readonly appVersion: string;
@@ -159,7 +237,18 @@ export function applyMigrations(db: Db, pending: readonly Migration[], options: 
       if (before.userVersion !== migration.version - 1) {
         throw new Error(`它要求库停在第 ${migration.version - 1} 号，实际是第 ${before.userVersion} 号`);
       }
+      const shapeBefore = migration.shrink ? null : schemaShape(db);
       db.exec(migration.sql);
+      if (shapeBefore) {
+        const found = shrinkFound(shapeBefore, schemaShape(db));
+        if (found.length > 0) {
+          const listed = found.length > 5 ? `${found.slice(0, 5).join("、")} 等 ${found.length} 处` : found.join("、");
+          throw new Error(
+            `它声明 shrink=false，执行后却${listed}。删表、删列、改名、改列类型、给已有列加 NOT NULL、删或改已有的索引、触发器、视图都是收缩，` +
+              "要改成 shrink=true 并另写 ADR 取得所有者批准",
+          );
+        }
+      }
       compatVersion = migration.shrink ? migration.version : before.compatVersion;
       // schema_migrations 由 0001 建出，所以语句在执行完迁移之后才准备。
       db.prepare(

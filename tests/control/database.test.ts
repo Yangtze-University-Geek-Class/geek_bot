@@ -161,6 +161,14 @@ describe("迁移器（ADR-0008）", () => {
     expect(() => planMigrations(db, loadMigrations(dir))).toThrow("迁移 0001_foundation.sql 与代码里的文件不一致");
   });
 
+  it("反例：schema_migrations 的编号不是从 1 起连续的（中间一行被删）时拒绝启动", () => {
+    const db = open(join(tempDir(), "geek-bot.db"));
+    const dir = migrationSet([EXPAND_NEXT]);
+    migrateWith(db, dir);
+    db.prepare("DELETE FROM schema_migrations WHERE version = 1").run();
+    expect(() => planMigrations(db, loadMigrations(dir))).toThrow("schema_migrations 里的迁移编号不是从 1 起连续的（缺第 1 号）：库被手工改过，拒绝启动");
+  });
+
   it("有表却没有迁移记录的库（不是 geek_bot 的库）拒绝启动；user_version 与记录对不上也拒绝", () => {
     const foreign = open(join(tempDir(), "foreign.db"));
     foreign.exec("CREATE TABLE something (id INTEGER)");
@@ -169,6 +177,98 @@ describe("迁移器（ADR-0008）", () => {
     migrateWith(tampered, migrationSet());
     tampered.pragma("user_version = 7");
     expect(() => planMigrations(tampered, loadMigrations())).toThrow("两者对不上");
+  });
+});
+
+describe("迁移器：声明 shrink=false 的迁移不能收缩（按执行前后的真实结构判定）", () => {
+  const HEADER = "-- geek-bot-migration shrink=false";
+
+  /** 在最新的库上追加一个迁移并执行；返回执行结果（失败时是报错）和执行后的库。 */
+  function applyNext(sql: string): { error: string | null; db: Db; current: number } {
+    const db = open(join(tempDir(), "geek-bot.db"));
+    migrateWith(db, migrationSet());
+    db.prepare("INSERT INTO settings (key, value_json, updated_by, updated_at) VALUES ('pause.global', '{}', 7, 1)").run();
+    const current = realMigrations().length;
+    const next = loadMigrations(migrationSet([{ slug: "next", sql }]));
+    try {
+      applyMigrations(db, planMigrations(db, next).pending, { clock, appVersion: "next" });
+      return { error: null, db, current };
+    } catch (error) {
+      expect(error).toBeInstanceOf(MigrationError);
+      return { error: (error as Error).message, db, current };
+    }
+  }
+
+  it("反例：删表、删列、表或列改名、删索引、重写触发器、重建表时丢列或改类型或加 NOT NULL，都回滚并拒绝", () => {
+    const cases: Array<[string, string]> = [
+      [`${HEADER}\nDROP TABLE revisions;\n`, "删掉或改名了表 revisions"],
+      // 小写、注释和一个文件里的多条语句：判断看的是执行后的结构，写法不影响。
+      [`${HEADER}\n/* 看起来只是加一张表 */ create table extra_ok (id integer);\n-- drop 写在注释里不算\nalter table settings drop column updated_by;\n`, "删掉或改名了列 settings.updated_by"],
+      [`${HEADER}\nALTER TABLE revisions RENAME TO revisions_old;\n`, "删掉或改名了表 revisions"],
+      [`${HEADER}\nAlter Table settings Rename Column updated_by To changed_by;\n`, "删掉或改名了列 settings.updated_by"],
+      [`${HEADER}\nDrOp InDeX audit_logs_at;\n`, "删掉或改名了索引 audit_logs_at"],
+      [`${HEADER}\nDROP TRIGGER audit_logs_no_delete;\nCREATE TRIGGER audit_logs_no_delete BEFORE DELETE ON audit_logs BEGIN SELECT 1; END;\n`, "改了触发器 audit_logs_no_delete的定义"],
+      [
+        `${HEADER}\nCREATE TABLE revisions_new (scope TEXT PRIMARY KEY, updated_at INTEGER NOT NULL);\nINSERT INTO revisions_new SELECT scope, updated_at FROM revisions;\nDROP TABLE revisions;\nALTER TABLE revisions_new RENAME TO revisions;\n`,
+        "删掉或改名了列 revisions.revision",
+      ],
+      [
+        `${HEADER}\nCREATE TABLE revisions_new (scope TEXT PRIMARY KEY, revision TEXT NOT NULL, updated_at INTEGER NOT NULL);\nINSERT INTO revisions_new SELECT * FROM revisions;\nDROP TABLE revisions;\nALTER TABLE revisions_new RENAME TO revisions;\n`,
+        "改了列 revisions.revision 的类型（INTEGER → TEXT）",
+      ],
+      [
+        `${HEADER}\nCREATE TABLE settings_new (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_by INTEGER NOT NULL, updated_at INTEGER NOT NULL);\nINSERT INTO settings_new SELECT * FROM settings;\nDROP TABLE settings;\nALTER TABLE settings_new RENAME TO settings;\n`,
+        "给已有列 settings.updated_by 加了 NOT NULL",
+      ],
+    ];
+    for (const [sql, expected] of cases) {
+      const { error, db, current } = applyNext(sql);
+      expect(error, sql).toContain(`已回滚，库停在第 ${current} 号迁移：它声明 shrink=false，执行后却${expected}`);
+      expect(error).toContain("要改成 shrink=true 并另写 ADR 取得所有者批准");
+      // 事务整体回滚：版本、记录和结构都停在执行之前。
+      expect(readSchemaState(db, current + 1).userVersion).toBe(current);
+      expect((db.prepare("SELECT count(*) AS n FROM schema_migrations").get() as { n: number }).n).toBe(current);
+      expect(listTables(db)).toEqual(expect.arrayContaining(["revisions", "settings"]));
+      expect(listTables(db)).not.toContain("extra_ok");
+      expect(db.prepare("SELECT key, updated_by FROM settings").all()).toEqual([{ key: "pause.global", updated_by: 7 }]);
+      expect((db.prepare("SELECT sql FROM sqlite_master WHERE name = 'audit_logs_no_delete'").get() as { sql: string }).sql).toContain("RAISE(ABORT");
+    }
+  });
+
+  it("按官方步骤重建表放宽 CHECK（列、索引原样重建）不算收缩：shrink=false 通过，数据保留，兼容版本不变", () => {
+    const db = open(join(tempDir(), "geek-bot.db"));
+    migrateWith(db, migrationSet());
+    db.prepare("INSERT INTO alerts (kind, severity, subject, message, first_at, last_at, count) VALUES ('backup_failed', 'critical', 'backup/daily', 'x', 1, 1, 1)").run();
+    // 迁移作者照抄 0001 里建索引的原文。
+    const index = (db.prepare("SELECT sql FROM sqlite_master WHERE name = 'alerts_open_kind_subject'").get() as { sql: string }).sql;
+    const rebuild = [
+      HEADER,
+      "CREATE TABLE alerts_new (id INTEGER PRIMARY KEY, kind TEXT NOT NULL, severity TEXT NOT NULL CHECK (severity IN ('info', 'notice', 'warning', 'critical')), subject TEXT NOT NULL, message TEXT NOT NULL, first_at INTEGER NOT NULL, last_at INTEGER NOT NULL, count INTEGER NOT NULL, acked_by INTEGER, acked_at INTEGER, resolved_at INTEGER);",
+      "INSERT INTO alerts_new SELECT * FROM alerts;",
+      "DROP TABLE alerts;",
+      "ALTER TABLE alerts_new RENAME TO alerts;",
+      `${index};`,
+      "",
+    ].join("\n");
+    const dir = migrationSet([{ slug: "relax_alert_severity", sql: rebuild }]);
+    migrateWith(db, dir);
+    const current = realMigrations().length;
+    expect(readSchemaState(db, current + 1)).toMatchObject({ userVersion: current + 1, compatVersion: 0 });
+    db.prepare("INSERT INTO alerts (kind, severity, subject, message, first_at, last_at, count) VALUES ('x', 'notice', 'y', 'z', 1, 1, 1)").run();
+    expect(db.prepare("SELECT kind, severity FROM alerts ORDER BY id").all()).toEqual([
+      { kind: "backup_failed", severity: "critical" },
+      { kind: "x", severity: "notice" },
+    ]);
+    // 上一版代码仍能打开（回滚情形）。
+    expect(planMigrations(db, loadMigrations(migrationSet()))).toMatchObject({ pending: [], databaseNewer: true });
+  });
+
+  it("声明 shrink=true 的迁移可以删表，兼容版本抬到它自己的编号", () => {
+    const db = open(join(tempDir(), "geek-bot.db"));
+    migrateWith(db, migrationSet([{ slug: "drop_revisions", sql: "-- geek-bot-migration shrink=true\nDROP TABLE revisions;\n" }]));
+    const current = realMigrations().length;
+    expect(readSchemaState(db, current + 1)).toMatchObject({ userVersion: current + 1, compatVersion: current + 1 });
+    expect(listTables(db)).not.toContain("revisions");
   });
 });
 

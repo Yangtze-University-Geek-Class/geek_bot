@@ -73,3 +73,15 @@
 - 执行者：agent-claude-geek-bot-821e-control3（Claude Code，claude-opus-5-5）
 - 做了什么：fix(control): *_KEY_FILE 只接受路径写法，报错不回显值；同一提交并入主 agent 写的推送、PR、审查记录和本轮两条返工记录；提交前跑 pnpm check 与 pnpm exec vitest run tests/control
 - 结果：pnpm check 退出码 0；tests/control 75 passed
+
+## 13:04:39 +08:00 · 返工 · #3 · 迁移器按执行前后的真实结构核对 shrink=false，并核对编号连续
+
+- 执行者：agent-claude-geek-bot-821e-control3（Claude Code，claude-opus-5-5）
+- 做了什么：审查应修项（规范写了迁移器强制只扩不缩但没实现）按首选做法实现：applyMigrations 对 shrink=false 的文件在同一事务里比较执行前后的结构（表、列的声明类型与 NOT NULL 与主键位置、索引、触发器、视图的原文），少了或变了就回滚并拒绝。没有用词法扫描：data-model 允许按官方步骤重建表放宽 CHECK（其中有 DROP TABLE 和 RENAME），词法扫描会误拒；按结构比较对大小写、注释、多语句天然成立。另按建议核对 schema_migrations 编号从 1 起连续。data-model 迁移规则写明迁移器强制的范围、重建表的限制（被外键引用的表不能这样重建：事务里 PRAGMA foreign_keys 不生效，DROP TABLE 的隐式 DELETE 会级联删子表或失败）；CODE-REVIEW 第 10 项、RELEASES 回滚第 3 步、control README、TESTING、ADR-0008 实施状态改成与实现一致的描述
+- 结果：database.test 新增两条反例（9 种收缩写法、编号不连续）换回修之前的 migrator.ts 时失败，修复后通过；重建放宽 CHECK、shrink=true 删表两条正例在修前修后都通过；tests/control 79 passed；pnpm check 退出码 0
+
+## 13:04:39 +08:00 · 提交 · #3 · 迁移器结构核对与文档一起提交
+
+- 执行者：agent-claude-geek-bot-821e-control3（Claude Code，claude-opus-5-5）
+- 做了什么：fix(control): shrink=false 的迁移按执行前后的结构核对，schema_migrations 编号必须连续；提交前跑 pnpm check 与 tests/control
+- 结果：pnpm check 退出码 0；tests/control 79 passed
