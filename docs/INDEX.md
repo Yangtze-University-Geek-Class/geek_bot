@@ -103,7 +103,7 @@
 
 | 文档 | 说明 | EN |
 |---|---|---|
-| [`CICD.md`](./ops/CICD.md) | 三条工作流（ci / issue-lifecycle / branch-hygiene）只做机器验证、PR 正文核对和合并后的清理，不部署；发布镜像的 `release.yml` 随 #7 加入。平台能力按 2026-09-25 的只读核对记录。 | — |
+| [`CICD.md`](./ops/CICD.md) | 三条工作流（ci / issue-lifecycle / branch-hygiene）只做机器验证（含 control 镜像只构建不推送的检查）、PR 正文核对和合并后的清理，不部署；发布镜像的 `release.yml` 随 #7 加入。平台能力按 2026-09-25 的只读核对记录。 | — |
 | [`LOCAL-DEV.md`](./ops/LOCAL-DEV.md) | 在本机准备 Node 22 与 pnpm 9.15.9，安装依赖，跑 `pnpm verify`，启用 Git 钩子，用 task worktree 开工和收尾，每一步写执行记录。 | — |
 | [`RELEASE-ACCEPTANCE-TEMPLATE.md`](./ops/RELEASE-ACCEPTANCE-TEMPLATE.md) | 空白模板，供验收人逐字段手工填写；不是流水线自动生成的通过证明。 | — |
 

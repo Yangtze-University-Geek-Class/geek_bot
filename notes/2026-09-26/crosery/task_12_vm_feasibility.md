@@ -62,3 +62,9 @@
 - 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
 - 做了什么：git commit：fix(node): 按审查意见收紧实验代理与探测，写 ADR-0011；提交前 pnpm verify、shellcheck
 - 结果：pnpm verify 退出码 0
+
+## 14:27:54 +08:00 · 提交 · #12 · 合入最新 stage（含 #3），并入 #3 暂存的合并与收尾记录
+
+- 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
+- 做了什么：git merge origin/stage（619ff73）；package.json 与 docs/ops/LOCAL-DEV.md 冲突手工合并（保留 dev:control 与 test:vm 两条脚本）；REFERENCES 的 QEMU 行改指 vm-feasibility 与 ADR-0011；node scripts/note.mjs flush 并入 task_3 链路的「合并」「收尾」；pnpm install --frozen-lockfile；pnpm verify
+- 结果：pnpm verify 退出码 0（Test Files 30 passed，Tests 433 passed）

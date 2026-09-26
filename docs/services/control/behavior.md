@@ -4,7 +4,7 @@
 
 状态：`proposed` · 更新：2026-09-26 · 适用：`app/control` 的仓库开关、轮询入队、PR 审查、issue 受理与跟进、修复与返工、调度和模型池（由 #6、#8、#9、#10、#13、#15、#16、#17、#18 实现）
 
-本文的规则都还没有实现，只是实现目标和审查基线。已经有代码的只有 `app/control/src/config.ts` 里的 7 个数值默认（轮询间隔、静默窗口、提醒与关闭天数、追问轮数、VM 规格）和 `@geek-bot/protocol` 的 `PR_CHANNEL_PRIORITY`；其余配置项名是本文定的，实现时照这里的名字写。改默认行为时同时改本文和 [control 服务契约](README.md)「计划中的默认行为」一节的摘要。
+本文的规则都还没有实现，只是实现目标和审查基线。已经有代码的只有 `app/control/src/config.ts` 读取的配置项（下文「配置项一览」里状态为「已有」的几行：7 个行为数值默认、#3 加的备份与部署配置）和 `@geek-bot/protocol` 的 `PR_CHANNEL_PRIORITY`；其余配置项名是本文定的，实现时照这里的名字写。改默认行为时同时改本文和 [control 服务契约](README.md)「计划中的默认行为」一节的摘要。
 
 ## 来源
 
@@ -269,7 +269,7 @@ issue #n 满足下面任一条，就算有开着的关联 PR：
 | `GEEK_BOT_MONITOR_NEW_REPOS` | `true`、`false` | `true` | `switches.monitor` | 是 | B-01 | 新增（#6） |
 | `GEEK_BOT_MONITOR_NEW_FORK_REPOS` | `true`、`false` | `false` | `switches.monitor` | 是 | B-01 | 新增（#6） |
 | `GEEK_BOT_WRITE_MODE` | `off`、`dry_run`、`on` | `dry_run` | `write_mode`（取更严） | 只读 | B-03 | 新增（#9） |
-| `GEEK_BOT_INSTANCE_ROLE` | `preview`、`production` | 无，必须配置，没配拒绝启动 | — | 只读 | B-64 | 新增（#3、#9） |
+| `GEEK_BOT_INSTANCE_ROLE` | `preview`、`production` | 无，必须配置，没配拒绝启动 | — | 只读 | B-64 | 已有（#3 读取并校验；按角色限制写入随 #9） |
 | `GEEK_BOT_PUBLISHER_REPO_ALLOWLIST` | 逗号分隔的 `<owner>/<repo>`；只在 preview 下生效 | 空（不写任何仓库） | — | 只读 | B-64 | 新增（#9） |
 | `GEEK_BOT_PUBLISHER_REPO_DENYLIST` | 逗号分隔的 `<owner>/<repo>`；只在 production 下生效 | 空 | — | 只读 | B-64 | 新增（#9） |
 | `GEEK_BOT_CATCHUP_WINDOW_HOURS` | 整数，≥ 1 | `72` | — | 是 | B-18 | 新增（#8） |
@@ -289,10 +289,18 @@ issue #n 满足下面任一条，就算有开着的关联 PR：
 | `GEEK_BOT_WRITE_RATE_PER_HOUR` | 整数，1–500 | `400` | — | 只能收紧（只能调小） | B-63 | 新增（#9） |
 | `GEEK_BOT_TASK_DATA_RETENTION_DAYS` | 整数，≥ 1 | `30` | — | 是 | [数据模型](data-model.md) | 新增（#14） |
 | `GEEK_BOT_HEALTH_SAMPLE_RETENTION_DAYS` | 整数，≥ 1 | `7` | — | 是 | [数据模型](data-model.md) | 新增（#11） |
-| `GEEK_BOT_BACKUP_KEEP_DAILY` | 整数，≥ 1 | `7` | — | 是 | [数据模型](data-model.md) | 新增（#3） |
-| `GEEK_BOT_BACKUP_KEEP_WEEKLY` | 整数，≥ 0 | `4` | — | 是 | [数据模型](data-model.md) | 新增（#3） |
-| `GEEK_BOT_PUBLIC_ORIGIN` | 实例的 origin，如 `https://geek-bot.example.com` | 空 | — | 只读 | 不是行为规则，见 [API](../../architecture/API.md)「会话与 CSRF」 | 新增（#5） |
-| `GEEK_BOT_ALLOW_PLAINTEXT_MESH` | `true`、`false` | `false` | — | 只读 | 不是行为规则，见 [SECURITY](../../architecture/SECURITY.md) | 新增（#5、#7） |
+| `GEEK_BOT_BACKUP_KEEP_DAILY` | 整数，≥ 1 | `7` | — | 是 | [数据模型](data-model.md) | 已有（#3） |
+| `GEEK_BOT_BACKUP_KEEP_WEEKLY` | 整数，≥ 0；0 表示不做每周备份 | `4` | — | 是 | [数据模型](data-model.md) | 已有（#3） |
+| `GEEK_BOT_BACKUP_HOUR_UTC` | 整数，0–23 | `3` | — | 是 | 每天 UTC 这一点之后做当天的备份与恢复校验，见 [数据模型](data-model.md) | 已有（#3） |
+| `GEEK_BOT_PUBLIC_ORIGIN` | 实例的 origin，如 `https://geek-bot.example.com` | 空 | — | 只读 | 不是行为规则，见 [API](../../architecture/API.md)「会话与 CSRF」 | 已有（#3 用于 S-20 的启动检查；会话与 CSRF 随 #5） |
+| `GEEK_BOT_ALLOW_PLAINTEXT_MESH` | `true`、`false` | `false` | — | 只读 | 不是行为规则，见 [SECURITY](../../architecture/SECURITY.md) | 已有（#3 用于 S-20 的启动检查；cookie 与后台提示随 #5、#7） |
+| `GEEK_BOT_HOST` | 监听地址 | `127.0.0.1` | — | 只读 | 不是行为规则；非回环地址要配 origin（S-20） | 已有（#3） |
+| `GEEK_BOT_PORT` | 整数，1–65535 | `8080` | — | 只读 | 不是行为规则；后台、节点 API 与健康检查共用 | 已有（#3） |
+| `GEEK_BOT_DB_PATH` | 容器内库文件路径 | `/data/geek-bot.db` | — | 只读 | 不是行为规则；备份与本地通道放在同目录，见 [数据模型](data-model.md) | 已有（#3） |
+| `GEEK_BOT_MASTER_KEY_FILE` | 容器内密钥文件路径：绝对路径，或以 `./`、`../` 开头 | `/run/secrets/master_key` | — | 只读 | 不是行为规则；密钥表见 [SECURITY](../../architecture/SECURITY.md) | 已有（#3 读取并校验；加密令牌随 #5） |
+| `GEEK_BOT_BACKUP_KEY_FILE` | 容器内密钥文件路径：绝对路径，或以 `./`、`../` 开头 | `/run/secrets/backup_key` | — | 只读 | 不是行为规则；备份加密密钥 | 已有（#3） |
+| `GEEK_BOT_LOG_LEVEL` | `debug`、`info`、`warn`、`error` | `info` | — | 只读 | 不是行为规则 | 已有（#3） |
+| `GEEK_BOT_APP_VERSION` | 字母、数字与 `._@+-`，最长 64 | `local` | — | 只读 | 不是行为规则；只作来源记录，由部署脚本写入（#7） | 已有（#3） |
 
 架构草案里的 `PUBLISHER_REPO_ALLOWLIST` 按统一前缀改名为 `GEEK_BOT_PUBLISHER_REPO_ALLOWLIST`，只作 preview 的沙盒清单；production 的排除清单另用 `GEEK_BOT_PUBLISHER_REPO_DENYLIST`。节点侧的配置项（`GEEK_BOT_NODE_*`，包括节点令牌文件 `GEEK_BOT_NODE_TOKEN_FILE`）见 [node 服务契约](../node/README.md)，不在本表。
 

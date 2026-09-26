@@ -10,7 +10,7 @@
 
 | 目录 | 包名 | 职责 | 契约 |
 |---|---|---|---|
-| `app/control` | `@geek-bot/control` | 控制面。Fastify 5 + better-sqlite3（计划中，#3）。唯一的 SQLite 写入者、唯一的 GitHub 写入者（publisher 白名单 + outbox）；负责登录、令牌加密存放、仓库发现、轮询、调度、模型中继；同源托管 console 的静态产物 | [control](../services/control/README.md) |
+| `app/control` | `@geek-bot/control` | 控制面。Fastify 5 + better-sqlite3（#3 引入）。唯一的 SQLite 写入者、唯一的 GitHub 写入者（publisher 白名单 + outbox）；负责登录、令牌加密存放、仓库发现、轮询、调度、模型中继；同源托管 console 的静态产物 | [control](../services/control/README.md) |
 | `app/console` | `@geek-bot/console` | 管理后台。Vue 3.5 + vue-router 4 + @talex-touch/tuffex 0.6.0 + Vite 7（#4 引入外壳）。不用原生下拉框和复选框，不用 emoji | [console](../services/console/README.md) |
 | `app/node` | `@geek-bot/node` | 工作节点代理。只向外连 control（HTTP 长轮询 `/api/node/v1`），不开入站端口；管理 issue 通道的无网只读 sandbox 容器和 PR 通道的一次性 QEMU/KVM VM（计划中，#11、#14、#17） | [node](../services/node/README.md) |
 | `app/runner` | `@geek-bot/runner` | 在 sandbox 或 VM 里驱动 omp 的单文件程序，只用 Node 标准库（计划中，#14） | [runner](../services/runner/README.md) |
@@ -50,7 +50,7 @@ control 内部（计划中）：index -> app -> routes/<module> -> 服务 -> pub
 ## 数据与事务
 
 - SQLite 只属于 control：库文件放在 control 栈的命名卷里，不跨环境共享；只有 control 进程写入（单写者）。console、node、runner 都不打开数据库，只经 control 的接口读写。
-- 迁移用版本化 SQL 文件，只扩不缩（加表、加列、回填），保证上一版镜像仍能读库；迁移前自动备份；库里另记一个兼容版本，只有收缩类改动才抬高它，兼容版本比代码认识的新时拒绝启动，所以上一版镜像仍能打开新库、可以回滚（[ADR-0008](../decisions/0008-sqlite-migrations-recovery.md)，计划中，#3）。
+- 迁移用版本化 SQL 文件，只扩不缩（加表、加列、回填），保证上一版镜像仍能读库；迁移前自动备份；库里另记一个兼容版本，只有收缩类改动才抬高它，兼容版本比代码认识的新时拒绝启动，所以上一版镜像仍能打开新库、可以回滚（[ADR-0008](../decisions/0008-sqlite-migrations-recovery.md)，#3 实现）。
 - SQL 值一律参数化，动态列名只来自代码里的允许列表。
 - 一次本地业务状态变化及派生计数处于同一事务。外部请求（GitHub、模型网关）不能放进长事务。
 - 对 GitHub 的写入先在事务里记下意图（outbox，带去重键），提交后再发送；结果未知时记为 unknown，发送前先复核 GitHub 当前状态，不能盲目重试；重试不得产生第二条写入（计划中，#9）。

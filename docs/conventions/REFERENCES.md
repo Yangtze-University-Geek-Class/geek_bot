@@ -15,8 +15,11 @@
 | [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/) | type、可选 scope、breaking change 的提交结构 | [COMMITS](COMMITS.md)；中文说明和 scope 词表是本项目选择 |
 | [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) | `MAJOR.MINOR.PATCH` 各位的升级含义 | [RELEASES](RELEASES.md) 的版本号一节；`-rc.N` 预发布后缀的形状由本项目的 tag 正则限定 |
 | [TypeScript module reference](https://www.typescriptlang.org/docs/handbook/modules/reference.html) | `.js` 对应 TS 源文件、tsconfig `paths` 与 `moduleResolution` 的真实解析 | `scripts/check-boundaries.mjs` 及跨包导入反例，见 [MODULAR-DEVELOPMENT](MODULAR-DEVELOPMENT.md) |
-| [Fastify Testing](https://fastify.dev/docs/latest/Guides/Testing/) | 构造与监听分离、inject 注册真实插件与路由、关闭资源 | [TESTING](TESTING.md) 的隔离一节；control 路由测试（计划中，#3） |
-| [Fastify Validation and Serialization](https://fastify.dev/docs/latest/Reference/Validation-and-Serialization/) | 运行时 HTTP Schema 与类型声明各有职责 | control 各路由模块的 `contracts.ts`（计划中，#3）；[API](../architecture/API.md) |
+| [Fastify Testing](https://fastify.dev/docs/latest/Guides/Testing/) | 构造与监听分离、inject 注册真实插件与路由、关闭资源 | [TESTING](TESTING.md) 的隔离一节；control 路由测试（`tests/control/server.test.ts`，#3） |
+| [Fastify Validation and Serialization](https://fastify.dev/docs/latest/Reference/Validation-and-Serialization/) | 运行时 HTTP Schema 与类型声明各有职责 | control 各路由模块的 `contracts.ts`（#3 起，`app/control/src/routes/health/contracts.ts`）；[API](../architecture/API.md) |
+| [Fastify Logging](https://fastify.dev/docs/latest/Reference/Logging/) | 自定义 logger 经 `loggerInstance` 传入，要有 `info`、`error`、`debug`、`fatal`、`warn`、`trace`、`silent`、`child` 与 `level`（2026-09-26 核对） | control 的结构化日志 `app/control/src/log/logger.ts`，见 [control 服务契约](../services/control/README.md)「日志与打码」 |
+| [SQLite Write-Ahead Logging](https://www.sqlite.org/wal.html)、[SQLite PRAGMA](https://www.sqlite.org/pragma.html) | 先设 `locking_mode=EXCLUSIVE` 再访问 WAL 库时不建共享内存文件，连接一直持有锁；`wal_checkpoint(TRUNCATE)` 成功后把 WAL 截断到 0 字节，返回 busy、log、checkpointed；`user_version` 存在库文件头（2026-09-26 核对） | control 的单写者与停机 checkpoint（`app/control/src/db/database.ts`）、迁移器（`src/db/migrator.ts`），见 [数据模型](../services/control/data-model.md) |
+| [better-sqlite3 API](https://github.com/WiseLibs/better-sqlite3/blob/master/docs/api.md) | `.backup()` 是在线备份，同一连接在备份期间的写入会进入备份，别的连接写入会让备份重来；构造参数 `timeout` 是等锁的毫秒数（默认 5000）（2026-09-26 核对） | control 的备份（`app/control/src/ops/backup.ts`），见 [数据模型](../services/control/data-model.md)「备份与每日恢复校验」 |
 | [W3C APG modal dialog](https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/) | 弹层名称、焦点进入/圈定/恢复、危险操作优先聚焦取消 | 管理后台的抽屉导航（焦点进入、Esc 关闭、焦点归还，`tests/e2e/`，#4）与确认弹层（随用到它的页面加入），见 [DESIGN](../design/DESIGN.md) |
 | [WCAG 2.2](https://www.w3.org/TR/WCAG22/) | AA 级验收目标；文本对比度 4.5:1 与大文本 3:1（1.4.3）、焦点可见（2.4.7）、目标尺寸 24×24 CSS 像素及其间距例外（2.5.8） | [DESIGN](../design/DESIGN.md) 的无障碍目标；管理后台浏览器回归（`tests/e2e/`，#4） |
 | [Vite：Getting Started](https://vite.dev/guide/) | 「Vite requires Node.js version 20.19+, 22.12+」（2026-09-26 核对） | [STACK](../design/STACK.md) 的前端构建；本仓库的 Node 22 基线满足 |
@@ -45,7 +48,7 @@
 |---|---|---|
 | [OWASP Session Management](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html) | 会话验证、有效期、身份变化后的更新以及 Cookie 范围风险 | [安全模型](../architecture/SECURITY.md)；后台会话（计划中，#5） |
 | [OWASP LLM Prompt Injection Prevention](https://cheatsheetseries.owasp.org/cheatsheets/LLM_Prompt_Injection_Prevention_Cheat_Sheet.html) | 仓库、代码注释、文档等外部内容里的间接提示注入 | [CODE-REVIEW](CODE-REVIEW.md) 第 14 项；[安全模型](../architecture/SECURITY.md)；runner 剔除规则文件与输出中和（计划中，#9、#14） |
-| [QEMU Invocation](https://www.qemu.org/docs/master/system/invocation.html) | `-netdev user` 的 `restrict=on` 与 `guestfwd`、`-fw_cfg`、`-sandbox`、加速器 `kvm` | PR 通道一次性 VM（计划中，#12 实测，#17 实现） |
+| [QEMU Invocation](https://www.qemu.org/docs/master/system/invocation.html) | `-netdev user` 的 `restrict=on` 与 `guestfwd`、`-fw_cfg`、`-sandbox`、加速器 `kvm` | PR 通道一次性 VM：#12 已实测（[VM 可行性实测](../services/node/vm-feasibility.md)，`-sandbox` 取值见 [ADR-0011](../decisions/0011-qemu-sandbox-elevateprivileges.md)），#17 实现 |
 | [QEMU Network emulation](https://www.qemu.org/docs/master/system/devices/net.html) | 用户态网络栈的工作方式 | 同上 |
 | [QEMU fw_cfg](https://www.qemu.org/docs/master/specs/fw_cfg.html) | `-fw_cfg name=opt/...,file=...` 把文件传给 guest，`opt/` 前缀留给用户 | 每任务令牌传入 VM 的方式（计划中，#17） |
 

@@ -22,6 +22,7 @@
     "build": "pnpm check:runtime && pnpm -r --if-present run build",
     "verify": "pnpm check && pnpm test && pnpm build",
     "dev:console": "pnpm --filter @geek-bot/console dev",
+    "dev:control": "pnpm check:runtime && pnpm --filter @geek-bot/protocol build && pnpm --filter @geek-bot/control build && node app/control/scripts/dev.mjs",
     "test:e2e": "pnpm check:runtime && playwright test",
     "test:vm": "bash tests/integration/vm/run.sh"
   },

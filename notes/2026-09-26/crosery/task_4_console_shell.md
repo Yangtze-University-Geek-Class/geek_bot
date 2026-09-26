@@ -75,3 +75,21 @@
 - 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
 - 做了什么：git commit：fix(console): 按复核建议收紧重连与被禁符号扫描；提交前 pnpm verify、pnpm test:e2e
 - 结果：pnpm verify 退出码 0（Tests 319 passed）；pnpm test:e2e 42 passed
+
+## 11:21:47 +08:00 · PR · #4 · 更新 #28 正文：验证结果、验收截图链接与审查结论改到 947d549
+
+- 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
+- 做了什么：gh pr edit 28；正文先经 node scripts/pr-contract.mjs check 本地核对
+- 结果：pr-contract 通过；正文含 947d549、运行 36214424108 的 artifact、结论：通过
+
+## 11:21:47 +08:00 · 合并 · #4 · #28 合进 stage
+
+- 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
+- 做了什么：gh pr merge 28 --merge（947d549 上 CI 全绿：verify、branch-guard、core、console-e2e、pr-contract、lint-workflows）
+- 结果：合并提交 400917d090a08843376296014fdf38d3ce9ac3aa
+
+## 11:23:03 +08:00 · 收尾 · #4 · PR #28 已合并，清理 worktree
+
+- 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
+- 做了什么：node scripts/task.mjs finish 4：删 worktree .claude/worktrees/task-4 与本地分支 task/4/console_shell
+- 结果：PR 已合并

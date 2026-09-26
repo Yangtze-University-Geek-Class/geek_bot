@@ -10,7 +10,7 @@
  * 硬失败条件：
  *   1. 根 `.env`、`.env.local`、`.env.<环境>.local` 等本地/私有 env 文件进入版本控制（或未被忽略）。
  *   2. 模板 env 里「密钥名 = 非空值」（SECRET / TOKEN / PASSWORD / API_KEY / SETUP_KEY / JOIN_KEY / MASTER_KEY /
- *      ENCRYPTION_KEY / SSH_KEY / PRIVATE_KEY…）；键名以 `_FILE` 结尾时，值只能是文件路径。
+ *      BACKUP_KEY / ENCRYPTION_KEY / SSH_KEY / PRIVATE_KEY…）；键名以 `_FILE` 结尾时，值只能是文件路径。
  *   3. 任何被扫描文本里出现 sshpass 内联口令、私钥材料、GitHub 令牌形态、OpenAI 兼容密钥形态（`sk-` 开头的长串）。
  *   4. 数据库文件进入版本控制：`.db` / `.sqlite` / `.sqlite3` 及其附属与备份后缀（-journal、-wal、-shm、.bak、.1……；
  *      源码与文档扩展名除外，例如 repo.db.ts），以及任何以 SQLite 文件头开头的文件（改了名的库文件）。
@@ -39,7 +39,7 @@ const FORBIDDEN_ENV_RES = [
   /(?:^|\/)\.env\.[a-z0-9-]+\.local$/,
 ];
 /** 键名长得像密钥：模板里一旦有非空值即失败（CLIENT_ID 这类公开标识不在列表里）。 */
-export const SECRET_KEY_RE = /(?:^|_)(?:SECRET|TOKEN|PASSWORD|PASSWD|CREDENTIALS?|API_KEY|SETUP_KEY|JOIN_KEY|MASTER_KEY|ENCRYPTION_KEY|SSH_KEY|PRIVATE_KEY)(?:_|$)/i;
+export const SECRET_KEY_RE = /(?:^|_)(?:SECRET|TOKEN|PASSWORD|PASSWD|CREDENTIALS?|API_KEY|SETUP_KEY|JOIN_KEY|MASTER_KEY|BACKUP_KEY|ENCRYPTION_KEY|SSH_KEY|PRIVATE_KEY)(?:_|$)/i;
 /** `*_FILE` 的值只能是文件路径（绝对路径或 ./、../ 开头的相对路径，不含空白）。 */
 const FILE_REFERENCE_RE = /^(?:\/|\.{1,2}\/)\S*$/;
 /** 二进制判定：前 8 KB 里出现 NUL 字节（与 check-public-safety 同一口径）。 */

@@ -73,6 +73,7 @@ export async function iconsWithoutGlyph(page: Page): Promise<string[]> {
   return page.evaluate(() =>
     Array.from(document.querySelectorAll<HTMLElement>("[class*='i-carbon-']"))
       .filter(element => {
+        if (element.hasAttribute("data-v-wave-container-internal")) return false;
         const style = getComputedStyle(element);
         const mask = style.maskImage || style.getPropertyValue("-webkit-mask-image");
         return !mask || mask === "none";
@@ -89,11 +90,14 @@ export async function pageOverflow(page: Page): Promise<{ scrollWidth: number; c
 /**
  * 外壳里（含侧栏、主内容区和挂到 body 下的抽屉）被 overflow: hidden / clip 截掉的元素：内容比盒子宽，又不能滚动。
  * 单行省略（text-overflow: ellipsis）且带 title、能看到完整值的，按 DESIGN 允许。
+ * Tuffex 按钮点击时 v-wave 生成的波纹容器（`data-v-wave-container-internal`）是装饰动画，
+ * 波纹扩散时本来就比容器大，不算内容被截断（#30）。
  */
 export async function clippedElements(page: Page): Promise<string[]> {
   return page.evaluate(() =>
     Array.from(document.querySelectorAll<HTMLElement>(".shell, .shell *, .tx-drawer, .tx-drawer *"))
       .filter(element => {
+        if (element.hasAttribute("data-v-wave-container-internal")) return false;
         const style = getComputedStyle(element);
         if (style.overflowX !== "hidden" && style.overflowX !== "clip") return false;
         if (element.scrollWidth <= element.clientWidth + 1) return false;

@@ -1,0 +1,28 @@
+# 镜像的构建上下文是仓库根（app/<服务>/Dockerfile*）。Dockerfile 只 COPY 明确列出的路径；
+# 这里另外排除本机产物、实例数据和私有 env，既缩小上下文，也保证它们不会被误拷进镜像。
+**/node_modules
+**/dist
+**/.sample-dist
+**/*.tsbuildinfo
+.git
+.claude
+.omp
+.agents
+.tools
+.githooks
+.github
+data
+notes
+docs
+tests
+test-results
+playwright-report
+coverage
+vm-cache
+**/.env
+**/.env.*
+**/*.db
+**/*.db-*
+**/*.sqlite
+**/*.sqlite3
+**/*.gbbk

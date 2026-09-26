@@ -61,7 +61,7 @@ console 对 `@geek-bot/protocol` 只做 type 导入（`ApiErrorBody`、`ApiList`
 | 模型池页 | 拖拽与键盘排序、窄屏上移下移、思考档位 | #13 |
 | 任务详情页 | 实时输出、原始事件、模型尝试与降级时间线 | #14 |
 | 设置页 | 轮询间隔、静默窗口、等回复天数与轮数等参数 | #16 |
-| 同源托管 | control 托管 `dist/` 的静态产物，打进 control 镜像 | #3、#7 |
+| 同源托管 | control 托管 `dist/` 的静态产物，打进 control 镜像（#3 建了 control 镜像，没有打进 console 产物） | #7 |
 
 ## 接口与数据归属
 

@@ -4,7 +4,7 @@
 
 状态：`proposed` · 更新：2026-09-26 · 适用：`app/control` 的 `/api/v1/*`、`/healthz`、`/readyz`、`/api/release`，调用它们的 `app/console`，`packages/protocol` 里的 console API DTO（由 #3–#20 实现，每个端点的实现 issue 见端点表）
 
-本文是设计，还没有任何端点实现。实现以后，接口的来源是代码：control 各路由模块的 `contracts.ts`（入参与出参的 JSON Schema）和 `@geek-bot/protocol` 的 DTO 类型；本文与代码不符时，在同一次改动里改文档（[DOCUMENTATION](../conventions/DOCUMENTATION.md)「同步规则」）。
+本文是设计。已经实现的只有 A-53 `/healthz`、A-54 `/readyz`（#3），以及「错误格式」里的通用形状、未知路径 404、`X-Request-Id`、请求体 64 KB 上限、非 JSON 请求体 415、Ajv 不删多余字段（#3，`app/control/src/app.ts`）；其余端点都还没有实现。实现以后，接口的来源是代码：control 各路由模块的 `contracts.ts`（入参与出参的 JSON Schema）和 `@geek-bot/protocol` 的 DTO 类型；本文与代码不符时，在同一次改动里改文档（[DOCUMENTATION](../conventions/DOCUMENTATION.md)「同步规则」）。
 
 节点使用的 `/api/node/v1/*` 不在本文，见 [节点协议](../services/node/protocol.md)。整体设计见 [ARCHITECTURE](ARCHITECTURE.md)，安全不变量见 [SECURITY](SECURITY.md)。
 
@@ -234,7 +234,7 @@
 |---|---|---|---|---|---|---|
 | A-53 | GET | `/healthz` | 公开 | 无 | 200 `{ "status": "ok" }`：进程活着就返回，不检查依赖 | #3 |
 | A-54 | GET | `/readyz` | 公开 | 无 | 同时满足才返回 200：库可写；库的兼容版本 K ≤ 代码版本 C；已执行的迁移 D ≥ C（没有待执行的迁移）；必需的密钥文件可读。否则 503，列出没通过的检查项名称（不含路径和值）。catalog 没配置不算未就绪，只在后台状态里告警。回滚到旧镜像时 D > C、K ≤ C，健康门能过。部署脚本的健康门用它 | #3 |
-| A-55 | GET | `/api/release` | 公开 | 无 | 展示值（正式 `X.Y.Z`、预发布 `X.Y.Z-rc.N@<sha12>`、本机「本地开发 · 未发布」）、`version`、完整提交 SHA、支持的节点协议版本范围；值由部署脚本写入运行时环境（[RELEASES](../conventions/RELEASES.md)「展示值与发布身份」） | #3、#7 |
+| A-55 | GET | `/api/release` | 公开 | 无 | 展示值（正式 `X.Y.Z`、预发布 `X.Y.Z-rc.N@<sha12>`、本机「本地开发 · 未发布」）、`version`、完整提交 SHA、支持的节点协议版本范围；值由部署脚本写入运行时环境（[RELEASES](../conventions/RELEASES.md)「展示值与发布身份」） | #7（#3 没有实现：展示值的组合规则依赖只在 `scripts/release-tags.mjs` 实现的 tag 语法，见 [control 服务契约](../services/control/README.md)「已知限制」） |
 | A-56 | GET | `/api/v1/stream` | 任一角色 | `topics`；可选 `Last-Event-ID` 头 | SSE 事件流，事件类型见「SSE」 | #14（客户端随 #4） |
 
 ## 节点 API
