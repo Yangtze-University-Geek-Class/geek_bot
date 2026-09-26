@@ -43,7 +43,7 @@
 | 规范独立（不引用别的项目） | `tests/tooling/standalone-refs.test.ts` | 入库或未忽略的文件（上游 Tuffex 快照 `reference/`、`snapshot/` 除外）的路径、内容或符号链接目标里出现旧项目名、旧仓库名或旧规范的来源提交号（测试里这些标识在运行时拼出，不留明文） |
 | 组件文档快照（`tuffex-docs`） | `tests/tooling/tuffex-docs.test.ts` | 快照文件被改动；`reference/`、`snapshot/` 下有清单没登记的文件；路径穿越、绝对路径或符号链接目标；生成文件里写死项目名 |
 | 标签声明（`scripts/labels.mjs`） | `tests/tooling/labels.test.ts` | `labels.yml` 颜色或说明不合规；issue 模板引用了没声明的标签；「端」下拉不是八个端；不认识的参数以 0 退出 |
-| control 镜像（`ci.yml` 的 `docker` job，#3） | `tests/tooling/ci-docker.test.ts` | 断言脚本在 `Config.User` 为空、`root`、`0`、`0:0`，容器 uid 为 0，没有 HEALTHCHECK 或是 `NONE` 时以 0 退出（脚本从 `ci.yml` 取出、按 GitHub 的 bash 参数执行，`docker` 换成桩）；job 出现 `docker push`、`docker login`；`verify` 的 `needs` 或汇总条件漏了 `docker` |
+| control 镜像（`ci.yml` 的 `docker` job，#3） | `tests/tooling/ci-docker.test.ts` | 断言脚本在 `Config.User` 为空、`root`、`0`、`0:0`，容器 uid 为 0，没有 HEALTHCHECK 或是 `NONE` 时以 0 退出；Dockerfile 的 `FROM` 不带 digest、`ARG` 默认值不带 digest、digest 不是 64 位、引用没定义的阶段、没有 `FROM` 时以 0 退出；停机日志里没有 `busy` 为 0 的「WAL 已 checkpoint，库已关闭」、退出码不是 0、`/readyz` 一直不是 200 时以 0 退出（脚本从 `ci.yml` 取出、按 GitHub 的 bash 参数执行，`docker`、`curl`、`sudo`、`sleep` 换成桩）；job 出现 `docker push`、`docker login`；`verify` 的 `needs` 或汇总条件漏了 `docker` |
 | PR 目标分支（`issue-lifecycle.yml` 的 `pr-base`） | `tests/tooling/labels.test.ts` | PR 指向 `stage` 以外的分支（`main`、`dev/alice`、`task/12/review_queue`、`stage2`、空）时不以 1 退出；`pr-base` 不随 edited 触发；`pr-contract`、`close-on-merge` 没限定只处理指向 `stage` 的 PR |
 
 `app/node`、`app/runner`、`packages/protocol` 现在只有最小源码，各有一份最小测试：`tests/node/config.test.ts`（节点配置校验）、`tests/runner/omp-args.test.ts`（omp 参数）、`tests/protocol/protocol.test.ts`（协议常量与通道映射）；另由各包的 `typecheck` 与 `build` 证明各包能编译、能类型导入 `@geek-bot/protocol`。这些测试只证明工作区与工具链可用，不证明任何业务功能。

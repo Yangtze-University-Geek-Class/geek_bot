@@ -4,7 +4,7 @@
 
 状态：`current` · 更新：2026-09-26 · 适用：本仓库的发布 tag、版本号、镜像与预发布 / 正式实例 · 依据：[ADR-0001](../decisions/0001-standalone-product.md)（独立产品，env 模板只放占位符）；部署方式是 ghcr 同一 digest 加目标机拉取，详细决策见 [ADR-0007](../decisions/0007-ghcr-pull-deploy.md)。分支规则见 [BRANCHING](BRANCHING.md)。
 
-本文中标「计划中」的部分（release.yml、部署与回滚脚本、compose、env 模板、发布规划器、版本接口）还不存在，分别由 #3、#7、#11、#17、#20 实现；tag 格式、授权门禁、rc 编号、版本号与 tag 不可变这些规则现在就生效。
+本文中标「计划中」的部分（release.yml、部署与回滚脚本、compose、env 模板、发布规划器、版本接口）还不存在，分别由 #7、#11、#17、#20 实现（版本接口 A-55 原定随 #3，已改到 #7）；tag 格式、授权门禁、rc 编号、版本号与 tag 不可变这些规则现在就生效。
 
 ## 发布模型：tag 驱动
 

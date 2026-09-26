@@ -100,7 +100,7 @@ control 从不运行 omp，也不执行目标仓库里的任何代码。
 - 以 `node` 用户（uid 1000）运行；`/data` 属 `node`、权限 0700，部署时挂命名卷；代码文件属 root，运行用户只读。
 - `HEALTHCHECK` 每 15 秒运行 `node dist/healthcheck.js` 请求本进程的 `/readyz`（超时 5 秒，启动宽限 60 秒，连续 3 次失败算不健康）。
 - 不设 `GEEK_BOT_HOST`：镜像默认只绑回环地址，部署时由 compose 设成 `0.0.0.0` 并配置 origin（#7）。
-- 镜像里没有环境身份、域名、密钥和 console 产物。CI 的 `docker` job 只构建、不推送，断言非 root 与 HEALTHCHECK 并起一次容器（[CICD](../../ops/CICD.md)）；推镜像随 #7 的 `release.yml`。
+- 镜像里没有环境身份、域名、密钥和 console 产物。CI 的 `docker` job 只构建、不推送，断言基础镜像按 digest 钉死、非 root 与 HEALTHCHECK，并起一次容器核对 `/readyz`、退出码和 checkpoint 日志（[CICD](../../ops/CICD.md)）；推镜像随 #7 的 `release.yml`。
 
 ## 计划中的模块与对应 issue
 

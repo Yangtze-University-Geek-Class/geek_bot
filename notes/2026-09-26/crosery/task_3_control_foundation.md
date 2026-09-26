@@ -121,3 +121,15 @@
 - 执行者：agent-claude-geek-bot-821e-control3（Claude Code，claude-opus-5-5）
 - 做了什么：fix(control): 明文临时文件改放 <dataDir>/tmp，建出即 0600，启动时清空；提交前跑 pnpm check 与 tests/control
 - 结果：pnpm check 退出码 0；tests/control 88 passed
+
+## 13:15:41 +08:00 · 返工 · #3 · CI docker job 断言 digest 钉死与 checkpoint 日志；RELEASES、SECURITY 与实现对齐
+
+- 执行者：agent-claude-geek-bot-821e-control3（Claude Code，claude-opus-5-5）
+- 做了什么：审查建议 7、8：ci.yml 的 docker job 在构建前加一步「断言基础镜像按 digest 钉死」（awk 核对每个 FROM：阶段名，或带 @sha256:<64 位十六进制>，经 ARG 默认值给出的按默认值核对）；起容器那一步把 docker logs 收进变量，断言有 busy 为 0 的「WAL 已 checkpoint，库已关闭」。tests/tooling/ci-docker.test.ts 加通过与失败用例（docker、curl、sudo、sleep 换成桩）。SECURITY 第 7 行写明三项都由 docker job 断言；RELEASES 第 7 行去掉 #3（版本接口已改到 #7）；CICD、TESTING、control README 同步
+- 结果：新用例换回修之前的 ci.yml 时 3 条失败（缺 digest 步骤 2 条；日志没有 checkpoint 行时旧脚本以 0 退出），修复后 ci-docker.test 8 passed；actionlint 1.7.12 退出码 0；awk 程序在本机 BWK awk 与一个 Debian 基础的临时容器里的 busybox awk 下都按预期通过与失败，GitHub 运行器上的 mawk 没有实测；pnpm check 退出码 0
+
+## 13:15:41 +08:00 · 提交 · #3 · CI docker job 的两条新断言一起提交
+
+- 执行者：agent-claude-geek-bot-821e-control3（Claude Code，claude-opus-5-5）
+- 做了什么：ci(control): docker job 断言基础镜像按 digest 钉死与停机 checkpoint 日志；提交前跑 pnpm check、ci-docker.test 与 actionlint
+- 结果：pnpm check 退出码 0；ci-docker.test 8 passed；actionlint 退出码 0
