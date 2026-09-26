@@ -175,3 +175,9 @@
 - 执行者：agent-claude-geek-bot-821e-control3（Claude Code，claude-opus-5-5）
 - 做了什么：docs(control): data-model 点名迁移器查不出的例子；提交前跑 pnpm check
 - 结果：pnpm check 退出码 0
+
+## 13:41:10 +08:00 · 返工 · #3 · 复审三条改完后的整体验证
+
+- 执行者：agent-claude-geek-bot-821e-control3（Claude Code，claude-opus-5-5）
+- 做了什么：在 a670402 上跑 pnpm verify、actionlint、pnpm test:e2e（4174 空闲）；这一轮没有重新构建镜像做容器实测
+- 结果：pnpm verify 退出码 0（Test Files 29 passed，Tests 414 passed）；actionlint 1.7.12 退出码 0；pnpm test:e2e 42 passed；镜像这一轮未实测，改动（迁移器的事务与保存点、密钥文件报错文字）由 tests/control 覆盖
