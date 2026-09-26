@@ -27,7 +27,7 @@ control 从不运行 omp，也不执行目标仓库里的任何代码。
 | `src/services.ts` | 启动与停机的全部步骤（见下文「启动、就绪与停机」）；`startControl` 返回句柄，测试直接调用 |
 | `src/app.ts` | Fastify 组装：日志、服务端生成的 `X-Request-Id`、[API](../../architecture/API.md) 的错误格式、Ajv `removeAdditional: false`、请求体 64 KB 上限、只接受 JSON 请求体；注册路由模块 |
 | `src/config.ts` | 产品默认值 `CONTROL_DEFAULTS` 与环境变量表 `CONTROL_ENV`（轮询、静默窗口、提醒与关闭天数、追问轮数、VM 规格，以及 #3 加的备份保留份数与每日备份时刻）；部署配置 `createDeploymentConfig`（实例角色、监听地址与端口、origin、明文模式、库路径、两个密钥文件路径、日志级别、镜像版本）；`loadControlConfig` 一次读出两部分，问题合在一个 `ControlConfigError` 里一起报。都是纯函数，不读 `process.env`、不读文件 |
-| `src/secrets/key-files.ts` | 读 `*_FILE` 指向的 32 字节密钥（base64 或 64 位十六进制）；报错只有变量名和路径；读到的原文登记进打码器；备份密钥的指纹 |
+| `src/secrets/key-files.ts` | 读 `*_FILE` 指向的 32 字节密钥（base64 或 64 位十六进制）；报错与提醒只写变量名，不回显路径和内容；读到的原文登记进打码器；备份密钥的指纹 |
 | `src/db/database.ts` | 打开库（WAL、`synchronous=FULL`、`foreign_keys=ON`、`busy_timeout=5000`、`locking_mode=EXCLUSIVE`）、打开独立副本、`wal_checkpoint(TRUNCATE)` 后关库、各表行数 |
 | `src/db/migrator.ts`、`src/db/sql-statements.ts`、`src/db/migrations/0001_foundation.sql` | 迁移器（`sql-statements.ts` 在加载时找出顶层的事务控制语句）与第一个迁移（7 张表：`schema_migrations`、`settings`、`revisions`、`idempotency_keys`、`alerts`、`audit_logs`、`backups`）。规则见 [数据模型](data-model.md)「迁移规则」 |
 | `src/db/audit.ts`、`src/db/alerts.ts` | 唯一的审计函数（写入前打码，表只追加）；告警（同一件事只有一条未解决的，重复只加计数） |
@@ -53,7 +53,7 @@ control 从不运行 omp，也不执行目标仓库里的任何代码。
 - **实例角色** `GEEK_BOT_INSTANCE_ROLE`（`preview`、`production`）必须显式配置，没配或值不对就拒绝启动（B-64）。
 - **监听** `GEEK_BOT_HOST` 默认 `127.0.0.1`，`GEEK_BOT_PORT` 默认 `8080`。绑定非回环地址时必须配置 `GEEK_BOT_PUBLIC_ORIGIN`；origin 不是 https 时还要显式设置 `GEEK_BOT_ALLOW_PLAINTEXT_MESH=true`，否则拒绝启动（S-20）。origin 只能是 `http(s)://主机[:端口]`。
 - **库** `GEEK_BOT_DB_PATH` 默认 `/data/geek-bot.db`。加密备份在同目录的 `backups/`，运维本地通道在 `run/`，备份与恢复校验的明文临时文件在 `tmp/`（0700，文件 0600，启动时清空）。
-- **密钥只从 `*_FILE` 读**：`GEEK_BOT_MASTER_KEY_FILE`（默认 `/run/secrets/master_key`）与 `GEEK_BOT_BACKUP_KEY_FILE`（默认 `/run/secrets/backup_key`）。这两个变量只接受路径的写法：绝对路径，或以 `./`、`../` 开头（与 `check-secrets` 的密钥文件引用同一口径）；以 `/` 开头的 base64 密钥原文另按密钥的样子拦下。不合规就拒绝启动，报错只写变量名、不回显值，因为误填进来的往往就是密钥原文。文件内容是 32 个随机字节的 base64（`openssl rand -base64 32`）或 64 位十六进制；读不到、格式不对、两个变量指向同一个文件、两把密钥相同都拒绝启动，报错只写变量名和路径。直接写值的 `GEEK_BOT_MASTER_KEY`、`GEEK_BOT_BACKUP_KEY` 一旦有值就拒绝启动。文件对组或其他用户可读时记一条 warn（不阻止启动；权限由部署脚本核对，#7）。#3 只读取并校验 master key，用它加密令牌随 #5。
+- **密钥只从 `*_FILE` 读**：`GEEK_BOT_MASTER_KEY_FILE`（默认 `/run/secrets/master_key`）与 `GEEK_BOT_BACKUP_KEY_FILE`（默认 `/run/secrets/backup_key`）。这两个变量只接受路径的写法：绝对路径，或以 `./`、`../` 开头（与 `check-secrets` 的密钥文件引用同一口径）；以 `/` 开头的 base64 密钥原文另按密钥的样子拦下。不合规就拒绝启动，报错只写变量名、不回显值，因为误填进来的往往就是密钥原文。文件内容是 32 个随机字节的 base64（`openssl rand -base64 32`）或 64 位十六进制；读不到、格式不对、两个变量指向同一个文件、两把密钥相同都拒绝启动，报错只写变量名、提示核对挂载，不回显路径：以 `/` 开头、不带 `=` 的 base64 原文也满足路径的写法，拼进报错就等于泄露。control 和 CLI 的报错是同一份文字。直接写值的 `GEEK_BOT_MASTER_KEY`、`GEEK_BOT_BACKUP_KEY` 一旦有值就拒绝启动。文件对组或其他用户可读时记一条 warn（不阻止启动；权限由部署脚本核对，#7）。#3 只读取并校验 master key，用它加密令牌随 #5。
 - **日志级别** `GEEK_BOT_LOG_LEVEL`：`debug`、`info`（默认）、`warn`、`error`。
 - **镜像版本** `GEEK_BOT_APP_VERSION`（默认 `local`）：只作来源记录，写进 `schema_migrations.app_version` 与 `backups.app_version`；由部署脚本写入（#7）。它不是 A-55 的展示值。
 - **备份** `GEEK_BOT_BACKUP_KEEP_DAILY`（默认 7）、`GEEK_BOT_BACKUP_KEEP_WEEKLY`（默认 4；为 0 时不做每周备份，每周第一次也记为每日）、`GEEK_BOT_BACKUP_HOUR_UTC`（默认 3，即每天 UTC 03:00 之后做当天的备份）。

@@ -151,3 +151,15 @@
 - 执行者：agent-claude-geek-bot-821e-control3（Claude Code，claude-opus-5-5）
 - 做了什么：fix(control): 迁移文件不能自己结束事务，执行后用保存点核对；提交前跑 pnpm check 与 tests/control
 - 结果：pnpm check 退出码 0；tests/control 91 passed
+
+## 13:39:25 +08:00 · 返工 · #3 · 密钥文件的报错与提醒只写变量名，不回显路径
+
+- 执行者：agent-claude-geek-bot-821e-control3（Claude Code，claude-opus-5-5）
+- 做了什么：复审第 2 条：key-files.ts 里「不存在」「读不了」「不是普通文件」「不是 32 字节密钥」四类报错和「组或其他用户可读」的提醒都去掉路径，改成提示核对挂载、属主和权限；control 与 CLI 都用这一份文字。server.test、cli.test 里断言报错带路径的两条改成新文字并断言不含路径，另各补一条反例：以 / 开头、不带 = 的 43 位 base64 能过路径写法的检查，填进 *_KEY_FILE 后报错、日志、stderr 里都搜不到它。CI 的 docker job 与 ci-docker.test 里没有断言这条报错的地方（grep 核对过），不用改；control README、LOCAL-DEV、TESTING 同步
+- 结果：两条反例换回修之前的 key-files.ts 时失败（not.toContain 命中那串值），修复后通过；tests/control 与 ci-docker.test 共 101 passed；pnpm check 退出码 0
+
+## 13:39:25 +08:00 · 提交 · #3 · 密钥文件报错不回显路径一起提交
+
+- 执行者：agent-claude-geek-bot-821e-control3（Claude Code，claude-opus-5-5）
+- 做了什么：fix(control): 密钥文件的报错与提醒只写变量名，不回显路径；提交前跑 pnpm check 与 tests/control、ci-docker.test
+- 结果：pnpm check 退出码 0；101 passed

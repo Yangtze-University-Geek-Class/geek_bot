@@ -2,7 +2,8 @@
  * 读取以 `*_FILE` 挂载的 32 字节密钥（master key、备份加密密钥）。
  *
  * 文件内容是 32 个随机字节的 base64（例如 `openssl rand -base64 32` 的输出）或 64 位十六进制，首尾空白忽略。
- * 任何报错都只写变量名和路径，不回显文件内容；读到的原文登记进打码器，之后出现在日志里也会被替换。
+ * 任何报错与提醒都只写变量名，不回显路径和文件内容：路径来自环境变量，误填的密钥原文（例如以 / 开头、不带 = 的 base64）
+ * 也能满足路径的写法，会被当成路径拼进报错。读到的原文登记进打码器，之后出现在日志里也会被替换。
  */
 import { accessSync, constants, readFileSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
@@ -25,7 +26,7 @@ export interface LoadedKey {
   readonly warning: string | null;
 }
 
-/** 读密钥文件失败；problem 只含变量名、路径和原因。 */
+/** 读密钥文件失败；problem 只含变量名和原因，不含路径。 */
 export class KeyFileError extends Error {
   constructor(readonly problem: string) {
     super(problem);
@@ -50,25 +51,25 @@ export function loadKeyFile(spec: KeyFileSpec, redactor: Redactor): LoadedKey {
     stat = statSync(path);
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
-    if (code === "ENOENT") throw new KeyFileError(`${envName} 指向的密钥文件不存在：${path}`);
-    throw new KeyFileError(`${envName} 指向的密钥文件读不了（${code ?? "未知原因"}）：${path}`);
+    if (code === "ENOENT") throw new KeyFileError(`${envName} 指向的密钥文件不存在：核对这个变量的值和密钥文件的挂载（报错里不回显路径）`);
+    throw new KeyFileError(`${envName} 指向的密钥文件读不了（${code ?? "未知原因"}）：核对密钥文件的挂载、属主和权限（报错里不回显路径）`);
   }
-  if (!stat.isFile()) throw new KeyFileError(`${envName} 指向的不是普通文件：${path}`);
+  if (!stat.isFile()) throw new KeyFileError(`${envName} 指向的不是普通文件：核对密钥文件的挂载（报错里不回显路径）`);
   let raw: string;
   try {
     raw = readFileSync(path, "utf8");
   } catch (error) {
-    throw new KeyFileError(`${envName} 指向的密钥文件读不了（${(error as NodeJS.ErrnoException).code ?? "未知原因"}）：${path}`);
+    throw new KeyFileError(`${envName} 指向的密钥文件读不了（${(error as NodeJS.ErrnoException).code ?? "未知原因"}）：核对密钥文件的挂载、属主和权限（报错里不回显路径）`);
   }
   // 先登记原文再校验，校验失败的内容同样不能出现在日志里。
   redactor.addKnownSecret(raw);
   const key = decodeKey(raw.trim());
   if (!key) {
-    throw new KeyFileError(`${envName} 指向的文件不是 32 字节密钥（要求 base64 或 64 位十六进制，例如 openssl rand -base64 32 的输出）：${path}`);
+    throw new KeyFileError(`${envName} 指向的文件不是 32 字节密钥（要求 base64 或 64 位十六进制，例如 openssl rand -base64 32 的输出）`);
   }
   redactor.addKnownSecret(key.toString("base64"));
   redactor.addKnownSecret(key.toString("hex"));
-  const warning = (stat.mode & 0o077) !== 0 ? `${envName} 指向的密钥文件对组或其他用户可读（权限 ${(stat.mode & 0o777).toString(8)}），建议改成 0600 或 0400：${path}` : null;
+  const warning = (stat.mode & 0o077) !== 0 ? `${envName} 指向的密钥文件对组或其他用户可读（权限 ${(stat.mode & 0o777).toString(8)}），建议改成 0600 或 0400` : null;
   return Object.freeze({ envName, path, key, warning });
 }
 

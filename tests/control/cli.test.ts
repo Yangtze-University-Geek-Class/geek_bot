@@ -230,12 +230,30 @@ describe("CLI：restore --dry-run", () => {
     }
   });
 
-  it("备份密钥文件读不到时以 1 退出，报错只有变量名和路径", async () => {
+  it("备份密钥文件读不到时以 1 退出，报错只写变量名、不回显路径（与 control 的报错一致）", async () => {
     const fx = fixture();
     const env = { ...fx.env, GEEK_BOT_BACKUP_KEY_FILE: join(fx.dir, "missing_backup_key") };
     let stderr = "";
     const code = await runCli(["restore", "--dry-run", "x.gbbk"], { env, cwd: fx.dir, stdout: () => undefined, stderr: text => void (stderr += text) });
     expect(code).toBe(1);
-    expect(stderr).toBe(`GEEK_BOT_BACKUP_KEY_FILE 指向的密钥文件不存在：${join(fx.dir, "missing_backup_key")}\n`);
+    expect(stderr).toBe("GEEK_BOT_BACKUP_KEY_FILE 指向的密钥文件不存在：核对这个变量的值和密钥文件的挂载（报错里不回显路径）\n");
+  });
+
+  it("反例：以 / 开头、不带 = 的 43 位 base64 密钥原文填进 GEEK_BOT_BACKUP_KEY_FILE 时，各命令的输出里搜不到它", async () => {
+    const fx = fixture();
+    const pasted = `/${fx.backupKey.text.trim().slice(1, 43)}`;
+    expect(pasted).toMatch(/^\/[A-Za-z0-9+/]{42}$/);
+    const env = { ...fx.env, GEEK_BOT_BACKUP_KEY_FILE: pasted };
+    for (const argv of [["backup"], ["verify-backup"], ["restore", "--dry-run", "x.gbbk"]]) {
+      let stdout = "";
+      let stderr = "";
+      const code = await runCli(argv, { env, cwd: fx.dir, stdout: text => void (stdout += text), stderr: text => void (stderr += text) });
+      for (const text of [stdout, stderr]) {
+        expect(text).not.toContain(pasted);
+        expect(text).not.toContain(pasted.slice(1, 17));
+      }
+      expect(code, argv.join(" ")).toBe(1);
+      expect(stderr).toContain("GEEK_BOT_BACKUP_KEY_FILE 指向的密钥文件不存在：核对这个变量的值和密钥文件的挂载（报错里不回显路径）");
+    }
   });
 });

@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -125,16 +126,18 @@ describe("启动检查", () => {
     expect(handle.backups.list()).toEqual([]);
   });
 
-  it("删掉 master key 文件后拒绝启动；报错说明变量名和路径，日志和报错里都没有任何密钥内容", async () => {
+  it("删掉 master key 文件后拒绝启动；报错只写变量名、提示核对挂载，日志和报错里没有路径和任何密钥内容", async () => {
     const fx = fixture();
     const masterText = fx.masterKey.text.trim();
     rmSync(fx.masterKey.path);
     const sink = memorySink();
     const error = await startupError({ env: fx.env, sink, dailyJobs: false, opsChannel: false });
-    expect(error.problems).toEqual([`GEEK_BOT_MASTER_KEY_FILE 指向的密钥文件不存在：${fx.masterKey.path}`]);
+    const missing = "GEEK_BOT_MASTER_KEY_FILE 指向的密钥文件不存在：核对这个变量的值和密钥文件的挂载（报错里不回显路径）";
+    expect(error.problems).toEqual([missing]);
     const fatal = sink.lines().find(line => line.level === "fatal");
-    expect(fatal?.msg).toBe(`control 拒绝启动：GEEK_BOT_MASTER_KEY_FILE 指向的密钥文件不存在：${fx.masterKey.path}`);
+    expect(fatal?.msg).toBe(`control 拒绝启动：${missing}`);
     for (const text of [error.message, sink.text()]) {
+      expect(text).not.toContain(fx.masterKey.path);
       expect(text).not.toContain(masterText);
       expect(text).not.toContain(fx.backupKey.text.trim());
     }
@@ -155,6 +158,22 @@ describe("启动检查", () => {
       expect(sink.lines().find(line => line.level === "fatal")?.msg).toBe(error.message);
     }
     expect(existsSync(fx.dbPath)).toBe(false);
+  });
+
+  it("反例：以 / 开头、不带 = 的 43 位 base64 密钥原文能过路径写法的检查，填进 *_KEY_FILE 时报错和日志里也搜不到它", async () => {
+    const fx = fixture();
+    // 32 字节密钥的 base64 去掉结尾的 =，第一个字符换成 /：还是一个能解出 32 字节的值，也满足「绝对路径」的写法。
+    const pasted = `/${randomBytes(32).toString("base64").slice(1, 43)}`;
+    expect(pasted).toMatch(/^\/[A-Za-z0-9+/]{42}$/);
+    for (const name of ["GEEK_BOT_MASTER_KEY_FILE", "GEEK_BOT_BACKUP_KEY_FILE"] as const) {
+      const sink = memorySink();
+      const error = await startupError({ env: { ...fx.env, [name]: pasted }, cwd: fx.dir, sink, dailyJobs: false, opsChannel: false });
+      for (const text of [error.message, JSON.stringify(error.problems), sink.text()]) {
+        expect(text).not.toContain(pasted);
+        expect(text).not.toContain(pasted.slice(1, 17));
+      }
+      expect(error.problems).toEqual([`${name} 指向的密钥文件不存在：核对这个变量的值和密钥文件的挂载（报错里不回显路径）`]);
+    }
   });
 
   it("密钥文件格式不对、两把密钥相同都拒绝启动；报错不回显文件内容", async () => {

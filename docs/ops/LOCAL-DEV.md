@@ -85,7 +85,7 @@ docker build -f app/control/Dockerfile -t geek-bot-control:local .
   ```
 
 - 绑定 `0.0.0.0` 必须配 `GEEK_BOT_PUBLIC_ORIGIN`（S-20）；本机 `curl` 走的是端口映射，origin 只是占位。
-- 删掉 master key 文件（或不挂它）再起，容器以 1 退出，`docker logs` 里只有变量名和路径，没有密钥内容。
+- 删掉 master key 文件（或不挂它）再起，容器以 1 退出，`docker logs` 里只有变量名和「核对挂载」的提示，没有路径和密钥内容。
 
 ## Git 钩子
 
