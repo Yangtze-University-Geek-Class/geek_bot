@@ -163,3 +163,15 @@
 - 执行者：agent-claude-geek-bot-821e-control3（Claude Code，claude-opus-5-5）
 - 做了什么：fix(control): 密钥文件的报错与提醒只写变量名，不回显路径；提交前跑 pnpm check 与 tests/control、ci-docker.test
 - 结果：pnpm check 退出码 0；101 passed
+
+## 13:40:11 +08:00 · 返工 · #3 · data-model 点名结构核对查不出的例子：DROP 后按原样 CREATE
+
+- 执行者：agent-claude-geek-bot-821e-control3（Claude Code，claude-opus-5-5）
+- 做了什么：复审第 3 条：data-model「迁移器强制的部分」里补一个例子：先 DROP TABLE settings 再按原样 CREATE，结构核对通过但数据全没了。写之前用一个没入库的临时测试核对过这个说法
+- 结果：临时测试：shrink=false 的 DROP TABLE settings 加原样 CREATE TABLE settings 迁移照常应用，之后 settings 行数为 0（1 passed），测试文件已删；这一条只改文档，没有「修之前会失败」的反例；pnpm check 退出码 0
+
+## 13:40:11 +08:00 · 提交 · #3 · data-model 的例子一起提交
+
+- 执行者：agent-claude-geek-bot-821e-control3（Claude Code，claude-opus-5-5）
+- 做了什么：docs(control): data-model 点名迁移器查不出的例子；提交前跑 pnpm check
+- 结果：pnpm check 退出码 0
