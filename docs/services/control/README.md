@@ -85,7 +85,7 @@ control 从不运行 omp，也不执行目标仓库里的任何代码。
 | `verify-backup [<文件名>]` | 恢复校验一份备份（默认最新一份没被清理的），结果写进 `backups`，失败写 `critical` 告警，并以 1 退出 |
 | `restore --dry-run <文件>` | 只做恢复校验，报告会恢复到哪个时间点、哪个库版本，以及这版代码能否直接打开；不碰库、不改任何文件。文件可以是 `backups/` 里的文件名或任意路径（例如异地副本）。正式恢复（覆盖库文件）没有实现，不带 `--dry-run` 以 2 退出，随 #20 的恢复演练写入 |
 
-单写者（ADR-0003）的定稿做法：`backup`、`verify-backup` 会写库，control 在运行时经本地通道（`<库所在目录>/run/control.sock`，unix socket 上的 HTTP；`run/` 权限 0700、socket 0600，只有运行 control 的账号能连，不占 TCP 端口）交给 control 执行，CLI 不开写连接。连不上通道时（control 没在运行），CLI 以同样的独占方式打开库自己执行，做完 checkpoint 并关库；拿不到锁就失败。`restore --dry-run` 只读备份文件和备份加密密钥。以后的 `bootstrap-code`（#5）走同一个通道；`rotate-master-key`（#5）与正式 `restore`（#20）只在 control 停止时以独占方式运行。
+单写者（ADR-0003）的定稿做法：`backup`、`verify-backup` 会写库，control 在运行时经本地通道（`<库所在目录>/run/control.sock`，unix socket 上的 HTTP；`run/` 权限 0700、socket 0600，只有运行 control 的账号能连，不占 TCP 端口）交给 control 执行，CLI 不开写连接。连不上通道时（control 没在运行），CLI 以同样的独占方式打开库自己执行，做完 checkpoint 并关库；拿不到锁就失败。离线执行在写库之前按迁移规则核对库版本：库执行到的迁移必须正好是这版 CLI 认识的最高编号，兼容版本也不能高于它；对不上（库比 CLI 旧、比 CLI 新、兼容版本更高、库被手工改过）就拒绝执行、不写库，CLI 自己不执行迁移。`restore --dry-run` 只读备份文件和备份加密密钥。以后的 `bootstrap-code`（#5）走同一个通道；`rotate-master-key`（#5）与正式 `restore`（#20）只在 control 停止时以独占方式运行。
 
 ## 日志与打码
 

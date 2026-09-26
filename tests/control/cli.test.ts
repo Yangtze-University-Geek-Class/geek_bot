@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { runCli } from "../../app/control/src/cli.js";
 import { openDatabase } from "../../app/control/src/db/database.js";
 import { startControl, type ControlHandle } from "../../app/control/src/services.js";
-import { cleanupTempDirs, fixture, memorySink, realMigrations, type Fixture } from "./helpers.js";
+import { cleanupTempDirs, EXPAND_NEXT, fixture, memorySink, migrationSet, realMigrations, SHRINK_NEXT, type Fixture } from "./helpers.js";
 
 const handles: ControlHandle[] = [];
 afterEach(async () => {
@@ -94,6 +94,44 @@ describe("CLI：backup、verify-backup（单写者：交给运行中的 control�
       expect(backup.stderr).toContain("库正被另一个进程占用");
     } finally {
       holder.close();
+    }
+  });
+
+  it("反例：离线执行写库之前核对库版本：兼容版本高于 CLI、库比 CLI 新、库比 CLI 旧时都拒绝，库和备份目录不变", async () => {
+    const current = realMigrations().length;
+    const cases = [
+      { control: migrationSet([SHRINK_NEXT]), cli: migrationSet(), expected: `库的兼容版本是 ${current + 1}，高于这版代码认识的最高迁移编号 ${current}` },
+      { control: migrationSet([EXPAND_NEXT]), cli: migrationSet(), expected: `库执行到第 ${current + 1} 号迁移，比这版 CLI 认识的第 ${current} 号新` },
+      { control: migrationSet(), cli: migrationSet([EXPAND_NEXT]), expected: `库执行到第 ${current} 号迁移，这版 CLI 认识到第 ${current + 1} 号：先用这版镜像启动一次 control 完成迁移` },
+    ];
+    for (const { control, cli: cliMigrations, expected } of cases) {
+      const fx = fixture();
+      const handle = await startControl({ env: fx.env, sink: memorySink(), dailyJobs: false, opsChannel: false, port: 0, migrationsDir: control });
+      await handle.shutdown("stopped");
+      const version = (() => {
+        const db = openDatabase(fx.dbPath);
+        try {
+          return db.pragma("user_version", { simple: true });
+        } finally {
+          db.close();
+        }
+      })();
+      for (const argv of [["backup"], ["verify-backup"]]) {
+        let stderr = "";
+        const code = await runCli(argv, { env: fx.env, cwd: fx.dir, migrationsDir: cliMigrations, stdout: () => undefined, stderr: text => void (stderr += text) });
+        expect(code, `${argv[0]}：${expected}`).toBe(1);
+        expect(stderr).toContain(expected);
+        expect(stderr).toContain("拒绝离线执行");
+      }
+      const db = openDatabase(fx.dbPath);
+      try {
+        expect(db.pragma("user_version", { simple: true })).toBe(version);
+        expect(db.prepare("SELECT count(*) AS n FROM backups").get()).toEqual({ n: 0 });
+        expect(db.prepare("SELECT count(*) AS n FROM audit_logs WHERE action LIKE 'backup.%'").get()).toEqual({ n: 0 });
+      } finally {
+        db.close();
+      }
+      expect(readdirSync(fx.backupDir).filter(name => name.endsWith(".gbbk"))).toEqual([]);
     }
   });
 

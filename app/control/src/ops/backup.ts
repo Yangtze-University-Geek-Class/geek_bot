@@ -49,6 +49,28 @@ export interface RetentionPolicy {
 /** pre_deploy、pre_migration、manual 各保留最近 3 份（data-model 的推荐值）。 */
 export const OTHER_BACKUPS_KEPT = 3;
 
+/**
+ * 备份服务读写的 backups 列，都是 0001 就有的。迁移前备份（pre_migration）在执行迁移之前写登记，这时库还停在旧版本，
+ * 不能依赖最新的表结构；以后给 backups 加的列必须可空或带默认值，不能加进这里（tests/control 核对这些列在 0001 里都有）。
+ */
+export const BACKUP_COLUMNS = Object.freeze([
+  "id",
+  "kind",
+  "file",
+  "sha256",
+  "bytes",
+  "schema_version",
+  "compat_version",
+  "app_version",
+  "backup_key_id",
+  "row_counts_json",
+  "created_at",
+  "verified_at",
+  "verify_result",
+  "verify_detail",
+  "pruned_at",
+] as const);
+
 export interface Actor {
   readonly type: AuditActorType;
   readonly id?: string | null;
@@ -188,8 +210,7 @@ export function createBackupService(options: BackupServiceOptions): BackupServic
     return run;
   };
 
-  const selectColumns =
-    "id, kind, file, sha256, bytes, schema_version, compat_version, app_version, backup_key_id, row_counts_json, created_at, verified_at, verify_result, verify_detail, pruned_at";
+  const selectColumns = BACKUP_COLUMNS.join(", ");
   const byFile = db.prepare(`SELECT ${selectColumns} FROM backups WHERE file = ?`);
   const insert = db.prepare(
     "INSERT INTO backups (kind, file, sha256, bytes, schema_version, compat_version, app_version, backup_key_id, row_counts_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",

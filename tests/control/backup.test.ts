@@ -8,10 +8,10 @@ import { applyMigrations, loadMigrations, planMigrations } from "../../app/contr
 import { createLogger } from "../../app/control/src/log/logger.js";
 import { createRedactor } from "../../app/control/src/log/redact.js";
 import { BACKUP_MAGIC, decryptBackup, readBackupHeader, sha256File } from "../../app/control/src/ops/backup-file.js";
-import { checkBackupFile, createBackupService, type BackupRecord, type BackupService } from "../../app/control/src/ops/backup.js";
+import { BACKUP_COLUMNS, checkBackupFile, createBackupService, type BackupRecord, type BackupService } from "../../app/control/src/ops/backup.js";
 import { createDailyJobs, isoWeekStart, lastSlotAt } from "../../app/control/src/ops/scheduler.js";
 import { keyFingerprint } from "../../app/control/src/secrets/key-files.js";
-import { cleanupTempDirs, fakeClock, memorySink, tempDir } from "./helpers.js";
+import { cleanupTempDirs, fakeClock, memorySink, migrationSet, tempDir } from "./helpers.js";
 import { randomBytes } from "node:crypto";
 
 const opened: Db[] = [];
@@ -216,6 +216,17 @@ describe("保留策略：7 份每日加 4 份每周；pre_deploy、pre_migration
     env.clock.advance(1000);
     const latest = await env.service.create("daily", system);
     expect(env.service.list().filter(row => row.pruned_at === null).map(row => row.file)).toEqual([latest.file]);
+  });
+});
+
+describe("迁移前备份不依赖最新的表结构", () => {
+  it("备份服务读写的 backups 列在 0001 里都有（迁移前备份写登记时库还停在旧版本）", () => {
+    const db = openDatabase(join(tempDir(), "geek-bot.db"));
+    opened.push(db);
+    const first = loadMigrations(migrationSet([], 1));
+    applyMigrations(db, planMigrations(db, first).pending, { clock: () => 1, appVersion: "test" });
+    const columns = (db.prepare("SELECT name FROM pragma_table_info('backups')").all() as Array<{ name: string }>).map(row => row.name);
+    expect(columns).toEqual(expect.arrayContaining([...BACKUP_COLUMNS]));
   });
 });
 

@@ -6,7 +6,8 @@
  *   restore --dry-run <文件>            只做恢复校验并报告会恢复到哪个库版本和时间点，不改任何文件
  *
  * 单写者（ADR-0003）：backup、verify-backup 会写库，control 在运行时经本地通道（src/ops/channel.ts）交给它做，
- * CLI 自己不开写连接；control 没在运行时，CLI 以独占方式打开库自己做（拿不到锁就失败）。
+ * CLI 自己不开写连接；control 没在运行时，CLI 以独占方式打开库自己做（拿不到锁就失败），写库之前先按迁移规则核对库版本，
+ * 库与这版 CLI 的迁移对不上（D ≠ C，或兼容版本高于 C）就拒绝执行。
  * restore --dry-run 不碰库，只读备份文件和备份加密密钥。正式恢复（覆盖库文件）不在 #3，没有实现。
  * 退出码：0 成功；1 失败；2 用法错误。
  */
@@ -18,8 +19,8 @@ import { parseArgs } from "node:util";
 import { ControlConfigError, loadControlConfig, type Env, type LoadedConfig } from "./config.js";
 import { createAlerts } from "./db/alerts.js";
 import { createAuditor } from "./db/audit.js";
-import { checkpointAndClose, DatabaseOpenError, openDatabase } from "./db/database.js";
-import { loadMigrations } from "./db/migrator.js";
+import { checkpointAndClose, DatabaseOpenError, openDatabase, type Db } from "./db/database.js";
+import { loadMigrations, MigrationError, planMigrations } from "./db/migrator.js";
 import { createLogger, type LogSink } from "./log/logger.js";
 import { createRedactor, type Redactor } from "./log/redact.js";
 import { checkBackupFile, createBackupService, OTHER_BACKUPS_KEPT, type BackupRecord, type FileCheck, type VerifyReport } from "./ops/backup.js";
@@ -91,7 +92,31 @@ function loadBackupKey(config: LoadedConfig, redactor: Redactor): LoadedKey {
   }
 }
 
-/** control 没在运行时：以独占方式打开库，在本进程里执行，做完 checkpoint 并关库。 */
+/**
+ * 离线写库之前核对库版本（data-model「迁移规则」）：库执行到的迁移必须正好是这版 CLI 认识的最高编号（D = C），
+ * 兼容版本不高于 C。CLI 不执行迁移，对不上就拒绝，交给对应版本的 control 处理。
+ */
+function assertSchemaMatches(db: Db, io: CliIo): void {
+  let codeVersion: number;
+  let userVersion: number;
+  try {
+    const migrations = loadMigrations(io.migrationsDir);
+    codeVersion = migrations.length;
+    userVersion = planMigrations(db, migrations).state.userVersion;
+  } catch (error) {
+    if (error instanceof MigrationError) throw new CliFailure(`${error.message.replace(/[，；。]?拒绝启动$/, "")}。拒绝离线执行`);
+    throw error;
+  }
+  if (userVersion === 0) throw new CliFailure("库还没有初始化（没有执行过迁移）：先启动一次 control 完成迁移。拒绝离线执行");
+  if (userVersion < codeVersion) {
+    throw new CliFailure(`库执行到第 ${userVersion} 号迁移，这版 CLI 认识到第 ${codeVersion} 号：先用这版镜像启动一次 control 完成迁移（启动时会先做迁移前备份），再执行命令。拒绝离线执行`);
+  }
+  if (userVersion > codeVersion) {
+    throw new CliFailure(`库执行到第 ${userVersion} 号迁移，比这版 CLI 认识的第 ${codeVersion} 号新：换用与库版本一致的镜像，或者在 control 运行时执行（命令会交给 control）。拒绝离线执行`);
+  }
+}
+
+/** control 没在运行时：以独占方式打开库，核对库版本后在本进程里执行，做完 checkpoint 并关库。 */
 async function offline<T>(io: CliIo, config: LoadedConfig, redactor: Redactor, run: (service: ReturnType<typeof createBackupService>) => Promise<T>): Promise<T> {
   const clock = io.clock ?? Date.now;
   const key = loadBackupKey(config, redactor);
@@ -103,8 +128,7 @@ async function offline<T>(io: CliIo, config: LoadedConfig, redactor: Redactor, r
     throw error;
   }
   try {
-    const hasBackups = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'backups'").get() !== undefined;
-    if (!hasBackups) throw new CliFailure("库还没有初始化（没有 backups 表）：先启动一次 control 完成迁移");
+    assertSchemaMatches(db, io);
     const logger = createLogger({ level: config.deployment.logLevel, redactor, clock, sink: { write: line => io.stderr(line) } });
     const service = createBackupService({
       db,

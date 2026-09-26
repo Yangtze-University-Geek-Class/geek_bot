@@ -97,3 +97,15 @@
 - 执行者：agent-claude-geek-bot-821e-control3（Claude Code，claude-opus-5-5）
 - 做了什么：fix(control): 每周保留 0 份时每周首次备份记为 daily，校验前核对是否已被清理；提交前跑 pnpm check 与 tests/control
 - 结果：pnpm check 退出码 0；tests/control 81 passed
+
+## 13:08:56 +08:00 · 返工 · #3 · 离线 CLI 写库前核对库版本；备份服务只用 0001 的 backups 列
+
+- 执行者：agent-claude-geek-bot-821e-control3（Claude Code，claude-opus-5-5）
+- 做了什么：审查建议 5：cli.ts 的离线执行在写库之前跑 loadMigrations 与 planMigrations，D ≠ C 或 K > C（以及库被手工改过）就拒绝执行、不写库；backup.ts 把备份服务读写的 backups 列提成 BACKUP_COLUMNS 常量并写明只能是 0001 就有的列。反例：cli.test 三种版本不一致的库（K > C、D > C、D < C）各跑 backup 与 verify-backup；锁定测试：backup.test 核对 BACKUP_COLUMNS 在 0001 的 backups 里都有，server.test 在下一版给 backups 加列时做迁移前备份。control README、data-model、TESTING 同步
+- 结果：cli 反例换回修之前的 cli.ts 时失败（K > C 的库离线 backup 退出码 0）；迁移前备份原本就只写 0001 的列，这一项没有「修之前会失败」的反例，改用变异核对：往 BACKUP_COLUMNS 加一个后加的列时两条锁定测试都失败（no such column: offsite_at）；tests/control 84 passed；pnpm check 退出码 0
+
+## 13:08:56 +08:00 · 提交 · #3 · 离线 CLI 版本核对一起提交
+
+- 执行者：agent-claude-geek-bot-821e-control3（Claude Code，claude-opus-5-5）
+- 做了什么：fix(control): 离线 CLI 写库前核对库版本，备份服务只读写 0001 的 backups 列；提交前跑 pnpm check 与 tests/control
+- 结果：pnpm check 退出码 0；tests/control 84 passed

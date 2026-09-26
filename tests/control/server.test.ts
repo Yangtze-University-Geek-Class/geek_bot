@@ -216,6 +216,20 @@ describe("启动检查", () => {
     expect(upgraded.db.pragma("user_version", { simple: true })).toBe(current + 1);
   });
 
+  it("下一版给 backups 加了列时，迁移前备份照样写得进登记（备份服务只用 0001 就有的列）", async () => {
+    const fx = fixture();
+    await (await start(fx)).shutdown("upgrade");
+    const next = migrationSet([{ slug: "backups_offsite", sql: "-- geek-bot-migration shrink=false\nALTER TABLE backups ADD COLUMN offsite_at INTEGER;\n" }]);
+    const upgraded = await start(fx, { migrationsDir: next });
+    expect(upgraded.migrations.preMigrationBackup).toMatch(/^geek-bot-pre_migration-.*\.gbbk$/);
+    const manual = await upgraded.backups.create("manual", { type: "cli" });
+    expect(upgraded.db.prepare("SELECT kind, offsite_at FROM backups ORDER BY id").all()).toEqual([
+      { kind: "pre_migration", offsite_at: null },
+      { kind: "manual", offsite_at: null },
+    ]);
+    expect((await upgraded.backups.verify(manual.file, { type: "cli" })).ok).toBe(true);
+  });
+
   it("迁移前备份失败时不执行迁移，拒绝启动", async () => {
     const fx = fixture();
     await (await start(fx)).shutdown("upgrade");
