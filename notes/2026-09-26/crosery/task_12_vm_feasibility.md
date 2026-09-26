@@ -32,3 +32,33 @@
 - 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
 - 做了什么：git commit：test(node): 一次性 VM 可行性实验与出网代理规则，附实测报告；提交前 pnpm verify、actionlint、shellcheck
 - 结果：pnpm verify 退出码 0（Tests 330 passed）；actionlint 与 shellcheck 无输出
+
+## 13:36:56 +08:00 · 推送 · #12 · 推送 task/12/vm_feasibility
+
+- 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
+- 做了什么：git push -u origin task/12/vm_feasibility（HEAD bf06b05）
+- 结果：推送成功，pre-push 钩子通过
+
+## 13:36:57 +08:00 · PR · #12 · 开 PR #33 指向 stage；未覆盖的项拆到 #32
+
+- 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
+- 做了什么：开 #32 承接 omp、恶意夹具、只读缓存盘、passt、CI 构建基础镜像；在 #12 留进展与拆分记录；gh pr create --base stage，正文先经 pr-contract 核对
+- 结果：PR #33；pr-contract 通过；审查结论段写阻塞，等独立审查与所有者对 -sandbox 的结论
+
+## 14:22:53 +08:00 · 审查 · #12 · 独立审查员审 bf06b05：阻塞（缺 PR 记录）与 8 条应修
+
+- 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
+- 做了什么：独立审查代理只读核对 bf06b05，跑了 pnpm verify、vitest、shellcheck、note check 与纯函数探针，不连远程主机
+- 结果：阻塞：推送与 PR 记录未提交导致 CI 缺 PR 记录；应修：直连探测无阳性对照、run.sh 非 root 或缺 nft 时比较空洞、基础镜像与构建缓存残留、代理字节上限只在新连接时查且连接数有竞态、KVM 结论缺前提、引导次数写错、未测项漏列、IPv6 字面量；另有 3 条建议
+
+## 14:22:53 +08:00 · 返工 · #12 · 按审查意见改实验脚本、代理与报告，所有者决定写成 ADR-0011
+
+- 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
+- 做了什么：所有者选择接受去掉 elevateprivileges=deny，写 ADR-0011 取代 ADR-0004 那一句，同步 SECURITY S-13、ARCHITECTURE；代理：连接数先占位、字节上限逐块核对、解析期间暂停客户端、上游失败记 error、拦嵌入 IPv4 的 IPv6 段、注入 lookup 后补 8 条行为测试（变异 3 处各有测试失败）；探测加阳性对照、失败类型与容器网关、只跑探测模式；run.sh 要求 root 与命令、读不到记 UNKNOWN、资源名加后缀、基础镜像只删本次拉的、记 docker 事件；IPv6 地址运行时拼出；报告与 ADR-0004、STACK、node 契约的措辑按意见改；#32 补漏项；第 7 次只跑探测：阳性对照 refused、宿主网关 unreachable、guestfwd 可达，raw 表多了 Docker 的容器直连防护规则
+- 结果：pnpm verify 退出码 0（338 passed (338)）；shellcheck 无输出；节点上的实验资源与临时目录已清理
+
+## 14:22:53 +08:00 · 提交 · #12 · 返工一起提交
+
+- 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
+- 做了什么：git commit：fix(node): 按审查意见收紧实验代理与探测，写 ADR-0011；提交前 pnpm verify、shellcheck
+- 结果：pnpm verify 退出码 0

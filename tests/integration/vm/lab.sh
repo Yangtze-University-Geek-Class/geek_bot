@@ -14,6 +14,9 @@ W="$(mktemp -d)"
 slirp() { printf '%d.%d.%d.%d' 10 0 2 "$1"; }
 PROXY_ADDR="$(slirp 100)"
 log() { echo "[$(date -u +%FT%TZ)] $*" | tee -a "$OUT/lab.log"; }
+PROBE_ONLY="${GEEKBOT_VM_PROBE_ONLY:-0}"
+# 容器的默认网关（Docker 网桥上的节点宿主地址），从 /proc/net/route 的十六进制小端字段换算，交给来宾去探测。
+CONTAINER_GW="$(awk '$2 == "00000000" { print $3; exit }' /proc/net/route | sed -E 's/(..)(..)(..)(..)/\4 \3 \2 \1/' | while read -r a b c d; do printf '%d.%d.%d.%d' "0x$a" "0x$b" "0x$c" "0x$d"; done)"
 
 log "身份：$(id)"
 stat -c "%A %U:%G %n" /dev/kvm | tee -a "$OUT/lab.log"
@@ -50,10 +53,9 @@ printf 'instance-id: geekbot-vmlab\nlocal-hostname: geekbot-vmlab\n' > "$W/meta-
 genisoimage -quiet -output "$W/seed.iso" -volid cidata -joliet -rock "$W/user-data" "$W/meta-data"
 
 # ---- qemu 的 seccomp 沙箱 ----
-# ADR-0004 定的是 on,obsolete=deny,elevateprivileges=deny,resourcecontrol=deny。本实验实测 QEMU 7.2（Debian 12）里
-# elevateprivileges=deny 或 =children 都会让 guestfwd 的 cmd: 转发进程起不来（来宾连上转发地址后立刻被断开），
-# 所以这里默认不带 elevateprivileges（即 allow），靠容器的 cap_drop ALL 与 no-new-privileges 兜底；
-# 能不能这样放宽由所有者决定，结论写在 docs/services/node/vm-feasibility.md。可用环境变量覆盖以复现。
+# 按 ADR-0011：on,obsolete=deny,resourcecontrol=deny，不带 elevateprivileges=deny。本实验实测 QEMU 7.2（Debian 12）里
+# elevateprivileges=deny 或 =children 都会让 guestfwd 的 cmd: 转发进程起不来；所有者 2026-09-26 决定去掉这一项，
+# 由容器的 cap_drop ALL 与 no-new-privileges 兜底。可用环境变量 GEEKBOT_VM_SANDBOX 覆盖以复现。
 SANDBOX="${GEEKBOT_VM_SANDBOX:-on,obsolete=deny,resourcecontrol=deny}"
 
 # ---- 出网代理 ----
@@ -67,7 +69,7 @@ run_vm() {
   cp /lab/guest.sh "$dir/in/guest.sh"
   cp /input/repo.tar "$dir/in/repo.tar"
   cp "$CACHE/$NODE_TAR" "$dir/in/node.tar.xz"
-  printf 'RUN=%s\nPROXY=http://%s:3128\n' "$run" "$PROXY_ADDR" > "$dir/in/env"
+  printf 'RUN=%s\nPROXY=http://%s:3128\nCONTAINER_GW=%s\nPROBE_ONLY=%s\n' "$run" "$PROXY_ADDR" "$CONTAINER_GW" "$PROBE_ONLY" > "$dir/in/env"
   if [ "$with_store" = "yes" ]; then cp "$W/store.tar" "$dir/in/store.tar"; fi
   tar -C "$dir/in" -cf "$dir/input.tar" .
   truncate -s 4G "$dir/output.img"
@@ -133,5 +135,11 @@ run_vm() {
 } > "$OUT/report.txt"
 
 run_vm cold no
-if [ -f "$W/store.tar" ]; then run_vm warm yes; else log "第一次没有导出 pnpm store，跳过第二次"; fi
+if [ "$PROBE_ONLY" = "1" ]; then
+  log "只跑探测（GEEKBOT_VM_PROBE_ONLY=1），不做第二次"
+elif [ -f "$W/store.tar" ]; then
+  run_vm warm yes
+else
+  log "第一次没有导出 pnpm store，跳过第二次"
+fi
 log "实验结束"

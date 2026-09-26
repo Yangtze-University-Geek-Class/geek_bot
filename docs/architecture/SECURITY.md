@@ -172,7 +172,7 @@ S-01…S-08 的编号和含义已被 [CODE-REVIEW](../conventions/CODE-REVIEW.md
 
 - node 容器：非 root，cap_drop ALL，no-new-privileges，只挂 `/dev/kvm` 设备并加入宿主 kvm 组，不挂 docker.sock，不用 privileged，不发布端口。
 - sandbox 容器：`network_mode: none`，根只读，工作目录是 tmpfs，cap_drop ALL，no-new-privileges，非 root，限制内存、CPU 和 pids，不挂任何令牌文件；每个任务结束后容器退出、重建。
-- VM：qemu `-sandbox on,obsolete=deny,elevateprivileges=deny,resourcecontrol=deny`，`-netdev user,restrict=on` 加两条 guestfwd；任务令牌经 `-fw_cfg name=opt/geekbot/token,file=<0600 临时文件>` 传入，不进 argv，VM 启动后删除临时文件；任务结束删除 overlay 和磁盘文件，节点定期回收没有对应任务的 VM 文件。
+- VM：qemu `-sandbox on,obsolete=deny,resourcecontrol=deny`（不带 `elevateprivileges=deny`：它会让 guestfwd 的转发进程起不来，提权由 node 容器的 cap_drop ALL 与 no-new-privileges 挡住，所以这两项是 PR 通道隔离的必要条件，见 [ADR-0011](../decisions/0011-qemu-sandbox-elevateprivileges.md)），`-netdev user,restrict=on` 加两条 guestfwd；任务令牌经 `-fw_cfg name=opt/geekbot/token,file=<0600 临时文件>` 传入，不进 argv，VM 启动后删除临时文件；任务结束删除 overlay 和磁盘文件，节点定期回收没有对应任务的 VM 文件。
 - 规格与细节以 #12 的实测为准；实测不通过时按 [ADR-0004](../decisions/0004-execution-isolation.md) 的退路改选，隔离要求不降低。
 
 **S-14 出网控制。** （#12、#17）

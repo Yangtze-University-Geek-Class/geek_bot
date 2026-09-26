@@ -27,3 +27,4 @@
 | 0008 | [数据：SQLite 版本化迁移只扩不缩；GitHub 标记注释可重建状态；每日恢复校验](0008-sqlite-migrations-recovery.md) | `accepted`（2026-09-26） |
 | 0009 | [管理后台用 Vue 3 + Tuffex 0.6.0，由 control 同源托管](0009-tuffex-console.md) | `accepted`（2026-09-26） |
 | 0010 | [本仓库开发流程用的追踪记录头](0010-tracking-record-prefix.md) | `accepted`（2026-09-25） |
+| 0011 | [一次性 VM 的 qemu 沙箱不启用 elevateprivileges=deny，由 node 容器兜底](0011-qemu-sandbox-elevateprivileges.md) | `accepted`（2026-09-26，取代 ADR-0004 里 `-sandbox` 那一句） |

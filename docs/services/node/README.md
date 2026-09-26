@@ -60,5 +60,5 @@ VM 相关测试只能在有 KVM 的机器上手动跑：`pnpm test:vm`（#12，[
 ## 已知限制
 
 - #1 没有实现任何节点功能；上文的模块和接口都是计划。
-- #12 在第一台节点上实测了节点容器里的 KVM、纯 QEMU 引导 cloud 镜像、restrict=on 加 guestfwd 的隔离、出网代理的规则，以及 1 vCPU / 2 GiB 跑本仓库完整校验的内存，结论见 [VM 可行性实测](vm-feasibility.md)。其中 `-sandbox` 的 `elevateprivileges=deny` 与 guestfwd 转发不兼容，怎么处理待所有者决定；omp、恶意夹具、只读缓存盘、passt 还没有实测。
+- #12 在第一台节点上实测了节点容器里的 KVM（这台宿主 `/dev/kvm` 的权限比 kvm 组宽，只靠 group_add 是否足够没有证明）、纯 QEMU 引导 cloud 镜像、restrict=on 加 guestfwd 的隔离、出网代理的规则，以及 1 vCPU / 2 GiB 跑本仓库完整校验的内存，结论见 [VM 可行性实测](vm-feasibility.md)。`-sandbox` 不带 `elevateprivileges=deny`，由容器兜底（[ADR-0011](../../decisions/0011-qemu-sandbox-elevateprivileges.md)）。omp、恶意夹具、只读缓存盘、passt、两种 I/O 方式与吞吐、模型代理那条 guestfwd 还没有实测（#32）。
 - 执行隔离的安全要求见 [SECURITY](../../architecture/SECURITY.md)。

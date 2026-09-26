@@ -46,7 +46,7 @@
 | 持久化 | SQLite（WAL）+ better-sqlite3 | #3 | 原生模块：在 Node 22 上核对预编译包和 ABI；只有 control 写库 |
 | 容器与发布 | Docker、Docker Compose v2、ghcr | #3（control 镜像）、#7（release.yml、compose、部署脚本） | 镜像非 root、带健康检查；同一 digest 跨环境 |
 | sandbox 执行器 | 无网、根只读的独立容器 | #14 | 容器里没有任何令牌文件 |
-| VM 执行器 | QEMU/KVM 一次性 VM，默认 1 vCPU / 2 GiB | #17 实现 | #12 已实测：节点容器里能用 `/dev/kvm`，用户态网络能隔离，2 GiB 跑本仓库的完整校验够用；`-sandbox` 的一项配置待所有者决定（[VM 可行性实测](../services/node/vm-feasibility.md)） |
+| VM 执行器 | QEMU/KVM 一次性 VM，默认 1 vCPU / 2 GiB | #17 实现 | #12 已实测：节点容器里能用 `/dev/kvm`（只靠 group_add 是否足够未证明），用户态网络能隔离，2 GiB 跑本仓库的完整校验够用；`-sandbox` 不带 `elevateprivileges=deny`（ADR-0011）（[VM 可行性实测](../services/node/vm-feasibility.md)） |
 | agent | omp，版本钉死，按 SHA256SUMS 校验后打进 node 镜像和 VM 基础镜像 | #14 | 设计草案选的版本是 18.3.0，以 #14 的实现为准 |
 | runner 打包 | 只用 Node 标准库，打成单文件 | #14 | 不引入任何 npm 包；对 `@geek-bot/protocol` 只做 type 导入 |
 | 运行时校验 | JSON Schema 的校验方式 | 第一个需要运行时校验的 issue | 是否引入校验库在那时决定，写回 [protocol 契约](../services/protocol/README.md) |

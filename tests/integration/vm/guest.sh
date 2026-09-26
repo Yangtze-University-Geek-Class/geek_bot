@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # #12 VM 里的流程（cloud-init 以 root 运行，输出到串口）：探测网络隔离 → 经出网代理装 git → 装 Node 与 pnpm →
 # pnpm install 与 pnpm verify（计时、采样内存）→ 结果写到输出盘 /dev/vdc。
-# QEMU 用户态网络与各私网段的地址在运行时拼出，仓库里不留私网地址字面量。
+# QEMU 用户态网络与各私网段的地址（IPv4 与 IPv6）在运行时拼出，仓库里不留地址字面量。
 set -u
 # cloud-init 的 runcmd 里没有 HOME：不设的话 git config --global、npm、pnpm 都写不到家目录。
 export HOME=/root
@@ -20,11 +20,29 @@ mark ready
 SAMPLER=$!
 
 # ---- 网络隔离：restrict=on 时来宾到宿主、私网、元数据地址都应当不通 ----
+# 每项记下失败类型（refused、timeout、unreachable），方便判断是被隔离挡住，还是目标本来就不在听。
+# 阳性对照：宿主别名地址 .2 在 restrict=off 时对应实验容器的回环，那里 3128 有出网代理在听；
+# 它也 blocked，才说明是 restrict=on 挡住了来宾到宿主的连接，而不是端口没人听。
+# 容器网关（CONTAINER_GW，由 lab.sh 从容器的默认路由取得）就是节点宿主在 Docker 网桥上的地址，探它的 22。
 probe_tcp() { # 名称 地址 端口
-  if timeout 4 bash -c "exec 3<>/dev/tcp/$2/$3" 2>/dev/null; then say "probe $1 REACHABLE"; else say "probe $1 blocked"; fi
+  local err status
+  err="$(timeout 4 bash -c "exec 3<>/dev/tcp/$2/$3" 2>&1)"
+  status=$?
+  if [ "$status" -eq 0 ]; then say "probe $1 REACHABLE"; return; fi
+  case "$status:$err" in
+    124:*) say "probe $1 blocked (timeout)" ;;
+    *refused*) say "probe $1 blocked (refused)" ;;
+    *unreachable*) say "probe $1 blocked (unreachable)" ;;
+    *) say "probe $1 blocked (other: $(printf '%s' "$err" | tail -1 | cut -c1-60))" ;;
+  esac
 }
 HOST_ALIAS="$(addr 10 0 2 2)"
+probe_tcp "host-alias:3128(positive-control)" "$HOST_ALIAS" 3128
 for port in 22 139 445 3055 3183; do probe_tcp "host-alias:$port" "$HOST_ALIAS" "$port"; done
+if [ -n "${CONTAINER_GW:-}" ]; then
+  probe_tcp "container-gateway:22" "$CONTAINER_GW" 22
+  probe_tcp "container-gateway:3128" "$CONTAINER_GW" 3128
+fi
 probe_tcp "slirp-dns:53" "$(addr 10 0 2 3)" 53
 probe_tcp "rfc1918-192.168:80" "$(addr 192 168 1 1)" 80
 probe_tcp "rfc1918-10:80" "$(addr 10 0 0 1)" 80
@@ -33,9 +51,22 @@ probe_tcp "cgnat:80" "$(addr 100 64 0 1)" 80
 probe_tcp "metadata:80" "$(addr 169 254 169 254)" 80
 probe_tcp "public-ip:443" "$(addr 1 1 1 1)" 443
 if timeout 4 getent hosts deb.debian.org >/dev/null 2>&1; then say "probe dns-resolution REACHABLE"; else say "probe dns-resolution blocked"; fi
-for target in "fec0::2" "fd00::1" "fe80::2%eth0" "::ffff:$(addr 10 0 0 1)" "64:ff9b::101:101"; do
+v6() { local IFS=:; echo "$*"; }
+for target in "$(v6 fec0 "" 2)" "$(v6 fd00 "" 1)" "$(v6 fe80 "" 2)%eth0" "$(v6 "" "" ffff "$(addr 10 0 0 1)")" "$(v6 64 ff9b "" 101 101)"; do
   if timeout 4 curl -sS -o /dev/null -g "http://[$target]:22/" 2>/dev/null; then say "probe ipv6:$target REACHABLE"; else say "probe ipv6:$target blocked"; fi
 done
+# 反向核对转发确实存在：出网代理的转发地址应当连得上。
+PROXY_HOSTPORT="${PROXY#http://}"
+probe_tcp "guestfwd-proxy(expected-reachable)" "${PROXY_HOSTPORT%:*}" "${PROXY_HOSTPORT##*:}"
+
+if [ "${PROBE_ONLY:-0}" = "1" ]; then
+  say "probe_only=1，跳过安装与校验"
+  mark "done"
+  sync
+  tar -cf /dev/vdc -C / results
+  sync
+  exit 0
+fi
 
 # ---- 出网代理：白名单内可达，GitHub、白名单外、IP 字面量、解析到回环的域名都被拒 ----
 through_proxy() { # 名称 URL

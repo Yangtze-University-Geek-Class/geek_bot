@@ -33,16 +33,19 @@
 ### 纯 QEMU 能不能引导 cloud 镜像，冷启动多久
 
 - Debian 12 genericcloud 镜像由 QEMU 直接引导，cloud-init 从 NoCloud 种子盘读 user-data。**通过。**
-- 从启动 qemu 到来宾里的 runner 脚本开始执行，七次引导在 10.5 到 13.1 秒之间：cold 12.1、10.5、12.5、13.1 秒，warm 10.5、11.0 秒。
+- 从启动 qemu 到来宾里的 runner 脚本开始执行，六次引导在 10.5 到 13.1 秒之间：cold 12.1、10.5、12.5、13.1 秒，warm 10.5、11.0 秒。
 
 ### 网络隔离：restrict=on 加一条 guestfwd
 
-直连探测（来宾里用 bash 的 `/dev/tcp` 或 curl，4 秒超时），全部 **不通**：
+直连探测（来宾里用 bash 的 `/dev/tcp` 或 curl，4 秒超时）全部 **不通**。第 7 次运行（只跑探测）记下了失败类型，并加了阳性对照：
 
-- QEMU 用户态网络里的宿主别名地址的 22、139、445、3055、3183 端口；
-- 用户态网络的 DNS 地址 53 端口；来宾里的域名解析也失败（只能经代理访问外网）；
-- RFC 1918 三个私网段、CGNAT、链路本地的云元数据地址、一个公网 IP 的 443；
-- IPv6：用户态网络的宿主地址、ULA、链路本地、IPv4 映射地址、NAT64 地址。
+- **阳性对照**：QEMU 用户态网络里的宿主别名地址对应的是实验容器自己的回环地址，它的 3128 端口上有出网代理在监听。来宾照样连不上（refused）。所以宿主别名上别的端口连不上，是 `restrict=on` 挡住的，不是端口没人在听。
+- **节点宿主**：实验容器的默认网关，也就是节点宿主在 Docker 网桥上的地址。它的 22 和 3128 端口都不可达（unreachable）。
+- 宿主别名地址的 22、139、445、3055、3183 端口：refused。
+- 用户态网络的 DNS 地址 53 端口：refused。来宾里的域名解析也失败，只能经代理访问外网。
+- RFC 1918 三个私网段、CGNAT、链路本地的云元数据地址、一个公网 IP 的 443：unreachable。
+- IPv6：用户态网络的宿主地址、ULA、链路本地、IPv4 映射地址、NAT64 地址，都不通。
+- 反向核对：出网代理的 guestfwd 转发地址连得上。
 
 经出网代理：
 
@@ -55,9 +58,12 @@
 | 解析到回环地址的公共域名（为验证放进了实验白名单） | 拒绝 | `resolved_to_forbidden_address` |
 
 宿主防火墙：实验前后按 iptables、ip6tables 和 nft 的每张表分别取指纹（去掉包计数器），容器删掉之后再比较。
-- iptables、ip6tables，以及 nft 里 Docker 与组网客户端用的各张表，前后一致。
-- 唯一变了的是 nft 的 `bridge incus` 表：多出来的是宿主上另一套程序在实验期间新建的 incus 实例的链，实例名里带着创建时间（正好落在第 6 次实验的时间窗里）。实验本身不碰 incus。
-- 没有实验运行时，这张表 120 秒内没有变化。
+- **filter、nat 表和 FORWARD 规则三次都没变**（#12 验收条件 5 说的「iptables 和 FORWARD 规则」）。
+- **第 6 次**：唯一变了的是 nft 的 `bridge incus` 表，多出的是 incus 实例的链。实例名里带的创建时间正好落在实验时间窗里，实验脚本不调用 incus，所以**推断**这个差异来自宿主上的另一套程序。这是按时间归因，不是直接证明。
+- **第 7 次**：iptables 的 raw 表（nft 里的 `ip raw`）多了两条规则，是 Docker 给接在默认网桥上的容器自动加的「直连防护」DROP 规则（`-d <容器地址>/32 ! -i docker0 -j DROP`）。实验前 raw 表里没有这类规则：把这两条去掉后，指纹和实验前完全一致。
+  - 一条属于实验期间宿主上另一套程序起的容器，Docker 事件里有它的创建时间，它现在还在运行。
+  - 另一条指向一个已经释放的容器地址。实验期间先后用过这个地址的，有实验镜像构建时的中间容器、实验容器，也可能有另一套程序的容器；现在已经无法确定是谁留下的。它只丢弃发往这个空闲地址的流量，由 Docker 管理，实验脚本没有写防火墙。**没有删**：删它要改宿主防火墙，不在这次授权范围内，交给所有者决定。
+- 从这一版起，`run.sh` 会把实验时间窗内的 Docker 容器事件存进 `docker-events.txt`，以后可以直接归因。
 
 ### 依赖安装、pnpm verify 与内存（1 vCPU / 2 GiB）
 
@@ -77,7 +83,7 @@
 
 ## 发现
 
-1. **`-sandbox` 的 `elevateprivileges=deny` 与 guestfwd 的 `cmd:` 转发不兼容。** QEMU 7.2.22 上逐项实测：`on`、`obsolete=deny`、`resourcecontrol=deny` 都正常；`elevateprivileges=deny` 或 `=children` 时，来宾连上转发地址后立刻被断开，转发进程起不来，代理一条连接都收不到。ADR-0004 写的是 `-sandbox on,obsolete=deny,elevateprivileges=deny,resourcecontrol=deny`，照原样做不到「VM 只经 guestfwd 出网」。本次实验改用 `on,obsolete=deny,resourcecontrol=deny`，靠容器的 `cap_drop ALL` 与 `no-new-privileges` 兜底：没有任何 capability、不能经 setuid 程序提权，qemu 与转发进程调用 set*uid 也拿不到权限。**这是对 ADR-0004 隔离配置的放宽，要所有者决定**：接受这个替代（写新 ADR 取代那一句），或者改走退路（passt，或换一种不需要起进程的转发方式），见「结论」。
+1. **`-sandbox` 的 `elevateprivileges=deny` 与 guestfwd 的 `cmd:` 转发不兼容（已由 [ADR-0011](../../decisions/0011-qemu-sandbox-elevateprivileges.md) 处理）。** QEMU 7.2.22 上逐项实测：`on`、`obsolete=deny`、`resourcecontrol=deny` 都正常；`elevateprivileges=deny` 或 `=children` 时，来宾连上转发地址后立刻被断开，转发进程起不来，代理一条连接都收不到。ADR-0004 写的是 `-sandbox on,obsolete=deny,elevateprivileges=deny,resourcecontrol=deny`，照原样做不到「VM 只经 guestfwd 出网」。本次实验改用 `on,obsolete=deny,resourcecontrol=deny`，靠容器的 `cap_drop ALL` 与 `no-new-privileges` 兜底：没有任何 capability、不能经 setuid 程序提权，qemu 与转发进程调用 set*uid 也拿不到权限。这是对 ADR-0004 隔离配置的放宽；所有者 2026-09-26 决定接受，写成 ADR-0011，取代 ADR-0004 里 `-sandbox` 那一句。
 2. **Node 的 `net.BlockList` 会拿 IPv4 地址去比 IPv4 映射规则。** 把 `::ffff:0:0/96` 加进 BlockList，会把全部 IPv4 地址都判为禁止。出网代理改成单独判断 IPv4 映射地址，单测里有这条回归。#17 写生产版出网代理时照此处理。
 3. **代理收到 SIGTERM 时不能等 `server.close()`**：VM 关机后还开着的隧道可能永远不关，要主动断开全部连接再退出。
 4. cloud-init 的 runcmd 里没有 `HOME`，`git config --global`、npm、pnpm 会写不到家目录；来宾脚本要先 `export HOME=/root`。
@@ -86,13 +92,13 @@
 
 | ADR-0004 要验证的假设 | 结论 |
 |---|---|
-| Docker 默认 seccomp 下 node 容器（非 root、cap_drop ALL、no-new-privileges）能用 `/dev/kvm` | 通过 |
+| Docker 默认 seccomp 下 node 容器（非 root、cap_drop ALL、no-new-privileges）能用 `/dev/kvm` | 通过；但这台宿主 `/dev/kvm` 的权限比 kvm 组宽，「只靠 group_add 就够」没有证明 |
 | 纯 QEMU 能引导 cloud 镜像 | 通过；到 runner 就绪 10.5–13.1 秒 |
-| restrict=on 加 guestfwd 的隔离 | 直连宿主、私网、元数据、IPv6 全部不通，通过；但要放宽 `-sandbox` 的 `elevateprivileges`（发现 1），待所有者决定 |
+| restrict=on 加 guestfwd 的隔离 | 通过：直连探测全部不通，阳性对照（有进程在听的宿主别名端口）也不通，节点宿主的 22 端口不可达；`-sandbox` 按 ADR-0011 不带 `elevateprivileges=deny` |
 | 出网代理的放行与拒绝（S-03、S-14） | 通过 |
 | 1 vCPU / 2 GiB 跑一次完整校验会不会 OOM | 本仓库不会（峰值 896–944 MiB）；omp 加校验的组合没有测，见下 |
 | 依赖安装耗时与缓存 | 冷装 36–40 秒；带 store 3–4 秒（外加解包 2 秒），几乎不走网络 |
-| 宿主防火墙规则不变 | 通过：实验没有改动；唯一的差异是另一套程序新建 incus 实例带来的（见「网络隔离」） |
+| 宿主防火墙规则不变 | filter、nat、FORWARD 三次都没变（#12 验收条件 5）；raw 表里多了 Docker 自动加的容器直连防护规则，其中一条的来源无法确定，incus 表的差异推断来自另一套程序，都没有删，交给所有者决定（见「网络隔离」） |
 
 ## 这一轮没有覆盖的
 
@@ -101,6 +107,9 @@
 - **omp**：omp 在 VM 里的内存（ADR-0004 估约 0.6 GB）与 omp 加校验的峰值；带 `.omp/hooks`、`mcp.json`、`.env` 的恶意夹具是否被加载。跑 omp 需要模型中继与每任务令牌（#13、#14），在 #17 的执行器里补测。
 - **只读缓存盘**：ADR-0004 设想的是只读挂进 VM 的 pnpm store 缓存盘；本次 warm 是把 store 解包到 VM 的可写盘上再装，只能说明「有缓存时下载量和耗时是多少」，不能说明只读挂载可行。
 - **passt**：没有评估。
+- **两种 I/O 方式与吞吐**：#12 范围里「对比 guestfwd 与原始盘 tar 两种 I/O 方式」、ADR-0004 假设里的吞吐，都没有测。
+- **第二条 guestfwd（模型代理）**：只测了出网代理这一条。
+- **出网代理的 SNI 绑定**：实验代理没有把 CONNECT 的主机名与 TLS 的 SNI 绑定，共享 CDN 上可换 SNI 绕过白名单；#17 的生产代理要处理。连接数与字节数上限已在实验代理里实现并有单测，但没有在 VM 里压测。
 - **基础镜像在 CI 里构建**：没有试跑。
 - **中等规模的其它仓库**：只测了本仓库。
 - 取消后 qemu 退出、overlay 回收、fw_cfg 传令牌：属于执行器行为，随 #17 实现与测试。

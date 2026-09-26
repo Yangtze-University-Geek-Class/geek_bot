@@ -301,7 +301,7 @@ geek_bot 是一个可以自己部署的 GitHub 维护机器人，面向任何部
 
 **PR 通道 VM**（以 #12 的实测结论为准；不通过时依次退到 passt 或宿主 incus，见 ADR-0004）：
 
-- node 容器里的 qemu，每个任务一台：`-enable-kvm`，默认 1 vCPU / 2 GiB（`GEEK_BOT_VM_VCPUS`、`GEEK_BOT_VM_MEMORY_MIB`），qcow2 overlay 叠在只读基础镜像上；`-sandbox on,obsolete=deny,elevateprivileges=deny,resourcecontrol=deny`（不能禁 spawn，guestfwd 要起进程）。任务结束删除 overlay 和磁盘。
+- node 容器里的 qemu，每个任务一台：`-enable-kvm`，默认 1 vCPU / 2 GiB（`GEEK_BOT_VM_VCPUS`、`GEEK_BOT_VM_MEMORY_MIB`），qcow2 overlay 叠在只读基础镜像上；`-sandbox on,obsolete=deny,resourcecontrol=deny`（不能禁 spawn，guestfwd 要起进程；不带 `elevateprivileges=deny`，由 node 容器兜底，见 ADR-0011）。任务结束删除 overlay 和磁盘。
 - 网络用 QEMU 用户态网络的受限模式（`restrict=on`），来宾访问不到宿主和外网，只加两条 guestfwd：一条到本地模型代理，一条到出网 CONNECT 代理。
 - 任务输入是只读原始盘上的 tar，产物写到可写原始盘上的 tar，实时事件走 virtio-serial，减少对 guestfwd「每个连接起一个进程」的依赖。
 - 任务令牌经 `-fw_cfg name=opt/geekbot/token,file=<0600 临时文件>` 传入，不进 qemu 的命令行参数；VM 起来后删除临时文件。
