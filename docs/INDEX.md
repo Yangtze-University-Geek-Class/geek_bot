@@ -52,6 +52,7 @@
 | 文档 | 说明 | EN |
 |---|---|---|
 | [`protocol.md`](./services/node/protocol.md) | 工作节点与 control 之间的 HTTP/JSON 协议：原则、消息表 N-01…，以及 sandbox 与 VM 怎样访问节点。 | — |
+| [`vm-feasibility.md`](./services/node/vm-feasibility.md) | 在第一台节点的临时容器里，用 QEMU/KVM 起 1 vCPU / 2 GiB 的一次性 VM：冷启动、网络隔离、出网代理、依赖安装、pnpm verify 与内存峰值的实测数据，以及对 ADR-0004 的结论。 | — |
 
 ## services/protocol/
 
@@ -122,7 +123,8 @@
 | [`0008-sqlite-migrations-recovery.md`](./decisions/0008-sqlite-migrations-recovery.md) | control 的 SQLite 用编号的 SQL 迁移加 `PRAGMA user_version`，只扩不缩，让上一版镜像仍能读库；每条写入带隐藏标记，库丢了能从 GitHub 重建关键状态；备份每天自动恢复校验。 | — |
 | [`0009-tuffex-console.md`](./decisions/0009-tuffex-console.md) | console 是 Vue 3.5 + vue-router 4 + Tuffex 0.6.0 + Vite 的单页应用，版本钉死；构建产物打进 control 镜像，与后台 API 和 SSE 同源提供，不另起静态服务器。 | — |
 | [`0010-tracking-record-prefix.md`](./decisions/0010-tracking-record-prefix.md) | 本仓库 issue / PR 评论里的追踪记录统一用 `<!-- track v1 kind=… stage=… -->`，与产品内置的默认格式一致；产品代码里它只是可配置的默认值。 | — |
+| [`0011-qemu-sandbox-elevateprivileges.md`](./decisions/0011-qemu-sandbox-elevateprivileges.md) | qemu 的 `-sandbox` 改为 `on,obsolete=deny,resourcecontrol=deny`：实测 `elevateprivileges=deny` 会让 guestfwd 的转发进程起不来；提权由 node 容器的 cap_drop ALL 与 no-new-privileges 挡住。取代 ADR-0004 里 `-sandbox` 那一句，ADR-0004 的其余决定不变。 | — |
 
 ---
 
-共 42 篇文档（另有 4 篇英文版）。索引按目录分组，组内按文件名排序。
+共 44 篇文档（另有 4 篇英文版）。索引按目录分组，组内按文件名排序。

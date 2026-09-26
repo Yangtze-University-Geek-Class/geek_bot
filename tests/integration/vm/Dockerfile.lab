@@ -1,0 +1,15 @@
+# #12 实验用的节点容器：只装 qemu 与构造启动盘的工具，按 node 容器的约束运行（非 root、只挂 /dev/kvm、
+# cap_drop ALL、no-new-privileges、默认 seccomp、不发布端口）。只用于实验，不发布；生产镜像随 #11、#17 写。
+FROM node:22-bookworm-slim
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils genisoimage curl ca-certificates xz-utils netcat-openbsd \
+ && rm -rf /var/lib/apt/lists/*
+
+# 命名卷第一次挂载时沿用镜像里目录的属主：/cache 先交给 uid 1000，容器以非 root 写得进去。
+RUN mkdir -p /cache && chown 1000:1000 /cache
+
+WORKDIR /lab
+COPY egress-proxy.mjs lab.sh guest.sh /lab/
+USER 1000:1000
+ENTRYPOINT ["bash", "/lab/lab.sh"]

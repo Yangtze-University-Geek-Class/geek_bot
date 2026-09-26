@@ -13,7 +13,9 @@
 
 浏览器回归 `pnpm test:e2e`（#4 加入）不在 `pnpm verify` 里：它以样板数据模式构建 console，在 127.0.0.1:4174 预览，用 Playwright（Chromium）跑 `tests/e2e/*.spec.ts`；CI 的 `console-e2e` job 每次都跑。本机第一次运行前用 `pnpm exec playwright install chromium` 下载浏览器。
 
-还没有的入口：环境模板契约 `pnpm check:environments`（随 #7 加入）、只在有 `/dev/kvm` 的机器上手动跑的 VM 实验 `pnpm test:vm`（随 #12 加入）。它们加入之前，相关项在报告里写「未验证」，不能用 `pnpm verify` 通过代替。
+VM 实验 `pnpm test:vm`（#12 加入）只在有 `/dev/kvm` 和 Docker 的 Linux 主机上以 root 手动跑（前后比对防火墙规则，宿主要有 `iptables-save`、`ip6tables-save` 与 `nft`），不在 `pnpm verify` 和 CI 里；没跑就在报告里写「未验证」。它的出网代理规则另有单测 `tests/integration/vm/egress-proxy.test.ts`，随 `pnpm test` 在任何机器上跑。结论与数据见 [VM 可行性实测](../services/node/vm-feasibility.md)。
+
+还没有的入口：环境模板契约 `pnpm check:environments`（随 #7 加入）。加入之前，相关项在报告里写「未验证」，不能用 `pnpm verify` 通过代替。
 
 运行时固定为 Node 22（`engines` 为 `>=22.13.0 <23`，`check:runtime` 核对），pnpm 9.15.9。未找到浏览器、未找到 KVM 都不能算对应套件通过。
 
@@ -70,7 +72,7 @@ console（#4）：`tests/console/` 覆盖 `lib/` 与样板数据（时长格式�
 | console | `vue-tsc` 通过；页面上原生 `select` 与 `input[type=checkbox]` 数量为 0；emoji 扫描为 0；390px 下没有页面级横向溢出；窄屏抽屉可用；键盘可达；样板数据模式下外部请求数为 0（已加入：`tests/console/`、`tests/e2e/`） | #4 |
 | console | 「认领→登录→设为机器人」界面流程；模型池拖拽与窄屏上移、下移排序 | #5、#13 |
 | node | 两端 schema 一致；epoch 过期的结果返回 409；失联 10 分钟后两侧对称判定并重排；control 重启后的宽限；重置令牌后旧令牌 401；协议版本在 N、N-1 范围内的节点正常派任务，范围外的节点只收心跳、不被派任务；主机健康越线自动 cordon | #11 |
-| node | VM 执行器：取消后 qemu 退出、没有残留 overlay；资源不足时 VM 槽位为 0；真实 KVM 冒烟手动跑 | #12、#17 |
+| node | VM 执行器：取消后 qemu 退出、没有残留 overlay；资源不足时 VM 槽位为 0；容器缺 cap_drop ALL 或 no-new-privileges 时 VM 槽位为 0（ADR-0011）；真实 KVM 冒烟手动跑 | #12、#17 |
 | node | 多节点：按信任等级与标签分配；掉线后在另一台节点重跑且 GitHub 上只有一次写入；排空 | #19 |
 | runner | 降级分类器夹具（成功、429、5xx、超时、缺少结束事件；上下文溢出与取消不降级）；剔除 `.omp`、`.claude`、`mcp.json`、`.env*`；恶意夹具的标记文件不存在 | #14 |
 | protocol | 节点消息、TaskSpec、结果、catalog 的 JSON Schema 与 TypeScript 类型一致 | #11、#13 |

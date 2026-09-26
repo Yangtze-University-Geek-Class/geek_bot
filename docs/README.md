@@ -55,7 +55,7 @@ Agent 进入仓库的第一件事是**确认当前分支**（`git branch --show-
 | 部署、回滚、环境与 env 模板、主机前置条件、故障处理 | DEPLOY、ENVIRONMENTS、HOST-PREREQS（#7 写入）、RUNBOOK（#7 起草，#20 补全） |
 | 加节点、槽位与节点健康 | NODES（#11 写入） |
 | 备份与恢复演练、告警与观测 | BACKUP、OBSERVABILITY（#20 写入） |
-| 架构决策 | [decisions](decisions/README.md)：[ADR-0001](decisions/0001-standalone-product.md)、[ADR-0010](decisions/0010-tracking-record-prefix.md)；ADR-0002 至 ADR-0009 见目录表 |
+| 架构决策 | [decisions](decisions/README.md)：[ADR-0001](decisions/0001-standalone-product.md)、[ADR-0010](decisions/0010-tracking-record-prefix.md)；ADR-0002 至 ADR-0009、ADR-0011 见目录表 |
 
 ## 文档类别与优先级
 

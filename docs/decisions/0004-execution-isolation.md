@@ -24,7 +24,7 @@
 ### PR 通道：node 容器里的一次性 QEMU/KVM VM
 
 - node 容器里的 qemu，每个任务一台：`-enable-kvm`，默认 `-smp 1 -m 2048`（规格取自 `GEEK_BOT_VM_VCPUS`、`GEEK_BOT_VM_MEMORY_MIB`，默认值在 `app/control/src/config.ts`）；qcow2 overlay 叠在只读的基础镜像上，任务结束删除 overlay 和临时磁盘。
-- `-sandbox on,obsolete=deny,elevateprivileges=deny,resourcecontrol=deny`；不禁 spawn，因为 guestfwd 要起进程。
+- `-sandbox on,obsolete=deny,elevateprivileges=deny,resourcecontrol=deny`；不禁 spawn，因为 guestfwd 要起进程。（**这一句已被 [ADR-0011](0011-qemu-sandbox-elevateprivileges.md) 取代**：#12 实测 `elevateprivileges=deny` 会让 guestfwd 的转发进程起不来，改为不带这一项、由 node 容器兜底。）
 - 网络：`-netdev user,restrict=on`，只加两条 guestfwd，一条到节点的本地模型代理，一条到出网 CONNECT 代理。按 QEMU 文档，restrict=on 时来宾访问不到宿主和外网，只能走显式配置的转发（[QEMU Invocation](https://www.qemu.org/docs/master/system/invocation.html)，登记在 [REFERENCES](../conventions/REFERENCES.md)）。
 - 任务输入是只读原始盘上的 tar，产物写到可写原始盘上的 tar，实时事件走 virtio-serial。这样少依赖 guestfwd「每个连接起一个进程」的转发。
 - 任务令牌经 `-fw_cfg name=opt/geekbot/token,file=<0600 临时文件>` 传入，不进 qemu 的命令行参数。
@@ -87,7 +87,14 @@
 
 本篇只是设计，还没有代码。
 
-- #12：一次性 VM 的可行性实测。实测结论记进本篇的实施状态；结论与本篇不符时另写 ADR 取代本篇。
+- #12（2026-09-26 实测，数据见 [VM 可行性实测](../services/node/vm-feasibility.md)）：
+  - 非 root、cap_drop ALL、no-new-privileges、默认 seccomp 的容器里能用 `/dev/kvm`（这台宿主 `/dev/kvm` 的现有权限比 kvm 组宽，「只靠 group_add 就够」没有被证明）；
+  - 纯 QEMU 引导 Debian 12 cloud 镜像，10.5–13.1 秒到 runner 就绪；
+  - restrict=on 加一条 guestfwd 时，来宾直连宿主、私网、元数据地址和 IPv6 全部不通，来宾自己加上默认路由之后也不通；
+  - 出网代理按 S-03、S-14 放行与拒绝；
+  - 1 vCPU / 2 GiB 对本仓库跑完整的 `pnpm verify`，内存峰值 896–944 MiB，没有 OOM；宿主的 filter、nat 与 FORWARD 规则前后没变；raw 表留下一条 Docker 自动加、来源无法确定的容器规则，#12 验收条件 5 是否满足待所有者判定（见实测报告）。
+  - 与本篇不符的一处：QEMU 7.2 上 `-sandbox` 的 `elevateprivileges=deny` 会让 guestfwd 的 `cmd:` 转发进程起不来。所有者 2026-09-26 决定去掉这一项、由容器的 cap_drop ALL 与 no-new-privileges 兜底，写成 [ADR-0011](0011-qemu-sandbox-elevateprivileges.md)。
+  - 这一轮没有覆盖、拆到 #32 的：omp、恶意夹具、只读缓存盘、passt、CI 构建基础镜像、两种 I/O 方式与吞吐、模型代理那条 guestfwd、只靠 group_add 是否足够。
 - #11：node 容器（非 root、只挂 `/dev/kvm`、不开端口）。
 - #14：sandbox 执行器、runner、事件打码。
 - #15：VM 就绪前在只读 sandbox 里审查的过渡。

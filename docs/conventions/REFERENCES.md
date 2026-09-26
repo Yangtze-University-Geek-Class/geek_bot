@@ -48,7 +48,7 @@
 |---|---|---|
 | [OWASP Session Management](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html) | 会话验证、有效期、身份变化后的更新以及 Cookie 范围风险 | [安全模型](../architecture/SECURITY.md)；后台会话（计划中，#5） |
 | [OWASP LLM Prompt Injection Prevention](https://cheatsheetseries.owasp.org/cheatsheets/LLM_Prompt_Injection_Prevention_Cheat_Sheet.html) | 仓库、代码注释、文档等外部内容里的间接提示注入 | [CODE-REVIEW](CODE-REVIEW.md) 第 14 项；[安全模型](../architecture/SECURITY.md)；runner 剔除规则文件与输出中和（计划中，#9、#14） |
-| [QEMU Invocation](https://www.qemu.org/docs/master/system/invocation.html) | `-netdev user` 的 `restrict=on` 与 `guestfwd`、`-fw_cfg`、`-sandbox`、加速器 `kvm` | PR 通道一次性 VM（计划中，#12 实测，#17 实现） |
+| [QEMU Invocation](https://www.qemu.org/docs/master/system/invocation.html) | `-netdev user` 的 `restrict=on` 与 `guestfwd`、`-fw_cfg`、`-sandbox`、加速器 `kvm` | PR 通道一次性 VM：#12 已实测（[VM 可行性实测](../services/node/vm-feasibility.md)，`-sandbox` 取值见 [ADR-0011](../decisions/0011-qemu-sandbox-elevateprivileges.md)），#17 实现 |
 | [QEMU Network emulation](https://www.qemu.org/docs/master/system/devices/net.html) | 用户态网络栈的工作方式 | 同上 |
 | [QEMU fw_cfg](https://www.qemu.org/docs/master/specs/fw_cfg.html) | `-fw_cfg name=opt/...,file=...` 把文件传给 guest，`opt/` 前缀留给用户 | 每任务令牌传入 VM 的方式（计划中，#17） |
 

@@ -36,7 +36,7 @@ AI 先执行 [AGENT-START](AGENT-START.md) 的阅读门禁，不能先运行下�
 
 - 运行根 `pnpm verify`（依次是 `pnpm check`、`pnpm test`、`pnpm build`；其中 `check:notes` 核对执行记录），贴真实输出。
 - 影响浏览器行为时跑 `pnpm test:e2e`（第一次运行前 `pnpm exec playwright install chromium`）。
-- 需要 `/dev/kvm` 的 VM 测试 `pnpm test:vm`（随 #12 加入）是可选的，只在有 KVM 的机器上跑；没跑就在 PR 的「验证命令与结果」里逐条写「未验证」和原因，不能写成通过。
+- 需要 `/dev/kvm` 的 VM 测试 `pnpm test:vm`（#12）是可选的，只在有 KVM 的机器上跑；没跑就在 PR 的「验证命令与结果」里逐条写「未验证」和原因，不能写成通过。
 - 审阅 diff，补文档；确认没有密钥、令牌、真实数据、编译产物，也没有组织名、真实仓库名、内部主机或网段（`pnpm check:secrets`、`pnpm check:public-safety` 只覆盖部分模式，仍要人眼看一遍）。
 - 改动触及文档标题、摘要或路径时，重新生成文档索引（`pnpm docs:index`），并用 `pnpm check:docs` 核对。
 - 失败项和未验证项如实写进 PR，不能只截取部分成功输出。
