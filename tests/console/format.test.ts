@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatDuration } from "../../app/console/src/index.js";
+import { formatDuration } from "../../app/console/src/lib/format.js";
 
 describe("formatDuration", () => {
   it("按例子输出：45 秒、3 分钟、2 小时 5 分钟", () => {

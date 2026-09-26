@@ -11,7 +11,7 @@
 | 目录 | 包名 | 职责 | 契约 |
 |---|---|---|---|
 | `app/control` | `@geek-bot/control` | 控制面。Fastify 5 + better-sqlite3（计划中，#3）。唯一的 SQLite 写入者、唯一的 GitHub 写入者（publisher 白名单 + outbox）；负责登录、令牌加密存放、仓库发现、轮询、调度、模型中继；同源托管 console 的静态产物 | [control](../services/control/README.md) |
-| `app/console` | `@geek-bot/console` | 管理后台。Vue 3.5 + vue-router 4 + @talex-touch/tuffex 0.6.0 + Vite（计划中，#4）。不用原生下拉框和复选框，不用 emoji | [console](../services/console/README.md) |
+| `app/console` | `@geek-bot/console` | 管理后台。Vue 3.5 + vue-router 4 + @talex-touch/tuffex 0.6.0 + Vite 7（#4 引入外壳）。不用原生下拉框和复选框，不用 emoji | [console](../services/console/README.md) |
 | `app/node` | `@geek-bot/node` | 工作节点代理。只向外连 control（HTTP 长轮询 `/api/node/v1`），不开入站端口；管理 issue 通道的无网只读 sandbox 容器和 PR 通道的一次性 QEMU/KVM VM（计划中，#11、#14、#17） | [node](../services/node/README.md) |
 | `app/runner` | `@geek-bot/runner` | 在 sandbox 或 VM 里驱动 omp 的单文件程序，只用 Node 标准库（计划中，#14） | [runner](../services/runner/README.md) |
 | `packages/protocol` | `@geek-bot/protocol` | 纯类型加 JSON Schema：节点协议、TaskSpec、结果、RepoProfile、catalog 文件契约、console API DTO | [protocol](../services/protocol/README.md) |
@@ -45,7 +45,7 @@ control 内部（计划中）：index -> app -> routes/<module> -> 服务 -> pub
 6. 每个包都要在 `pnpm-workspace.yaml` 里逐行列出（不用通配），`package.json` 里都要有非空的 `typecheck` 与 `build` 脚本：根脚本用 `pnpm -r --if-present run` 调用它们，缺了会被静默跳过。
 7. 计划中（#3、#9）：control 的路由模块互不导入；底层（db、GitHub 读取客户端、密钥）不反向导入路由或应用组装；publisher 以外不得调用 GitHub 写接口；令牌解密接口只许 publisher 与 GitHub 读取层（读取客户端，计划路径 `src/github/client.ts`，#6）调用（[SECURITY](../architecture/SECURITY.md) S-01）。这些规则随对应 issue 加进 `check-boundaries`，加入前由审查逐项核对（见 [CODE-REVIEW](CODE-REVIEW.md) 第 11、12 项）。
 
-检查由 TypeScript AST 解析静态 import、动态 import、re-export、import-type 与 `require`；Vue 单文件组件只解析 `<script>` 块；解析 `.js` 指向 `.ts` 以及 tsconfig 声明的路径别名；按解析后的文件路径判断所属包，不以导入名称判断。本地导入（相对路径、已声明别名、`@geek-bot/` 作用域）解析失败不是忽略理由，检查必须失败；非字面量的动态导入无法静态判定，同样失败；`app/`、`packages/` 下出现没在 `check-boundaries` 里登记边界的目录也失败。不允许靠新增别名绕过检查。运行时 HTTP 调用、跨包 URL 和 Schema 的语义还需测试，不宣称 import 检查覆盖它们。根 TypeScript 检查不自动证明 Vue 源码正确（console 另跑 `vue-tsc`，#4 起）。
+检查由 TypeScript AST 解析静态 import、动态 import、re-export、import-type 与 `require`；Vue 单文件组件只解析 `<script>` 块；解析 `.js` 指向 `.ts` 以及 tsconfig 声明的路径别名；按解析后的文件路径判断所属包，不以导入名称判断。本地导入（相对路径、已声明别名、`@geek-bot/` 作用域）解析失败不是忽略理由，检查必须失败；非字面量的动态导入无法静态判定，同样失败；`app/`、`packages/` 下出现没在 `check-boundaries` 里登记边界的目录也失败。不允许靠新增别名绕过检查。运行时 HTTP 调用、跨包 URL 和 Schema 的语义还需测试，不宣称 import 检查覆盖它们。根 TypeScript 检查不自动证明 Vue 源码正确（console 的 `typecheck` 是 `vue-tsc`）。
 
 ## 数据与事务
 

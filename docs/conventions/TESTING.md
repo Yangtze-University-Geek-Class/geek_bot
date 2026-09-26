@@ -6,12 +6,14 @@
 
 ## 根入口和分工
 
-- `pnpm check`：依次运行 `check:runtime`、`check:boundaries`、`check:docs`、`check:notes`、`check:secrets`、`check:public-safety` 与 `typecheck`（各包 `tsc -p tsconfig.json --noEmit`，再用根 `tsconfig.json` 检查 `tests/**` 与 `vitest.config.ts`，不产出文件）。
+- `pnpm check`：依次运行 `check:runtime`、`check:boundaries`、`check:docs`、`check:notes`、`check:secrets`、`check:public-safety` 与 `typecheck`（各包的 `typecheck`：console 是 `vue-tsc`，其余是 `tsc --noEmit`；再用根 `tsconfig.json` 检查 `tests/**`（`tests/e2e` 除外）与 `vitest.config.ts`，用 `tests/e2e/tsconfig.json` 带 DOM 类型检查浏览器回归与 `playwright.config.ts`，不产出文件）。
 - `pnpm test`：`vitest run`，覆盖 `tests/tooling/` 与 `tests/<包>/`。
-- `pnpm build`：先 `check:runtime`，再逐包 `tsc -p tsconfig.json`，产物进各包 `dist/`。
+- `pnpm build`：先 `check:runtime`，再逐包构建，产物进各包 `dist/`（console 是 `vite build`，其余是 `tsc -p tsconfig.json`）。
 - `pnpm verify` = `pnpm check && pnpm test && pnpm build`，任一步失败必须非零退出。CI 与合并前自查都跑它。
 
-还没有的入口：浏览器回归 `pnpm test:e2e`（随 #4 加入）、环境模板契约 `pnpm check:environments`（随 #7 加入）、只在有 `/dev/kvm` 的机器上手动跑的 VM 实验 `pnpm test:vm`（随 #12 加入）。它们加入之前，相关项在报告里写「未验证」，不能用 `pnpm verify` 通过代替。
+浏览器回归 `pnpm test:e2e`（#4 加入）不在 `pnpm verify` 里：它以样板数据模式构建 console，在 127.0.0.1:4174 预览，用 Playwright（Chromium）跑 `tests/e2e/*.spec.ts`；CI 的 `console-e2e` job 每次都跑。本机第一次运行前用 `pnpm exec playwright install chromium` 下载浏览器。
+
+还没有的入口：环境模板契约 `pnpm check:environments`（随 #7 加入）、只在有 `/dev/kvm` 的机器上手动跑的 VM 实验 `pnpm test:vm`（随 #12 加入）。它们加入之前，相关项在报告里写「未验证」，不能用 `pnpm verify` 通过代替。
 
 运行时固定为 Node 22（`engines` 为 `>=22.13.0 <23`，`check:runtime` 核对），pnpm 9.15.9。未找到浏览器、未找到 KVM 都不能算对应套件通过。
 
@@ -20,7 +22,7 @@
 - **工具测试**在临时目录里合成夹具（临时 Git 仓库、临时 `app/`、`docs/`），不改真实仓库的文件和 refs，不 fetch、不联网。需要仓库根目录的脚本通过 `--root <dir>` 或导出的纯函数接收根目录，反例都在夹具里跑。
 - **被禁字面量不进仓库**：`check-public-safety` 的反例在运行时拼出来（如把地址按段 `join('.')`），或者给纯函数注入测试自己的哈希表；测试文件、夹具里不留明文。
 - **control 的路由测试**（随 #3 起）用 `buildApp`/`inject` 注册真实路由，SQLite 用内存库，GitHub API 与模型网关经注入的 `fetch` 打桩并默认拒绝网络，需要响应的用例显式注入模拟。不复制 handler 去验证另一份实现，不读取 `.env`、目标机配置或真实数据库，不对真实仓库发任何写请求。时间相关的规则（静默窗口、5 天提醒、7 天关闭）用可注入的假时钟。
-- **浏览器测试**（随 #4 起）连样板数据或 mock API；每次使用自己创建的临时浏览器 profile，不打开、不清理用户已有的浏览器配置和数据；只关闭本次创建的进程，禁止广泛 `pkill`。样板数据全部虚构。
+- **浏览器测试**（`tests/e2e/`，#4 起）连样板数据或 mock API；每次使用自己创建的临时浏览器 profile，不打开、不清理用户已有的浏览器配置和数据；只关闭本次创建的进程，禁止广泛 `pkill`。样板数据全部虚构。
 - **node 与 runner 测试**默认把 VM 与容器驱动打桩；真实 KVM 冒烟只在有 `/dev/kvm` 的节点上手动跑，结果单独记录（#12、#17）。恶意夹具仓库（带 `.omp/hooks`、`mcp.json`、`.env`）只在 sandbox 或 VM 里使用。
 
 ## 现在就有的测试（本仓库骨架，#1）
@@ -43,7 +45,9 @@
 | 标签声明（`scripts/labels.mjs`） | `tests/tooling/labels.test.ts` | `labels.yml` 颜色或说明不合规；issue 模板引用了没声明的标签；「端」下拉不是八个端；不认识的参数以 0 退出 |
 | PR 目标分支（`issue-lifecycle.yml` 的 `pr-base`） | `tests/tooling/labels.test.ts` | PR 指向 `stage` 以外的分支（`main`、`dev/alice`、`task/12/review_queue`、`stage2`、空）时不以 1 退出；`pr-base` 不随 edited 触发；`pr-contract`、`close-on-merge` 没限定只处理指向 `stage` 的 PR |
 
-各包（`app/control`、`app/console`、`app/node`、`app/runner`、`packages/protocol`）现在只有最小源码，各有一份最小测试：`tests/control/config.test.ts`（配置默认值与环境变量校验）、`tests/console/format.test.ts`（时长格式化）、`tests/node/config.test.ts`（节点配置校验）、`tests/runner/omp-args.test.ts`（omp 参数）、`tests/protocol/protocol.test.ts`（协议常量与通道映射）。另由各包的 `typecheck` 与 `build` 证明各包能编译、能类型导入 `@geek-bot/protocol`。这些测试只证明工作区与工具链可用，不证明任何业务功能。
+各包（`app/control`、`app/node`、`app/runner`、`packages/protocol`）现在只有最小源码，各有一份最小测试：`tests/control/config.test.ts`（配置默认值与环境变量校验）、`tests/node/config.test.ts`（节点配置校验）、`tests/runner/omp-args.test.ts`（omp 参数）、`tests/protocol/protocol.test.ts`（协议常量与通道映射）。另由各包的 `typecheck` 与 `build` 证明各包能编译、能类型导入 `@geek-bot/protocol`。这些测试只证明工作区与工具链可用，不证明任何业务功能。
+
+console（#4）：`tests/console/` 覆盖 `lib/` 与样板数据（时长格式化；API 客户端的错误格式、网络错误、非 JSON 响应、取消、路径白名单与各种写法的点段；页面状态映射；SSE 的连接、断线轮询、CLOSED 后退避重建、`reset`、`session_expired`；样板数据的各场景与「不调用真实 fetch」；浏览器回归所用被禁符号正则的逐类自测）。`tests/e2e/` 是浏览器回归：每个页面在 1280px 与 390px 下断言没有原生 select 与 checkbox、emoji 与被禁符号扫描为 0、图标都有图形、没有页面级横向溢出；外壳与主内容区没有被 overflow 截掉的内容；另有侧栏与抽屉导航、键盘（跳过链接、Tab 与 Enter、纯键盘打开抽屉、焦点进入并圈在抽屉里、Esc 与焦点归还、关闭的抽屉键盘进不去）、断网提示、样板数据标识、各数据状态；每个用例结束时断言没有请求离开浏览器（上下文级的外部请求、WebSocket 与 `/api/` 请求都为 0）。
 
 ## 回归矩阵（计划中，随对应 issue 加入）
 
@@ -60,7 +64,7 @@
 | control | 池外模型 403、过期令牌 401、超预算 429；没有 efforts 的模型只能选 off | #13 |
 | control | 用假时钟走完第 5 天提醒、第 7 天关闭、2 轮上限；人重开后不再关闭；issue 正文里的注入指令不引起其它条目上的写入 | #16 |
 | control | 修复通道拒绝推 tag、推默认分支和 base 分支、非快进推送、合并、从 fork 开 PR、推别人的分支 | #18 |
-| console | `vue-tsc` 通过；页面上原生 `select` 与 `input[type=checkbox]` 数量为 0；emoji 扫描为 0；390px 下没有页面级横向溢出；窄屏抽屉可用；键盘可达；样板数据模式下外部请求数为 0 | #4 |
+| console | `vue-tsc` 通过；页面上原生 `select` 与 `input[type=checkbox]` 数量为 0；emoji 扫描为 0；390px 下没有页面级横向溢出；窄屏抽屉可用；键盘可达；样板数据模式下外部请求数为 0（已加入：`tests/console/`、`tests/e2e/`） | #4 |
 | console | 「认领→登录→设为机器人」界面流程；模型池拖拽与窄屏上移、下移排序 | #5、#13 |
 | node | 两端 schema 一致；epoch 过期的结果返回 409；失联 10 分钟后两侧对称判定并重排；control 重启后的宽限；重置令牌后旧令牌 401；协议版本在 N、N-1 范围内的节点正常派任务，范围外的节点只收心跳、不被派任务；主机健康越线自动 cordon | #11 |
 | node | VM 执行器：取消后 qemu 退出、没有残留 overlay；资源不足时 VM 槽位为 0；真实 KVM 冒烟手动跑 | #12、#17 |

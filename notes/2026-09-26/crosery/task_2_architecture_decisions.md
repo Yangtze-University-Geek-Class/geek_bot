@@ -77,3 +77,15 @@
 - 做了什么：按 CODE-REVIEW 第 1–15 项复核 f50a867 相对 50fc49f 的改动；在 #25 发 kind=review 记录
 - 结果：结论：通过；pnpm verify 退出码 0（Tests 282 passed）
 - 下一步：推送这三条记录，CI 全绿后合并进 stage
+
+## 09:25:48 +08:00 · 合并 · #2 · #25 合进 stage
+
+- 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
+- 做了什么：gh pr merge 25 --merge（CI 全绿：verify、branch-guard、pr-base、core、pr-contract、lint-workflows）
+- 结果：合并提交 3724f12320b6ee6bd913158d7da1b90bc696bca5
+
+## 09:26:49 +08:00 · 收尾 · #2 · PR #25 已合并，清理 worktree
+
+- 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
+- 做了什么：node scripts/task.mjs finish 2：删 worktree .claude/worktrees/task-2 与本地分支 task/2/architecture_decisions
+- 结果：PR 已合并

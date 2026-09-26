@@ -1,0 +1,197 @@
+/**
+ * 实时推送客户端（docs/architecture/API.md「SSE」，A-56 `GET /api/v1/stream`）。本目录不导入 Vue。
+ *
+ * - 用浏览器的 EventSource 连接；断线重连时浏览器自己带 Last-Event-ID，control 从环形缓冲补发。
+ * - 连接出错后退回每 5 秒轮询一次（由调用方提供 poll，调对应的 GET 端点），重新连上后停止轮询。
+ * - 浏览器只在网络断开时自己重连；响应不是 200（control 重启时的 503、反代的 502、会话过期后的 401）时
+ *   EventSource 进入 CLOSED、不再重连。这时本模块按 5 秒起、翻倍、最长 60 秒退避，自己重建连接；
+ *   重建的连接不带 Last-Event-ID，第一次连上时调 onReset 让页面重新拉取。
+ * - 会话过期后重建会一直拿到 401，EventSource 看不到状态码：调用方的 poll 收到 401 时要调 handle.close()。
+ * - 收到 `reset` 表示补发不了，调用方要重新拉取当前页的数据；收到 `session_expired` 关闭连接、不再重连。
+ * - 事件里的文本已由 control 打码，渲染时仍按纯文本处理（S-05）。
+ *
+ * 服务端的 SSE 由 #14 实现；在那之前外壳不建立连接，本模块由单测覆盖。EventSource 与定时器都可注入。
+ */
+import type { StreamTopic } from "@geek-bot/protocol";
+
+/** 断线后轮询对应 GET 端点的间隔（API.md「SSE」）。 */
+export const POLL_INTERVAL_MS = 5_000;
+/** EventSource 进入 CLOSED 后自己重建连接的退避：从 5 秒起，每次翻倍，最长 60 秒。 */
+export const RECONNECT_BASE_MS = 5_000;
+export const RECONNECT_MAX_MS = 60_000;
+/** EventSource.readyState 的 CLOSED。 */
+const EVENT_SOURCE_CLOSED = 2;
+/** 每个连接最多订阅的 topic 数（A-56）。 */
+export const MAX_TOPICS = 20;
+/** 连接上要监听的事件类型（API.md「SSE」事件表）。 */
+export const STREAM_EVENT_TYPES = Object.freeze([
+  "overview.stats",
+  "task.created",
+  "task.updated",
+  "task.event",
+  "task.attempt",
+  "publish.updated",
+  "node.updated",
+  "node.health",
+  "repo.updated",
+  "bot.status",
+  "alert.raised",
+  "alert.resolved",
+  "settings.updated",
+] as const);
+export type StreamEventType = (typeof STREAM_EVENT_TYPES)[number];
+
+/** connecting：正在建立连接；live：实时推送正常；polling：断线，正在轮询；closed：会话过期或已停止。 */
+export type StreamStatus = "connecting" | "live" | "polling" | "closed";
+
+export interface StreamEvent {
+  readonly type: StreamEventType;
+  /** 服务端的事件 id（实例内单调递增的整数，按字符串保存）。 */
+  readonly id: string;
+  readonly data: unknown;
+}
+
+/** 事件里本模块读取的字段（浏览器的 MessageEvent 满足它）。 */
+export interface StreamMessage {
+  readonly data: string;
+  readonly lastEventId: string;
+}
+
+/**
+ * EventSource 里本模块用到的部分，测试注入假实现。
+ * onopen、onerror 的事件参数不读取：浏览器与 Node 的类型声明对它的类型写法不同，用 never 让两者都能赋值。
+ */
+export interface EventSourceLike {
+  /** 0 CONNECTING、1 OPEN、2 CLOSED。 */
+  readonly readyState: number;
+  onopen: ((event: never) => void) | null;
+  onerror: ((event: never) => void) | null;
+  addEventListener(type: string, listener: (event: StreamMessage) => void): void;
+  close(): void;
+}
+
+export interface StreamOptions {
+  readonly topics: readonly StreamTopic[];
+  readonly onEvent: (event: StreamEvent) => void;
+  readonly onStatus: (status: StreamStatus) => void;
+  /** 收到 `reset`：重新拉取当前页的数据。 */
+  readonly onReset: () => void;
+  /** 断线期间每 5 秒调用一次。 */
+  readonly poll: () => void;
+  readonly createEventSource?: (url: string) => EventSourceLike;
+  readonly setInterval?: (handler: () => void, ms: number) => unknown;
+  readonly clearInterval?: (handle: unknown) => void;
+  readonly setTimeout?: (handler: () => void, ms: number) => unknown;
+  readonly clearTimeout?: (handle: unknown) => void;
+}
+
+export interface StreamHandle {
+  readonly url: string;
+  close(): void;
+}
+
+export function streamUrl(topics: readonly StreamTopic[]): string {
+  if (topics.length === 0) throw new RangeError("至少要订阅一个 topic");
+  if (topics.length > MAX_TOPICS) throw new RangeError(`每个连接最多订阅 ${MAX_TOPICS} 个 topic，当前 ${topics.length} 个`);
+  return `/api/v1/stream?topics=${topics.map(encodeURIComponent).join(",")}`;
+}
+
+export function openStream(options: StreamOptions): StreamHandle {
+  const url = streamUrl(options.topics);
+  const create: (target: string) => EventSourceLike = options.createEventSource ?? (target => new EventSource(target, { withCredentials: true }));
+  const startInterval = options.setInterval ?? ((handler, ms) => globalThis.setInterval(handler, ms));
+  const stopInterval = options.clearInterval ?? (handle => globalThis.clearInterval(handle as ReturnType<typeof globalThis.setInterval>));
+  const startTimeout = options.setTimeout ?? ((handler, ms) => globalThis.setTimeout(handler, ms));
+  const stopTimeout = options.clearTimeout ?? (handle => globalThis.clearTimeout(handle as ReturnType<typeof globalThis.setTimeout>));
+
+  let status: StreamStatus | null = null;
+  let pollTimer: unknown = null;
+  let reconnectTimer: unknown = null;
+  let reconnectDelay = RECONNECT_BASE_MS;
+  let source: EventSourceLike;
+  const setStatus = (next: StreamStatus) => {
+    if (next === status) return;
+    status = next;
+    options.onStatus(next);
+  };
+  const stopPolling = () => {
+    if (pollTimer === null) return;
+    stopInterval(pollTimer);
+    pollTimer = null;
+  };
+  const startPolling = () => {
+    if (pollTimer !== null) return;
+    pollTimer = startInterval(options.poll, POLL_INTERVAL_MS);
+  };
+  const close = () => {
+    stopPolling();
+    if (reconnectTimer !== null) stopTimeout(reconnectTimer);
+    reconnectTimer = null;
+    source.close();
+    setStatus("closed");
+  };
+  const scheduleReconnect = () => {
+    if (reconnectTimer !== null) return;
+    const delay = reconnectDelay;
+    reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX_MS);
+    reconnectTimer = startTimeout(() => {
+      reconnectTimer = null;
+      if (status !== "closed") connect(true);
+    }, delay);
+  };
+
+  /** 建一条连接并挂上处理函数；旧连接上迟到的回调一律忽略。rebuilt 表示这是 CLOSED 之后自己重建的连接。 */
+  const connect = (rebuilt: boolean) => {
+    const current = create(url);
+    source = current;
+    const active = () => source === current && status !== "closed";
+    // 只有重建后的第一次连上需要整页重新拉取；之后浏览器自己重连会带 Last-Event-ID，补发得回来。
+    let resetOnOpen = rebuilt;
+
+    current.onopen = () => {
+      if (!active()) return;
+      reconnectDelay = RECONNECT_BASE_MS;
+      stopPolling();
+      setStatus("live");
+      // 重建的连接没带 Last-Event-ID，断开期间的事件补发不回来，让页面重新拉取。
+      if (resetOnOpen) {
+        resetOnOpen = false;
+        options.onReset();
+      }
+    };
+    // 出错后先退回轮询，页面顶部只显示一条提示，不换成错误页；浏览器放弃重连（CLOSED）时自己退避重建。
+    current.onerror = () => {
+      if (!active()) return;
+      startPolling();
+      setStatus("polling");
+      if (current.readyState === EVENT_SOURCE_CLOSED) {
+        current.close();
+        scheduleReconnect();
+      }
+    };
+    for (const type of STREAM_EVENT_TYPES) {
+      current.addEventListener(type, event => {
+        if (active()) options.onEvent({ type, id: event.lastEventId, data: parseData(event.data) });
+      });
+    }
+    current.addEventListener("reset", () => {
+      if (active()) options.onReset();
+    });
+    current.addEventListener("session_expired", () => {
+      if (active()) close();
+    });
+  };
+
+  setStatus("connecting");
+  connect(false);
+  return { url, close };
+}
+
+/** data 是一行 JSON；解析不了时保留原文，不抛错打断整条连接。 */
+function parseData(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return raw;
+  }
+}

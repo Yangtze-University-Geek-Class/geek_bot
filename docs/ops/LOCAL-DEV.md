@@ -27,7 +27,8 @@ pnpm install --frozen-lockfile
 
 - 锁文件不可变：安装不应改动 `pnpm-lock.yaml`。要加依赖，按 [CONTRIBUTING](../conventions/CONTRIBUTING.md) 在 PR 里说明目的、许可和维护代价。
 - 每个 task worktree 各装一次；pnpm 的全局 store 会复用已下载的包。
-- 现阶段（#1）只有开发依赖 `typescript`、`vitest`、`@types/node`，没有任何生产依赖；Fastify、better-sqlite3、Vue、Tuffex 由后续 issue 引入。
+- 生产依赖目前只有 console 的 Vue、vue-router、Tuffex（#4）；Fastify、better-sqlite3 由 #3 引入。版本见 [STACK](../design/STACK.md)。
+- Tuffex 依赖的 `@talex-touch/utils` 把 Electron 声明为 peer；根 `package.json` 的 `pnpm.packageExtensions` 把它标成可选，安装时不会下载 Electron（[console 服务契约](../services/console/README.md)「Tuffex 0.6.0 在 Node 22 上的实测」）。
 
 ## 验证：`pnpm verify`
 
@@ -52,7 +53,9 @@ pnpm install --frozen-lockfile
 - `node scripts/check-public-safety.mjs --hash <词>`：打印一个词的 SHA-256，维护者用它往被禁词表里追加条目；表里只存哈希，不存明文。只接受单个 `[a-z0-9]+` token（大小写不限）或 IPv4；带连字符、空格的词要拆开分别登记；汉字词不支持，会以 2 退出。扫描时每个 token 连同它长度 4 到 32 的前缀、后缀一起比对，所以登记一个词就能拦住它和别的词、数字连写的形式（夹在两个词中间的拦不住）；短于 4 个字符的词只按整词比对，`--hash` 会在 stderr 提示。
 - `node scripts/note.mjs add|flush|index|check`：写执行记录、把暂存的记录并进当前 task worktree、重新生成 `notes/INDEX.md`（`--summary` 输出全部链路的一览表）、核对记录；`check --pr --base origin/stage --head <task 分支>` 是 CI 对 task PR 的检查，本地开 PR 前可以先跑（审查进行中加 `--for-review`，允许暂缺「审查」）。用法见 [NOTES](../conventions/NOTES.md) §5。
 - `pnpm labels:plan`：只打印创建标签的 `gh label create` 命令，不执行，由所有者决定是否运行（见 [CICD](CICD.md)）。
-- 还没有的命令：`dev:control`（#3）、`dev:console` 与 `test:e2e`（#4）、`check:environments` 与 `release:plan`（#7）、`test:vm`（#12）。
+- `pnpm dev:console`：console 的样板数据模式开发服务器（`vite --mode sample`），数据全部虚构、不连控制面；地址栏加 `?sample=empty|slow|error|forbidden|unauthenticated|offline` 看各种状态。
+- `pnpm test:e2e`：浏览器回归。以样板数据模式构建 console（`app/console/.sample-dist/`，已忽略），在 127.0.0.1:4174 预览，用 Playwright 跑 `tests/e2e/`；报告在 `playwright-report/`，验收截图在 `test-results/evidence/`（都已忽略）。第一次运行前 `pnpm exec playwright install chromium`，浏览器下载到用户缓存目录（macOS 是 `~/Library/Caches/ms-playwright`），不进仓库。4174 端口被占用时它直接失败，不复用已有的服务。
+- 还没有的命令：`dev:control`（#3）、`check:environments` 与 `release:plan`（#7）、`test:vm`（#12）。
 
 ## Git 钩子
 
@@ -101,10 +104,10 @@ node scripts/task.mjs finish <issue>
 |---|---|
 | `tests/control/`、`tests/console/`、`tests/node/`、`tests/runner/`、`tests/protocol/` | 各包的单测，与 `app/<name>`、`packages/protocol` 一一对应 |
 | `tests/tooling/` | 门禁脚本与工作流辅助脚本的测试：缺服务文档、跨包导入、私网地址、模板密钥有值、PR 正文缺段等反例必须失败；经符号链接启动 CLI 的回归；分支不变量、task worktree、PR 正文契约、标签声明 |
-| `tests/e2e/`（计划中，随 #4 加入） | 管理后台的浏览器测试，入口 `pnpm test:e2e` |
+| `tests/e2e/` | 管理后台的浏览器回归（Playwright），入口 `pnpm test:e2e`；类型检查用 `tests/e2e/tsconfig.json` |
 | `tests/integration/vm/`（计划中，随 #12 加入） | 一次性 VM 的实测，入口 `pnpm test:vm`；需要 `/dev/kvm`，只在有它的 Linux 机器上手动运行，macOS 本机跑不了 |
 
-测试文件以 `.test.ts` 结尾，由根 `vitest.config.ts` 收集。测试不读 `.env`、不连真实 GitHub、不用真实数据；需要反例的字面量（私网地址、被禁词）在运行时拼出来，不写进仓库。隔离要求见 [TESTING](../conventions/TESTING.md)。
+测试文件以 `.test.ts` 结尾，由根 `vitest.config.ts` 收集；浏览器回归以 `.spec.ts` 结尾，只由 Playwright 收集。测试不读 `.env`、不连真实 GitHub、不用真实数据；需要反例的字面量（私网地址、被禁词）在运行时拼出来，不写进仓库。隔离要求见 [TESTING](../conventions/TESTING.md)。
 
 ## 常见问题
 

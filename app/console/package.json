@@ -4,10 +4,24 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "build": "tsc -p tsconfig.json"
+    "dev": "vite --mode sample",
+    "typecheck": "vue-tsc -p tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit",
+    "build": "vite build",
+    "build:sample": "vite build --mode sample --outDir .sample-dist",
+    "preview:sample": "vite preview --mode sample --outDir .sample-dist --host 127.0.0.1 --port 4174 --strictPort"
   },
   "dependencies": {
-    "@geek-bot/protocol": "workspace:*"
+    "@geek-bot/protocol": "workspace:*",
+    "@talex-touch/tuffex": "0.6.0",
+    "vue": "^3.5.27",
+    "vue-router": "^4.6.4"
+  },
+  "devDependencies": {
+    "@iconify-json/carbon": "^1.2.27",
+    "@unocss/preset-icons": "^66.10.5",
+    "@unocss/vite": "^66.10.5",
+    "@vitejs/plugin-vue": "^6.0.9",
+    "vite": "^7.3.6",
+    "vue-tsc": "^3.3.11"
   }
 }

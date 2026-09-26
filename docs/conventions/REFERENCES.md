@@ -6,7 +6,7 @@
 
 ## 适用范围
 
-规范化所用外部事实优先查官方文档，内部约束仍以本项目 current 文档及实现为准。下表记录采用了哪些原则以及对应的仓库落点，不表示项目已通过 OWASP、WCAG 或其他认证。表中每个链接都在 2026-09-25 实际打开核对过；落点写「计划中」的，由括号里的 issue 实现。
+规范化所用外部事实优先查官方文档，内部约束仍以本项目 current 文档及实现为准。下表记录采用了哪些原则以及对应的仓库落点，不表示项目已通过 OWASP、WCAG 或其他认证。表中每个链接都实际打开核对过（2026-09-25，另写了日期的除外）；落点写「计划中」的，由括号里的 issue 实现。
 
 ### 协作与工程
 
@@ -17,8 +17,11 @@
 | [TypeScript module reference](https://www.typescriptlang.org/docs/handbook/modules/reference.html) | `.js` 对应 TS 源文件、tsconfig `paths` 与 `moduleResolution` 的真实解析 | `scripts/check-boundaries.mjs` 及跨包导入反例，见 [MODULAR-DEVELOPMENT](MODULAR-DEVELOPMENT.md) |
 | [Fastify Testing](https://fastify.dev/docs/latest/Guides/Testing/) | 构造与监听分离、inject 注册真实插件与路由、关闭资源 | [TESTING](TESTING.md) 的隔离一节；control 路由测试（计划中，#3） |
 | [Fastify Validation and Serialization](https://fastify.dev/docs/latest/Reference/Validation-and-Serialization/) | 运行时 HTTP Schema 与类型声明各有职责 | control 各路由模块的 `contracts.ts`（计划中，#3）；[API](../architecture/API.md) |
-| [W3C APG modal dialog](https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/) | 弹层名称、焦点进入/圈定/恢复、危险操作优先聚焦取消 | 管理后台的确认弹层与浏览器回归（计划中，#4），见 [DESIGN](../design/DESIGN.md) |
-| [WCAG 2.2](https://www.w3.org/TR/WCAG22/) | AA 级验收目标；文本对比度 4.5:1 与大文本 3:1（1.4.3）、焦点可见（2.4.7）、目标尺寸 24×24 CSS 像素及其间距例外（2.5.8） | [DESIGN](../design/DESIGN.md) 的无障碍目标；管理后台浏览器回归（计划中，#4） |
+| [W3C APG modal dialog](https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/) | 弹层名称、焦点进入/圈定/恢复、危险操作优先聚焦取消 | 管理后台的抽屉导航（焦点进入、Esc 关闭、焦点归还，`tests/e2e/`，#4）与确认弹层（随用到它的页面加入），见 [DESIGN](../design/DESIGN.md) |
+| [WCAG 2.2](https://www.w3.org/TR/WCAG22/) | AA 级验收目标；文本对比度 4.5:1 与大文本 3:1（1.4.3）、焦点可见（2.4.7）、目标尺寸 24×24 CSS 像素及其间距例外（2.5.8） | [DESIGN](../design/DESIGN.md) 的无障碍目标；管理后台浏览器回归（`tests/e2e/`，#4） |
+| [Vite：Getting Started](https://vite.dev/guide/) | 「Vite requires Node.js version 20.19+, 22.12+」（2026-09-26 核对） | [STACK](../design/STACK.md) 的前端构建；本仓库的 Node 22 基线满足 |
+| [Playwright：Browsers](https://playwright.dev/docs/browsers)、[Continuous Integration](https://playwright.dev/docs/ci) | 按名称只装一个浏览器（`playwright install chromium`）、`--with-deps` 同时装系统依赖、浏览器默认下载到用户缓存目录（macOS `~/Library/Caches/ms-playwright`，Linux `~/.cache/ms-playwright`）（2026-09-26 核对） | `pnpm test:e2e` 与 CI 的 `console-e2e`，见 [TESTING](TESTING.md)、[CICD](../ops/CICD.md) |
+| [pnpm：packageExtensions](https://pnpm.io/settings/dependency-resolution#packageextensions) | 按 `名称@版本范围` 给依赖补 `peerDependenciesMeta`（例如把某个 peer 标为 `optional`）。新版 pnpm 在 `pnpm-workspace.yaml` 里配置；本仓库钉的 pnpm 9.15.9 读根 `package.json` 的 `pnpm.packageExtensions`，实测生效（2026-09-26 核对） | 根 `package.json`：把 `@talex-touch/utils@2` 的 peer `electron` 标为可选，见 [STACK](../design/STACK.md)；升级 pnpm 大版本时迁移 |
 | [Node.js previous releases](https://nodejs.org/en/about/previous-releases) | 各大版本的代号与支持状态；v22 为 LTS 版本线（代号 Jod） | [STACK](../design/STACK.md) 的环境一致性一节；`.nvmrc`、`.node-version`、`engines` |
 
 ### GitHub

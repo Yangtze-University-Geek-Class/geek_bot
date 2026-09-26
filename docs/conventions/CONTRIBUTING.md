@@ -15,7 +15,7 @@ AI 先执行 [AGENT-START](AGENT-START.md) 的阅读门禁，不能先运行下�
 - Node 22（`engines` 要求 `>=22.13.0 <23`，版本写在 `.nvmrc` 与 `.node-version`）；pnpm 固定为 `pnpm@9.15.9`。
 - 安装：`pnpm install --frozen-lockfile`。不要在没有授权时改锁文件；新增依赖见下文。
 - 启用本仓库的 git hook：`pnpm hooks:enable`（把 `.githooks/` 设为 hook 目录，推送前运行分支不变量检查，见 [BRANCHING](BRANCHING.md)）。
-- 本机启动命令 `pnpm dev:*` 随 #3（control）、#4（console）加入；本机运行说明见 [LOCAL-DEV](../ops/LOCAL-DEV.md)。本机开发不需要任何真实令牌或正式配置。
+- 本机启动命令：`pnpm dev:console`（console 的样板数据模式，#4）；`pnpm dev:control` 随 #3 加入。本机运行说明见 [LOCAL-DEV](../ops/LOCAL-DEV.md)。本机开发不需要任何真实令牌或正式配置。
 
 ## 分支与改动
 
@@ -35,7 +35,7 @@ AI 先执行 [AGENT-START](AGENT-START.md) 的阅读门禁，不能先运行下�
 ## 提交前
 
 - 运行根 `pnpm verify`（依次是 `pnpm check`、`pnpm test`、`pnpm build`；其中 `check:notes` 核对执行记录），贴真实输出。
-- 影响浏览器行为时跑 `pnpm test:e2e`（随 #4 加入）。
+- 影响浏览器行为时跑 `pnpm test:e2e`（第一次运行前 `pnpm exec playwright install chromium`）。
 - 需要 `/dev/kvm` 的 VM 测试 `pnpm test:vm`（随 #12 加入）是可选的，只在有 KVM 的机器上跑；没跑就在 PR 的「验证命令与结果」里逐条写「未验证」和原因，不能写成通过。
 - 审阅 diff，补文档；确认没有密钥、令牌、真实数据、编译产物，也没有组织名、真实仓库名、内部主机或网段（`pnpm check:secrets`、`pnpm check:public-safety` 只覆盖部分模式，仍要人眼看一遍）。
 - 改动触及文档标题、摘要或路径时，重新生成文档索引（`pnpm docs:index`），并用 `pnpm check:docs` 核对。
