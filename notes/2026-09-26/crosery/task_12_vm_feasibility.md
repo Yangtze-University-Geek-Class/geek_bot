@@ -68,3 +68,45 @@
 - 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
 - 做了什么：git merge origin/stage（619ff73）；package.json 与 docs/ops/LOCAL-DEV.md 冲突手工合并（保留 dev:control 与 test:vm 两条脚本）；REFERENCES 的 QEMU 行改指 vm-feasibility 与 ADR-0011；node scripts/note.mjs flush 并入 task_3 链路的「合并」「收尾」；pnpm install --frozen-lockfile；pnpm verify
 - 结果：pnpm verify 退出码 0（Test Files 30 passed，Tests 433 passed）
+
+## 14:33:18 +08:00 · 推送 · #12 · 推送合入 stage 后的 task/12/vm_feasibility
+
+- 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
+- 做了什么：经 gh 凭据走 HTTPS 推送 HEAD:refs/heads/task/12/vm_feasibility（SSH 22 端口连不上）；pre-push 钩子运行
+- 结果：推送成功，远端 HEAD c8372eb858b9；pre-push 分支与发布 tag 规则通过；gh pr checks 33 全部 pass（verify、branch-guard、core、console-e2e、docker、pr-contract、pr-base、lint-workflows）
+
+## 14:33:18 +08:00 · PR · #12 · 改 #33 正文，发返工记录，请审查员复审
+
+- 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
+- 做了什么：gh pr edit 33：补 ADR-0011、第 7 次探测结果、raw 表两条 Docker 规则、返工与合并链路、未验证项（返工后没有再做完整运行）、人工验收加所有者决定项；本地 pr-contract check 通过；gh pr comment 33 发 kind=rework 记录；SendMessage 请独立审查员复审 bf06b05..c8372eb
+- 结果：PR 正文契约通过；返工记录已发（#33 评论）；审查结论仍为阻塞，等复审
+
+## 14:33:18 +08:00 · 开发 · #12 · 补记：上下文压缩后没有先重读 §0 规范就提交和推送
+
+- 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
+- 做了什么：上下文压缩后直接提交合并 c8372eb 并推送，没有先按 AGENTS §0 重读九篇规范；之后补读 docs/README、AGENT-START、PROJECT、BRANCHING、CONTRIBUTING、CODE-REVIEW、RELEASES、TRACKING、NOTES 全文
+- 结果：补读完成；核对这次提交与推送没有违反其中规则（task 分支、pre-push 通过、未碰 main 与 tag）
+
+## 14:46:37 +08:00 · 审查 · #12 · 独立审查员复审 c8372eb：有条件通过，5 条应修、6 条建议
+
+- 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
+- 做了什么：审查员只读复核 bf06b05..c8372eb：跑 pnpm verify、shellcheck、note check、pr-contract，在 /tmp 副本上对代理做 6 处变异，模拟 nft 没有表
+- 结果：结论：有条件通过，没有阻塞；应修：网段外探测都是 unreachable，可能是来宾没有默认路由、包没出来宾；S-13 与 ADR-0011 措辞矛盾且验证项缺容器约束断言；--keep 加后缀后无法复用；验收条件 5 写成已满足不妥；文档没写 root、所需命令和两个环境变量。另指出所有者接受 ADR-0011 在 #33 上只有代理的转记。更正 14:22:53 那条审查记录：第一轮建议是 4 条，不是 3 条
+
+## 14:46:37 +08:00 · 返工 · #12 · 按复审改脚本与文档，节点上重跑只探测（来宾加默认路由）
+
+- 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
+- 做了什么：guest.sh 在原探测后读默认路由、自己加 IPv4/IPv6 默认路由再探网段外目标，IPv6 探测记失败类型；run.sh 加 --suffix 复用、--keep 结束时打印资源名与清理命令、nft 没有表时不再静默退出（本机用假命令模拟两种情况）；代理的 --max-connections/--max-bytes 只收正整数并补测试（改回 Number 后该测试失败）；SECURITY S-13 注明 ADR-0011 例外并在验证项加容器约束断言，TESTING、LOCAL-DEV、vm-feasibility 写明 root、所需命令、两个环境变量与清理范围；ADR-0004 未覆盖项改指 #32；ADR-0011 的模型代理一句标为推断、#17 标计划中、所有者结论写明只有转记；在第一台节点上起只探测的第 8 次运行
+- 结果：代理单测 20 passed；shellcheck 无输出；第 8 次运行进行中
+
+## 15:04:09 +08:00 · 开发 · #12 · 第 8 次运行（只探测）：来宾自己加默认路由后仍然全部被拒
+
+- 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
+- 做了什么：第一台节点上以 root 跑 GEEKBOT_VM_PROBE_ONLY=1 的 run.sh（仓库 tar 取 stage），取回 results 后删掉节点上的运行目录
+- 结果：来宾原本没有 IPv4 默认路由；加上后节点宿主 22/3128、私网、CGNAT、元数据、公网 443 全部 refused，IPv6 的 ULA、NAT64、公网地址 curl 退出码 7，guestfwd 代理可达；firewall_unchanged=yes（14 项指纹一致）；container_exit=0；节点上 geekbot 的容器、镜像、卷、/tmp 目录都是 0
+
+## 15:04:09 +08:00 · 提交 · #12 · 复审的应修与建议一起提交
+
+- 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
+- 做了什么：git commit：fix(node): 补来宾自加默认路由的探测，run.sh 可复用缓存，同步文档；提交前 pnpm docs:index、pnpm verify、shellcheck
+- 结果：pnpm verify 退出码 0（Tests 434 passed）；shellcheck 无输出

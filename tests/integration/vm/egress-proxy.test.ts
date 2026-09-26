@@ -5,11 +5,21 @@
  */
 import { BlockList, connect, createServer, type AddressInfo, type Server, type Socket } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { buildBlockList, chooseAddress, decideTarget, isForbiddenAddress, matchesSuffix, parseConnectLine, startProxy } from "./egress-proxy.mjs";
+import { buildBlockList, chooseAddress, decideTarget, isForbiddenAddress, matchesSuffix, parseArgs, parseConnectLine, startProxy } from "./egress-proxy.mjs";
 
 const ip4 = (...octets: number[]) => octets.join(".");
 const ip6 = (...groups: string[]) => groups.join(":");
 const ALLOW = ["registry.npmjs.org", "deb.debian.org"];
+
+describe("parseArgs", () => {
+  it("连接数与字节上限只接受正整数，不让 NaN 或 0 把上限变成失效", () => {
+    expect(parseArgs(["--max-connections", "5", "--max-bytes", "1024"])).toMatchObject({ maxConnections: 5, maxBytes: 1024 });
+    for (const bad of ["abc", "0", "-1", "1.5", "", "1e3"]) {
+      expect(() => parseArgs(["--max-connections", bad])).toThrow("--max-connections 要是正整数");
+      expect(() => parseArgs(["--max-bytes", bad])).toThrow("--max-bytes 要是正整数");
+    }
+  });
+});
 
 describe("isForbiddenAddress", () => {
   it("S-14 列出的 IPv4 地址段都被拒绝", () => {

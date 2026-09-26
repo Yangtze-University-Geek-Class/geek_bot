@@ -7,9 +7,10 @@
 # 只在它是本次拉下来的时候才删。Docker 的构建缓存不清（它和宿主上别的构建共用）。不装宿主软件包，不改防火墙；
 # 实验前后按 iptables、ip6tables 与 nft 的每张表各取一次指纹，比较是否变化。
 #
-# 用法：bash tests/integration/vm/run.sh [--repo-tar <带 .git 的仓库 tar>] [--keep]
+# 用法：bash tests/integration/vm/run.sh [--repo-tar <带 .git 的仓库 tar>] [--keep] [--suffix <后缀>]
 #   --repo-tar  要在 VM 里 pnpm install / pnpm verify 的仓库（tar 里顶层目录名为 repo）；不给时从当前检出浅克隆一份
-#   --keep      保留实验镜像与缓存卷（下载过的 cloud 镜像），方便重跑
+#   --keep      保留实验镜像与缓存卷（下载过的 cloud 镜像），结束时打印它们的名字和清理命令
+#   --suffix    资源名的后缀，默认每次运行生成一个新的；重跑时传上一次 --keep 打印的后缀，就能复用那次的缓存卷
 # 环境变量：GEEKBOT_VM_RESULTS=<目录> 把全部产物复制出来；GEEKBOT_VM_PROBE_ONLY=1 只跑网络探测，不装依赖、不跑校验；
 #           GEEKBOT_VM_SANDBOX 覆盖 qemu 的 -sandbox 取值（默认值与理由见 lab.sh）。
 set -euo pipefail
@@ -18,10 +19,12 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BASE_IMAGE="node:22-bookworm-slim"
 REPO_TAR=""
 KEEP=0
+SUFFIX=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --repo-tar) REPO_TAR="$2"; shift 2 ;;
     --keep) KEEP=1; shift ;;
+    --suffix) SUFFIX="$2"; shift 2 ;;
     *) echo "不认识的参数：$1" >&2; exit 2 ;;
   esac
 done
@@ -33,8 +36,13 @@ for command in docker iptables-save ip6tables-save nft sha256sum; do
   command -v "$command" >/dev/null || { echo "缺少命令：$command" >&2; exit 2; }
 done
 
-# 每次运行的资源名带随机后缀：并发的第二次运行不会删掉第一次的容器、镜像或卷。
-SUFFIX="$(date +%s)-$$"
+# 每次运行的资源名带后缀：并发的第二次运行不会删掉第一次的容器、镜像或卷。显式传 --suffix 复用时，调用者自己保证
+# 同一后缀没有别的运行在用。
+if [ -z "$SUFFIX" ]; then
+  SUFFIX="$(date +%s)-$$"
+elif ! printf '%s' "$SUFFIX" | grep -Eq '^[0-9a-z-]{1,40}$'; then
+  echo "--suffix 只能是 1 到 40 个小写字母、数字或 -" >&2; exit 2
+fi
 CONTAINER="geekbot-vmlab-$SUFFIX"
 IMAGE="geekbot-vmlab:$SUFFIX"
 CACHE_VOLUME="geekbot-vmlab-cache-$SUFFIX"
@@ -75,8 +83,13 @@ firewall_snapshot() {
     echo "nft UNKNOWN"
     return
   fi
+  if [ -z "$tables" ]; then
+    echo "nft (no tables)"
+    return
+  fi
   printf '%s\n' "$tables" | while read -r _ family name; do
-    [ -n "$name" ] && rules_fingerprint "nft:$family:$name" nft list table "$family" "$name"
+    [ -z "$name" ] && continue
+    rules_fingerprint "nft:$family:$name" nft list table "$family" "$name"
   done
 }
 firewall_snapshot > "$WORK/out/firewall-before.txt"
@@ -136,6 +149,10 @@ echo "===== 实验结果（$WORK/out）====="
 for file in host.txt container-inspect.txt report.txt; do
   [ -f "$WORK/out/$file" ] && { echo "----- $file"; cat "$WORK/out/$file"; }
 done
+if [ "$KEEP" -eq 1 ]; then
+  echo "保留了实验镜像 $IMAGE 与缓存卷 $CACHE_VOLUME；重跑时加 --keep --suffix $SUFFIX 复用。"
+  echo "清理：docker rmi $IMAGE && docker volume rm $CACHE_VOLUME"
+fi
 if [ -n "${GEEKBOT_VM_RESULTS:-}" ]; then
   mkdir -p "$GEEKBOT_VM_RESULTS"
   cp -r "$WORK/out/." "$GEEKBOT_VM_RESULTS/"

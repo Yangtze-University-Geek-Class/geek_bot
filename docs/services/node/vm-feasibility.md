@@ -8,9 +8,9 @@
 
 ## 怎么测的
 
-入口 `pnpm test:vm`（`tests/integration/vm/run.sh`），只能在有 `/dev/kvm` 与 Docker 的 Linux 主机上手动运行。
+入口 `pnpm test:vm`（`tests/integration/vm/run.sh`），只能在有 `/dev/kvm` 与 Docker 的 Linux 主机上以 root 手动运行：要读防火墙规则做前后比对，宿主要有 `iptables-save`、`ip6tables-save` 与 `nft`。环境变量 `GEEKBOT_VM_PROBE_ONLY=1` 只跑网络探测，`GEEKBOT_VM_SANDBOX` 覆盖 qemu 的 `-sandbox` 取值，用法见 [LOCAL-DEV](../../ops/LOCAL-DEV.md)。
 
-- **宿主上只做**：构建一个实验镜像（`Dockerfile.lab`：Node 22 bookworm-slim 加 qemu），建一个缓存卷，起一个临时容器，跑完删除。不装宿主软件包，不改防火墙；实验前后各取一次防火墙规则的指纹（去掉注释与包计数器），在容器删掉之后比较。
+- **宿主上只做**：构建一个实验镜像（`Dockerfile.lab`：Node 22 bookworm-slim 加 qemu），建一个缓存卷，起一个临时容器，跑完删除容器、实验镜像和缓存卷；基础镜像只在它是本次拉下来的时候才删，Docker 的构建缓存不清（和宿主上别的构建共用）。不装宿主软件包，不改防火墙；实验前后各取一次防火墙规则的指纹（去掉注释与包计数器），在容器删掉之后比较。
 - **实验容器按 node 容器的约束运行**：uid 1000、`--group-add` 宿主 kvm 组、只挂 `/dev/kvm`、`cap_drop ALL`、`no-new-privileges`、Docker 默认 seccomp、不发布端口、限制内存与进程数。
 - **容器里**（`lab.sh`）：下载 Debian 12 genericcloud 镜像与 Node 22 并按官方 `SHA512SUMS`、`SHASUMS256` 核对；起出网代理 `egress-proxy.mjs`；两次引导 VM：
   - `-enable-kvm -cpu host -smp 1 -m 2048`，qcow2 overlay 叠在只读的基础镜像上；
@@ -37,7 +37,7 @@
 
 ### 网络隔离：restrict=on 加一条 guestfwd
 
-直连探测（来宾里用 bash 的 `/dev/tcp` 或 curl，4 秒超时）全部 **不通**。第 7 次运行（只跑探测）记下了失败类型，并加了阳性对照：
+直连探测（来宾里用 bash 的 `/dev/tcp` 或 curl，4 秒超时）全部 **不通**。第 7、8 次运行（只跑探测）记下了失败类型，并加了阳性对照，两次结果相同：
 
 - **阳性对照**：QEMU 用户态网络里的宿主别名地址对应的是实验容器自己的回环地址，它的 3128 端口上有出网代理在监听。来宾照样连不上（refused）。所以宿主别名上别的端口连不上，是 `restrict=on` 挡住的，不是端口没人在听。
 - **节点宿主**：实验容器的默认网关，也就是节点宿主在 Docker 网桥上的地址。它的 22 和 3128 端口都不可达（unreachable）。
@@ -46,6 +46,15 @@
 - RFC 1918 三个私网段、CGNAT、链路本地的云元数据地址、一个公网 IP 的 443：unreachable。
 - IPv6：用户态网络的宿主地址、ULA、链路本地、IPv4 映射地址、NAT64 地址，都不通。
 - 反向核对：出网代理的 guestfwd 转发地址连得上。
+
+上面这些网段外的目标报 unreachable，是因为来宾里没有 IPv4 默认路由（`restrict=on` 时 DHCP 不下发网关，`ip -4 route show default` 为空），包没有离开来宾。来宾里以 root 运行的代码可以自己加默认路由，所以第 8 次运行（只跑探测）在上面的探测之后，让来宾自己加上默认路由再探一遍：
+
+- IPv4 加 `default via <宿主别名地址>`，IPv6 本来就有一条经路由通告下发的默认路由（下一跳是用户态网络的链路本地地址），再加一条经用户态网络宿主地址的。两条都加成功。
+- 节点宿主（容器网关）的 22、3128，RFC 1918、CGNAT、云元数据地址、公网 IP 的 443：全部 **refused**。QEMU 用户态网络在 `restrict=on` 时直接拒掉来宾发往外面的连接，包到不了宿主网络。
+- IPv6 的 ULA、NAT64、一个公网 IPv6 地址：全部不通（curl 退出码 7，0 毫秒内失败）。
+- 出网代理的 guestfwd 转发地址照样连得上。
+
+所以「来宾连不出去」不依赖来宾里的路由表，靠的是 `restrict=on` 本身。
 
 经出网代理：
 
@@ -58,12 +67,13 @@
 | 解析到回环地址的公共域名（为验证放进了实验白名单） | 拒绝 | `resolved_to_forbidden_address` |
 
 宿主防火墙：实验前后按 iptables、ip6tables 和 nft 的每张表分别取指纹（去掉包计数器），容器删掉之后再比较。
-- **filter、nat 表和 FORWARD 规则三次都没变**（#12 验收条件 5 说的「iptables 和 FORWARD 规则」）。
+- **filter、nat 表和 FORWARD 规则每次都没变**。第 8 次运行全部 14 项指纹前后一致。
 - **第 6 次**：唯一变了的是 nft 的 `bridge incus` 表，多出的是 incus 实例的链。实例名里带的创建时间正好落在实验时间窗里，实验脚本不调用 incus，所以**推断**这个差异来自宿主上的另一套程序。这是按时间归因，不是直接证明。
 - **第 7 次**：iptables 的 raw 表（nft 里的 `ip raw`）多了两条规则，是 Docker 给接在默认网桥上的容器自动加的「直连防护」DROP 规则（`-d <容器地址>/32 ! -i docker0 -j DROP`）。实验前 raw 表里没有这类规则：把这两条去掉后，指纹和实验前完全一致。
   - 一条属于实验期间宿主上另一套程序起的容器，Docker 事件里有它的创建时间，它现在还在运行。
   - 另一条指向一个已经释放的容器地址。实验期间先后用过这个地址的，有实验镜像构建时的中间容器、实验容器，也可能有另一套程序的容器；现在已经无法确定是谁留下的。它只丢弃发往这个空闲地址的流量，由 Docker 管理，实验脚本没有写防火墙。**没有删**：删它要改宿主防火墙，不在这次授权范围内，交给所有者决定。
 - 从这一版起，`run.sh` 会把实验时间窗内的 Docker 容器事件存进 `docker-events.txt`，以后可以直接归因。
+- **#12 验收条件 5（「iptables 和 FORWARD 规则前后没有变化」）没有完全满足**：第 7 次运行后 raw 表里留下一条来源无法确定的规则，不能排除是实验的构建或实验容器留下的。是否算满足、那条规则删不删，待所有者判定。
 
 ### 依赖安装、pnpm verify 与内存（1 vCPU / 2 GiB）
 
@@ -94,11 +104,11 @@
 |---|---|
 | Docker 默认 seccomp 下 node 容器（非 root、cap_drop ALL、no-new-privileges）能用 `/dev/kvm` | 通过；但这台宿主 `/dev/kvm` 的权限比 kvm 组宽，「只靠 group_add 就够」没有证明 |
 | 纯 QEMU 能引导 cloud 镜像 | 通过；到 runner 就绪 10.5–13.1 秒 |
-| restrict=on 加 guestfwd 的隔离 | 通过：直连探测全部不通，阳性对照（有进程在听的宿主别名端口）也不通，节点宿主的 22 端口不可达；`-sandbox` 按 ADR-0011 不带 `elevateprivileges=deny` |
+| restrict=on 加 guestfwd 的隔离 | 通过：直连探测全部不通，阳性对照（有进程在听的宿主别名端口）也不通；来宾自己加上默认路由之后，节点宿主、私网、元数据地址、公网地址仍然全部被拒；`-sandbox` 按 ADR-0011 不带 `elevateprivileges=deny` |
 | 出网代理的放行与拒绝（S-03、S-14） | 通过 |
 | 1 vCPU / 2 GiB 跑一次完整校验会不会 OOM | 本仓库不会（峰值 896–944 MiB）；omp 加校验的组合没有测，见下 |
 | 依赖安装耗时与缓存 | 冷装 36–40 秒；带 store 3–4 秒（外加解包 2 秒），几乎不走网络 |
-| 宿主防火墙规则不变 | filter、nat、FORWARD 三次都没变（#12 验收条件 5）；raw 表里多了 Docker 自动加的容器直连防护规则，其中一条的来源无法确定，incus 表的差异推断来自另一套程序，都没有删，交给所有者决定（见「网络隔离」） |
+| 宿主防火墙规则不变 | 未完全满足，待所有者判定：filter、nat、FORWARD 每次都没变，第 8 次全部指纹一致；但第 7 次后 raw 表留下一条 Docker 自动加的容器直连防护规则，来源无法确定，不能排除是实验留下的；incus 表的差异推断来自另一套程序。都没有删（见「网络隔离」） |
 
 ## 这一轮没有覆盖的
 

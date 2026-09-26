@@ -52,12 +52,45 @@ probe_tcp "metadata:80" "$(addr 169 254 169 254)" 80
 probe_tcp "public-ip:443" "$(addr 1 1 1 1)" 443
 if timeout 4 getent hosts deb.debian.org >/dev/null 2>&1; then say "probe dns-resolution REACHABLE"; else say "probe dns-resolution blocked"; fi
 v6() { local IFS=:; echo "$*"; }
+probe_v6() { # 名称前缀 地址：curl 退出码 28 是超时，7 是连不上（按报错区分 refused 与 unreachable）
+  local err status
+  err="$(timeout 6 curl -sS -o /dev/null --max-time 4 -g "http://[$2]:22/" 2>&1)"
+  status=$?
+  if [ "$status" -eq 0 ]; then say "probe $1:$2 REACHABLE"; return; fi
+  case "$status:$err" in
+    28:*|124:*) say "probe $1:$2 blocked (timeout)" ;;
+    *refused*) say "probe $1:$2 blocked (refused)" ;;
+    *nreachable*) say "probe $1:$2 blocked (unreachable)" ;;
+    *) say "probe $1:$2 blocked (other: $(printf '%s' "$err" | tail -1 | cut -c1-60))" ;;
+  esac
+}
 for target in "$(v6 fec0 "" 2)" "$(v6 fd00 "" 1)" "$(v6 fe80 "" 2)%eth0" "$(v6 "" "" ffff "$(addr 10 0 0 1)")" "$(v6 64 ff9b "" 101 101)"; do
-  if timeout 4 curl -sS -o /dev/null -g "http://[$target]:22/" 2>/dev/null; then say "probe ipv6:$target REACHABLE"; else say "probe ipv6:$target blocked"; fi
+  probe_v6 ipv6 "$target"
 done
 # 反向核对转发确实存在：出网代理的转发地址应当连得上。
 PROXY_HOSTPORT="${PROXY#http://}"
 probe_tcp "guestfwd-proxy(expected-reachable)" "${PROXY_HOSTPORT%:*}" "${PROXY_HOSTPORT##*:}"
+
+# ---- 来宾自己加默认路由之后再探一次 ----
+# restrict=on 时 DHCP 可能不下发网关，上面网段外的目标报 unreachable 只说明包没离开来宾。来宾里以 root 运行的代码
+# 可以自己加默认路由，这时能不能拦住只取决于 QEMU 用户态网络在 restrict=on 下丢不丢包，所以加上路由再探一遍。
+say "route_v4_before: $(ip -4 route show default | head -1)"
+say "route_v6_before: $(ip -6 route show default | head -1)"
+if ip -4 route replace default via "$HOST_ALIAS" 2>/dev/null; then say "defroute_v4 added"; else say "defroute_v4 FAILED"; fi
+if ip -6 route replace default via "$(v6 fec0 "" 2)" 2>/dev/null; then say "defroute_v6 added"; else say "defroute_v6 FAILED"; fi
+if [ -n "${CONTAINER_GW:-}" ]; then
+  probe_tcp "defroute:container-gateway:22" "$CONTAINER_GW" 22
+  probe_tcp "defroute:container-gateway:3128" "$CONTAINER_GW" 3128
+fi
+probe_tcp "defroute:rfc1918-192.168:80" "$(addr 192 168 1 1)" 80
+probe_tcp "defroute:rfc1918-172.16:80" "$(addr 172 17 0 1)" 80
+probe_tcp "defroute:cgnat:80" "$(addr 100 64 0 1)" 80
+probe_tcp "defroute:metadata:80" "$(addr 169 254 169 254)" 80
+probe_tcp "defroute:public-ip:443" "$(addr 1 1 1 1)" 443
+for target in "$(v6 fd00 "" 1)" "$(v6 64 ff9b "" 101 101)" "$(v6 2606 4700 4700 "" 1111)"; do
+  probe_v6 defroute:ipv6 "$target"
+done
+probe_tcp "defroute:guestfwd-proxy(expected-reachable)" "${PROXY_HOSTPORT%:*}" "${PROXY_HOSTPORT##*:}"
 
 if [ "${PROBE_ONLY:-0}" = "1" ]; then
   say "probe_only=1，跳过安装与校验"

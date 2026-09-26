@@ -173,7 +173,7 @@ S-01…S-08 的编号和含义已被 [CODE-REVIEW](../conventions/CODE-REVIEW.md
 - node 容器：非 root，cap_drop ALL，no-new-privileges，只挂 `/dev/kvm` 设备并加入宿主 kvm 组，不挂 docker.sock，不用 privileged，不发布端口。
 - sandbox 容器：`network_mode: none`，根只读，工作目录是 tmpfs，cap_drop ALL，no-new-privileges，非 root，限制内存、CPU 和 pids，不挂任何令牌文件；每个任务结束后容器退出、重建。
 - VM：qemu `-sandbox on,obsolete=deny,resourcecontrol=deny`（不带 `elevateprivileges=deny`：它会让 guestfwd 的转发进程起不来，提权由 node 容器的 cap_drop ALL 与 no-new-privileges 挡住，所以这两项是 PR 通道隔离的必要条件，见 [ADR-0011](../decisions/0011-qemu-sandbox-elevateprivileges.md)），`-netdev user,restrict=on` 加两条 guestfwd；任务令牌经 `-fw_cfg name=opt/geekbot/token,file=<0600 临时文件>` 传入，不进 argv，VM 启动后删除临时文件；任务结束删除 overlay 和磁盘文件，节点定期回收没有对应任务的 VM 文件。
-- 规格与细节以 #12 的实测为准；实测不通过时按 [ADR-0004](../decisions/0004-execution-isolation.md) 的退路改选，隔离要求不降低。
+- 规格与细节以 #12 的实测为准；实测不通过时按 [ADR-0004](../decisions/0004-execution-isolation.md) 的退路改选，隔离要求不降低。唯一的例外是 [ADR-0011](../decisions/0011-qemu-sandbox-elevateprivileges.md)：所有者批准 qemu 进程少一层禁止 set*uid 的 seccomp 规则，代价是 node 容器的 cap_drop ALL 与 no-new-privileges 成为必要条件。
 
 **S-14 出网控制。** （#12、#17）
 
@@ -302,7 +302,7 @@ publisher 按禁改路径拒绝补丁。**禁改路径的唯一权威清单在�
 | S-10 | #5 | 路由测试 | 没有认领码无法成为 owner；过期或用过的认领码无效；重新生成后旧码无效；认领码的熵不低于 100 位 |
 | S-11 | #5 | 路由测试、真实 OAuth App 验收 | device flow 的 pending、slow_down、expired；`X-OAuth-Scopes` 含 {`repo`, `read:org`} 以外任何 scope 时拒绝绑定（5 个样例各一条）；登录令牌申请空 scope 并被吊销；不在管理员名单里的账号登录后令牌被吊销、没有会话；撤销授权后下一次校验显示「令牌失效，写入已暂停」 |
 | S-12 | #11、#19 | 协议契约测试、实机演练 | epoch 过期的结果返回 409；节点令牌只在生成时显示一次、库里只有哈希；重置后旧令牌 401；版本不兼容的节点不派任务；私有仓库任务只落在 trust=high 的节点 |
-| S-13 | #11、#12、#14、#17 | 实机检查 | node 容器非 root、只挂 `/dev/kvm`、没有发布端口和 docker.sock；sandbox 访问外网失败；取消后 30 秒内 qemu 退出、没有残留 overlay |
+| S-13 | #11、#12、#14、#17 | 实机检查、配置测试 | node 容器非 root、只挂 `/dev/kvm`、没有发布端口和 docker.sock；node 的 compose 与 CI 断言 cap_drop ALL 与 no-new-privileges，任一缺失时 vm 槽位为 0（ADR-0011）；sandbox 访问外网失败；取消后 30 秒内 qemu 退出、没有残留 overlay |
 | S-14 | #12、#17 | 实机测试 | VM 访问宿主端口、私网、CGNAT、链路本地、云元数据地址，以及 `::1`、ULA、IPv6 链路本地、IPv4 映射和 NAT64 地址全部失败；解析到私网地址的域名被拒；白名单外域名被拒、白名单内可达；宿主防火墙规则前后没有变化 |
 | S-15 | #7、#9、#20 | 配置测试、沙盒演练 | 没配 `GEEK_BOT_INSTANCE_ROLE` 时启动失败；preview 配置下对沙盒清单以外仓库的写入被拒并写审计；production 对排除清单里仓库的写入被拒 |
 | S-16 | #3、#9、#14 | 单元测试 | 日志打码覆盖 `ghp_`、`gho_`、`github_pat_`、`gbn_`、`gbt_`、`sk-`、`Bearer`；节点回传的事件里本任务令牌的原值被替换 |

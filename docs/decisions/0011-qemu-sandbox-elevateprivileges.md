@@ -10,7 +10,7 @@
 - #12 在第一台节点上实测（QEMU 7.2.22，Debian 12 的包，数据见 [VM 可行性实测](../services/node/vm-feasibility.md)），逐项二分 `-sandbox` 的取值，来宾经 guestfwd 访问出网代理：
   - `on`、`on,obsolete=deny`、`on,resourcecontrol=deny`：成功；
   - `on,elevateprivileges=deny`、`on,elevateprivileges=children`：来宾连上转发地址后立刻被断开，转发进程起不来，代理一条连接都收不到。
-- 按 ADR-0004 原样配置，VM 就连不上出网代理和模型代理，PR 通道没法工作。
+- 按 ADR-0004 原样配置，VM 就连不上出网代理，PR 通道装不了依赖。模型代理那条 guestfwd 这次没有测；如果它也用 `cmd:` 转发（ADR-0004 没有定），推断同样起不来，由 #32 实测。
 - node 容器按 ADR-0004 与 S-13 以非 root、`cap_drop: ALL`、`no-new-privileges` 运行。#12 实测实验容器的 `/proc/1/status` 为 `CapEff: 0000000000000000`、`NoNewPrivs: 1`、`Seccomp: 2`。
 
 ## 决策
@@ -34,7 +34,7 @@
 ## 实施状态
 
 - #12：实验脚本按本篇的取值跑通，数据见 [VM 可行性实测](../services/node/vm-feasibility.md)。
-- #17：QEMU/KVM 执行器按本篇实现，并测试容器约束缺失时拒绝开 vm 槽位。
+- #17（计划中）：QEMU/KVM 执行器按本篇实现，并测试容器约束缺失时拒绝开 vm 槽位。
 
 ## 重新评估条件
 
@@ -44,4 +44,4 @@
 
 ## 所有者结论
 
-接受：所有者 2026-09-26 在维护会话里对 #12 的实测结论选择「接受去掉这一项」，记在 #33。
+接受：所有者 2026-09-26 在维护会话里对 #12 的实测结论选择「接受去掉这一项」，由维护会话转记在 #33 的返工记录里；所有者本人在 #33 回复确认之前，GitHub 上只有这条转记。

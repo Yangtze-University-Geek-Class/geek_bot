@@ -90,11 +90,11 @@
 - #12（2026-09-26 实测，数据见 [VM 可行性实测](../services/node/vm-feasibility.md)）：
   - 非 root、cap_drop ALL、no-new-privileges、默认 seccomp 的容器里能用 `/dev/kvm`（这台宿主 `/dev/kvm` 的现有权限比 kvm 组宽，「只靠 group_add 就够」没有被证明）；
   - 纯 QEMU 引导 Debian 12 cloud 镜像，10.5–13.1 秒到 runner 就绪；
-  - restrict=on 加一条 guestfwd 时，来宾直连宿主、私网、元数据地址和 IPv6 全部不通；
+  - restrict=on 加一条 guestfwd 时，来宾直连宿主、私网、元数据地址和 IPv6 全部不通，来宾自己加上默认路由之后也不通；
   - 出网代理按 S-03、S-14 放行与拒绝；
-  - 1 vCPU / 2 GiB 对本仓库跑完整的 `pnpm verify`，内存峰值 896–944 MiB，没有 OOM；宿主的 filter、nat 与 FORWARD 规则前后没变（raw 表与 incus 表的差异来自 Docker 自动加的容器规则和宿主上的其它程序，见实测报告）。
+  - 1 vCPU / 2 GiB 对本仓库跑完整的 `pnpm verify`，内存峰值 896–944 MiB，没有 OOM；宿主的 filter、nat 与 FORWARD 规则前后没变；raw 表留下一条 Docker 自动加、来源无法确定的容器规则，#12 验收条件 5 是否满足待所有者判定（见实测报告）。
   - 与本篇不符的一处：QEMU 7.2 上 `-sandbox` 的 `elevateprivileges=deny` 会让 guestfwd 的 `cmd:` 转发进程起不来。所有者 2026-09-26 决定去掉这一项、由容器的 cap_drop ALL 与 no-new-privileges 兜底，写成 [ADR-0011](0011-qemu-sandbox-elevateprivileges.md)。
-  - omp、恶意夹具、只读缓存盘、passt、CI 构建基础镜像这一轮没有覆盖，随 #17 补测。
+  - 这一轮没有覆盖、拆到 #32 的：omp、恶意夹具、只读缓存盘、passt、CI 构建基础镜像、两种 I/O 方式与吞吐、模型代理那条 guestfwd、只靠 group_add 是否足够。
 - #11：node 容器（非 root、只挂 `/dev/kvm`、不开端口）。
 - #14：sandbox 执行器、runner、事件打码。
 - #15：VM 就绪前在只读 sandbox 里审查的过渡。

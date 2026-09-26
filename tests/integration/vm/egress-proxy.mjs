@@ -123,7 +123,13 @@ export function chooseAddress(addresses, blockList = buildBlockList()) {
   return { address: preferred.address, reason: "resolved" };
 }
 
-function parseArgs(argv) {
+function positiveInteger(flag, value) {
+  const number = Number(value);
+  if (!/^[0-9]+$/.test(value) || !Number.isSafeInteger(number) || number < 1) throw new Error(`${flag} 要是正整数`);
+  return number;
+}
+
+export function parseArgs(argv) {
   const options = { listen: "127.0.0.1:3128", allow: [], log: null, maxConnections: 2000, maxBytes: 4 * 1024 ** 3, denyCidr: [] };
   for (let index = 0; index < argv.length; index += 2) {
     const [flag, value] = [argv[index], argv[index + 1]];
@@ -131,8 +137,8 @@ function parseArgs(argv) {
     if (flag === "--listen") options.listen = value;
     else if (flag === "--allow") options.allow = value.split(",").filter(Boolean);
     else if (flag === "--log") options.log = value;
-    else if (flag === "--max-connections") options.maxConnections = Number(value);
-    else if (flag === "--max-bytes") options.maxBytes = Number(value);
+    else if (flag === "--max-connections") options.maxConnections = positiveInteger(flag, value);
+    else if (flag === "--max-bytes") options.maxBytes = positiveInteger(flag, value);
     else if (flag === "--deny-cidr") options.denyCidr = value.split(",").filter(Boolean);
     else throw new Error(`不认识的参数：${flag}`);
   }
