@@ -187,3 +187,9 @@
 - 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
 - 做了什么：git merge origin/stage（a862c2c，无冲突，合并提交 abdd117）；node scripts/note.mjs flush 并入 task_30 链路的「合并」「收尾」；pnpm verify
 - 结果：pnpm verify 退出码 0（414 passed (414)）
+
+## 14:10:55 +08:00 · 审查 · #3 · 独立审查员第二、三轮复审：通过
+
+- 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
+- 做了什么：第二轮复核 22f4653..66e6396：有条件通过，上轮 1 条阻塞与 3 条应修已修，另提 4 条建议；第三轮复核 66e6396..6b8a5e5：4 条建议已处理（词法扫描合法 8 类不误拒、违规 11 类全标出，保存点核对 5 种绕过写法都如实报错，密钥路径不回显），结论通过。更正 12:46:57 那条审查记录：第一轮的建议是 7 条，不是 8 条
+- 结果：结论：通过；剩一条建议（OR ROLLBACK 冲突回滚时报错偏保守）不修，写进 #29 正文；审查员复跑 pnpm verify 414 passed、e2e 43 passed、gh pr checks 29 全部 pass
