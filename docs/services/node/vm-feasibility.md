@@ -1,0 +1,106 @@
+# 一次性 VM 可行性实测（#12）
+
+> 在第一台节点的临时容器里，用 QEMU/KVM 起 1 vCPU / 2 GiB 的一次性 VM：冷启动、网络隔离、出网代理、依赖安装、pnpm verify 与内存峰值的实测数据，以及对 ADR-0004 的结论。
+
+状态：`current` · 更新：2026-09-26 · 适用：[ADR-0004](../../decisions/0004-execution-isolation.md) 的实施、#17 的 QEMU/KVM 执行器与出网代理、`tests/integration/vm/`
+
+本文记录 2026-09-26 在第一台节点上的实测。数字只代表这台主机、这个时间点、这份仓库，换主机或换版本要重新跑（`pnpm test:vm`）。主机的机型、`/dev/kvm` 的现有权限、散热等具体状况不写在这里，见运维记录。
+
+## 怎么测的
+
+入口 `pnpm test:vm`（`tests/integration/vm/run.sh`），只能在有 `/dev/kvm` 与 Docker 的 Linux 主机上手动运行。
+
+- **宿主上只做**：构建一个实验镜像（`Dockerfile.lab`：Node 22 bookworm-slim 加 qemu），建一个缓存卷，起一个临时容器，跑完删除。不装宿主软件包，不改防火墙；实验前后各取一次防火墙规则的指纹（去掉注释与包计数器），在容器删掉之后比较。
+- **实验容器按 node 容器的约束运行**：uid 1000、`--group-add` 宿主 kvm 组、只挂 `/dev/kvm`、`cap_drop ALL`、`no-new-privileges`、Docker 默认 seccomp、不发布端口、限制内存与进程数。
+- **容器里**（`lab.sh`）：下载 Debian 12 genericcloud 镜像与 Node 22 并按官方 `SHA512SUMS`、`SHASUMS256` 核对；起出网代理 `egress-proxy.mjs`；两次引导 VM：
+  - `-enable-kvm -cpu host -smp 1 -m 2048`，qcow2 overlay 叠在只读的基础镜像上；
+  - `-netdev user,restrict=on`，只有一条 guestfwd：来宾里的代理地址 → 容器回环地址上的出网代理；
+  - 任务输入是只读原始盘上的 tar，结果写到可写原始盘上的 tar，与 ADR-0004 的 I/O 方式一致；
+  - 第一次（cold）从零安装依赖；第二次（warm）带上第一次导出的 pnpm store。
+- **VM 里**（`guest.sh`，cloud-init 以 root 运行）：直连探测宿主与各类地址 → 经代理探测放行与拒绝 → 经代理用 apt 装 git（`pnpm verify` 的公开安全检查要用 `git ls-files`）→ 装 Node 与 pnpm → 对本仓库 `stage`（400917d）跑 `pnpm install --frozen-lockfile` 与 `pnpm verify`，每秒采样一次已用内存。
+- **出网代理规则**（S-03、S-14）是纯函数，有单测 `tests/integration/vm/egress-proxy.test.ts`，随 `pnpm test` 在任何机器上跑。
+
+## 结果
+
+测试环境：第一台节点（x86_64，16 个逻辑 CPU），Docker 29，实验镜像里的 QEMU 7.2.22（Debian 12 包），来宾 Debian 12 genericcloud、Node v22.23.3、pnpm 9.15.9。
+
+### 节点容器里能不能用 KVM
+
+- 实验容器以 uid 1000 运行，`/proc/1/status` 为 `CapEff: 0000000000000000`、`NoNewPrivs: 1`、`Seccomp: 2`（Docker 默认 seccomp 生效）；`docker inspect`：`privileged=false`、`capDrop=["ALL"]`、`capAdd=null`、`securityOpt=["no-new-privileges"]`、只挂了 `/dev/kvm`、没有发布端口。
+- 在这些约束下 `/dev/kvm` 可读写，`-enable-kvm` 正常引导。**通过。**
+- 这台宿主 `/dev/kvm` 的现有权限比 kvm 组更宽，所以本次实测证明不了「只靠 `group_add` 就够」；ADR-0004 仍要求 node 容器只靠 `group_add` 取得访问权，在别的宿主上部署时核对。
+
+### 纯 QEMU 能不能引导 cloud 镜像，冷启动多久
+
+- Debian 12 genericcloud 镜像由 QEMU 直接引导，cloud-init 从 NoCloud 种子盘读 user-data。**通过。**
+- 从启动 qemu 到来宾里的 runner 脚本开始执行，七次引导在 10.5 到 13.1 秒之间：cold 12.1、10.5、12.5、13.1 秒，warm 10.5、11.0 秒。
+
+### 网络隔离：restrict=on 加一条 guestfwd
+
+直连探测（来宾里用 bash 的 `/dev/tcp` 或 curl，4 秒超时），全部 **不通**：
+
+- QEMU 用户态网络里的宿主别名地址的 22、139、445、3055、3183 端口；
+- 用户态网络的 DNS 地址 53 端口；来宾里的域名解析也失败（只能经代理访问外网）；
+- RFC 1918 三个私网段、CGNAT、链路本地的云元数据地址、一个公网 IP 的 443；
+- IPv6：用户态网络的宿主地址、ULA、链路本地、IPv4 映射地址、NAT64 地址。
+
+经出网代理：
+
+| 目标 | 结果 | 代理记录的原因 |
+|---|---|---|
+| `registry.npmjs.org`（白名单内） | HTTP 200 | 放行 |
+| `github.com`、`api.github.com`、`raw.githubusercontent.com` | 拒绝 | `github_denied` |
+| `example.com`（白名单外） | 拒绝 | `not_in_allowlist` |
+| 直接写 IP 的 CONNECT | 拒绝 | `ip_literal` |
+| 解析到回环地址的公共域名（为验证放进了实验白名单） | 拒绝 | `resolved_to_forbidden_address` |
+
+宿主防火墙：实验前后按 iptables、ip6tables 和 nft 的每张表分别取指纹（去掉包计数器），容器删掉之后再比较。
+- iptables、ip6tables，以及 nft 里 Docker 与组网客户端用的各张表，前后一致。
+- 唯一变了的是 nft 的 `bridge incus` 表：多出来的是宿主上另一套程序在实验期间新建的 incus 实例的链，实例名里带着创建时间（正好落在第 6 次实验的时间窗里）。实验本身不碰 incus。
+- 没有实验运行时，这张表 120 秒内没有变化。
+
+### 依赖安装、pnpm verify 与内存（1 vCPU / 2 GiB）
+
+完整跑了两次（第 5、6 次），每次先 cold 再 warm：
+
+| | cold（无缓存） | warm（带 pnpm store） |
+|---|---|---|
+| `pnpm install --frozen-lockfile` | 36 秒 / 40 秒，350 个包，退出码 0 | 3 秒 / 4 秒（另有 2 秒把 308 MiB 的 store 解包到 VM 里），退出码 0 |
+| `pnpm verify` | 32 秒 / 36 秒，退出码 0，23 个测试文件、319 个用例通过 | 35 秒 / 31 秒，同样全部通过 |
+| 来宾内存峰值（MemTotal − MemAvailable） | 938 MiB / 904 MiB，总共 1979 MiB | 944 MiB / 896 MiB |
+| OOM | 没有；来宾没有 swap | 没有 |
+| 经代理的连接与下载量 | 357 个连接，下载约 112.7 MB（含 apt 的索引与 git） | 7 个连接，下载约 42.7 MB（几乎都是 apt 的索引与 git） |
+
+- 导出的 pnpm store 是 287 MiB。
+- apt 经代理装 git 在几次运行里用了 248 到 575 秒，主要花在下载软件源索引上。生产的基础镜像会预装 git（见 ADR-0004「基础镜像」），这段时间不计入任务耗时。
+- 本仓库目前的规模（350 个包、319 个用例）比 ADR-0004 背景里那次实测用的仓库小，内存峰值也低。2 GiB 对它足够；对更大的仓库，默认规格要按实测再定。
+
+## 发现
+
+1. **`-sandbox` 的 `elevateprivileges=deny` 与 guestfwd 的 `cmd:` 转发不兼容。** QEMU 7.2.22 上逐项实测：`on`、`obsolete=deny`、`resourcecontrol=deny` 都正常；`elevateprivileges=deny` 或 `=children` 时，来宾连上转发地址后立刻被断开，转发进程起不来，代理一条连接都收不到。ADR-0004 写的是 `-sandbox on,obsolete=deny,elevateprivileges=deny,resourcecontrol=deny`，照原样做不到「VM 只经 guestfwd 出网」。本次实验改用 `on,obsolete=deny,resourcecontrol=deny`，靠容器的 `cap_drop ALL` 与 `no-new-privileges` 兜底：没有任何 capability、不能经 setuid 程序提权，qemu 与转发进程调用 set*uid 也拿不到权限。**这是对 ADR-0004 隔离配置的放宽，要所有者决定**：接受这个替代（写新 ADR 取代那一句），或者改走退路（passt，或换一种不需要起进程的转发方式），见「结论」。
+2. **Node 的 `net.BlockList` 会拿 IPv4 地址去比 IPv4 映射规则。** 把 `::ffff:0:0/96` 加进 BlockList，会把全部 IPv4 地址都判为禁止。出网代理改成单独判断 IPv4 映射地址，单测里有这条回归。#17 写生产版出网代理时照此处理。
+3. **代理收到 SIGTERM 时不能等 `server.close()`**：VM 关机后还开着的隧道可能永远不关，要主动断开全部连接再退出。
+4. cloud-init 的 runcmd 里没有 `HOME`，`git config --global`、npm、pnpm 会写不到家目录；来宾脚本要先 `export HOME=/root`。
+
+## 结论
+
+| ADR-0004 要验证的假设 | 结论 |
+|---|---|
+| Docker 默认 seccomp 下 node 容器（非 root、cap_drop ALL、no-new-privileges）能用 `/dev/kvm` | 通过 |
+| 纯 QEMU 能引导 cloud 镜像 | 通过；到 runner 就绪 10.5–13.1 秒 |
+| restrict=on 加 guestfwd 的隔离 | 直连宿主、私网、元数据、IPv6 全部不通，通过；但要放宽 `-sandbox` 的 `elevateprivileges`（发现 1），待所有者决定 |
+| 出网代理的放行与拒绝（S-03、S-14） | 通过 |
+| 1 vCPU / 2 GiB 跑一次完整校验会不会 OOM | 本仓库不会（峰值 896–944 MiB）；omp 加校验的组合没有测，见下 |
+| 依赖安装耗时与缓存 | 冷装 36–40 秒；带 store 3–4 秒（外加解包 2 秒），几乎不走网络 |
+| 宿主防火墙规则不变 | 通过：实验没有改动；唯一的差异是另一套程序新建 incus 实例带来的（见「网络隔离」） |
+
+## 这一轮没有覆盖的
+
+以下各项都是 **未验证**，不能当作已通过：
+
+- **omp**：omp 在 VM 里的内存（ADR-0004 估约 0.6 GB）与 omp 加校验的峰值；带 `.omp/hooks`、`mcp.json`、`.env` 的恶意夹具是否被加载。跑 omp 需要模型中继与每任务令牌（#13、#14），在 #17 的执行器里补测。
+- **只读缓存盘**：ADR-0004 设想的是只读挂进 VM 的 pnpm store 缓存盘；本次 warm 是把 store 解包到 VM 的可写盘上再装，只能说明「有缓存时下载量和耗时是多少」，不能说明只读挂载可行。
+- **passt**：没有评估。
+- **基础镜像在 CI 里构建**：没有试跑。
+- **中等规模的其它仓库**：只测了本仓库。
+- 取消后 qemu 退出、overlay 回收、fw_cfg 传令牌：属于执行器行为，随 #17 实现与测试。

@@ -52,6 +52,7 @@
 | 文档 | 说明 | EN |
 |---|---|---|
 | [`protocol.md`](./services/node/protocol.md) | 工作节点与 control 之间的 HTTP/JSON 协议：原则、消息表 N-01…，以及 sandbox 与 VM 怎样访问节点。 | — |
+| [`vm-feasibility.md`](./services/node/vm-feasibility.md) | 在第一台节点的临时容器里，用 QEMU/KVM 起 1 vCPU / 2 GiB 的一次性 VM：冷启动、网络隔离、出网代理、依赖安装、pnpm verify 与内存峰值的实测数据，以及对 ADR-0004 的结论。 | — |
 
 ## services/protocol/
 
@@ -125,4 +126,4 @@
 
 ---
 
-共 42 篇文档（另有 4 篇英文版）。索引按目录分组，组内按文件名排序。
+共 43 篇文档（另有 4 篇英文版）。索引按目录分组，组内按文件名排序。

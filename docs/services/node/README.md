@@ -38,7 +38,7 @@
 | `src/executors/qemu/`、`src/egress-proxy/`、`src/endpoint/`、`src/gc/`、`vm/{build,guest}/`、`Dockerfile.vmimage` | QEMU/KVM 执行器、出网代理、VM 基础镜像配方、泄漏回收 | #17 |
 | 多节点：标签、容量、信任等级、排空、滚动升级 | 第二台节点加入后的分配与接管 | #19 |
 
-子文档：[节点协议](protocol.md)（消息表）；vm、sandbox、health、egress 的说明随 #11、#14、#17 写入。节点运维手册 NODES 由 #11 写入 ops。
+子文档：[节点协议](protocol.md)（消息表）、[VM 可行性实测](vm-feasibility.md)（#12）；sandbox、health、egress 的说明随 #11、#14、#17 写入。节点运维手册 NODES 由 #11 写入 ops。
 
 ## 接口与数据归属（计划中）
 
@@ -55,10 +55,10 @@ pnpm --filter @geek-bot/node typecheck
 pnpm exec vitest run tests/node
 ```
 
-VM 相关测试只能在有 KVM 的机器上手动跑（`test:vm` 随 #12 加入）。
+VM 相关测试只能在有 KVM 的机器上手动跑：`pnpm test:vm`（#12，[VM 可行性实测](vm-feasibility.md)）。
 
 ## 已知限制
 
 - #1 没有实现任何节点功能；上文的模块和接口都是计划。
-- 在节点容器里用 QEMU 用户态网络做隔离、cloud 镜像能否被纯 QEMU 引导、1 vCPU / 2 GiB 是否够用，这些都没有验证，以 #12 的实测结论为准；不通过时按 [ADR-0004](../../decisions/0004-execution-isolation.md) 列出的退路改选。
+- #12 在第一台节点上实测了节点容器里的 KVM、纯 QEMU 引导 cloud 镜像、restrict=on 加 guestfwd 的隔离、出网代理的规则，以及 1 vCPU / 2 GiB 跑本仓库完整校验的内存，结论见 [VM 可行性实测](vm-feasibility.md)。其中 `-sandbox` 的 `elevateprivileges=deny` 与 guestfwd 转发不兼容，怎么处理待所有者决定；omp、恶意夹具、只读缓存盘、passt 还没有实测。
 - 执行隔离的安全要求见 [SECURITY](../../architecture/SECURITY.md)。

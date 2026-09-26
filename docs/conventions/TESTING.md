@@ -13,7 +13,9 @@
 
 浏览器回归 `pnpm test:e2e`（#4 加入）不在 `pnpm verify` 里：它以样板数据模式构建 console，在 127.0.0.1:4174 预览，用 Playwright（Chromium）跑 `tests/e2e/*.spec.ts`；CI 的 `console-e2e` job 每次都跑。本机第一次运行前用 `pnpm exec playwright install chromium` 下载浏览器。
 
-还没有的入口：环境模板契约 `pnpm check:environments`（随 #7 加入）、只在有 `/dev/kvm` 的机器上手动跑的 VM 实验 `pnpm test:vm`（随 #12 加入）。它们加入之前，相关项在报告里写「未验证」，不能用 `pnpm verify` 通过代替。
+VM 实验 `pnpm test:vm`（#12 加入）只在有 `/dev/kvm` 和 Docker 的 Linux 主机上手动跑，不在 `pnpm verify` 和 CI 里；没跑就在报告里写「未验证」。它的出网代理规则另有单测 `tests/integration/vm/egress-proxy.test.ts`，随 `pnpm test` 在任何机器上跑。结论与数据见 [VM 可行性实测](../services/node/vm-feasibility.md)。
+
+还没有的入口：环境模板契约 `pnpm check:environments`（随 #7 加入）。加入之前，相关项在报告里写「未验证」，不能用 `pnpm verify` 通过代替。
 
 运行时固定为 Node 22（`engines` 为 `>=22.13.0 <23`，`check:runtime` 核对），pnpm 9.15.9。未找到浏览器、未找到 KVM 都不能算对应套件通过。
 

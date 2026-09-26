@@ -55,7 +55,8 @@ pnpm install --frozen-lockfile
 - `pnpm labels:plan`：只打印创建标签的 `gh label create` 命令，不执行，由所有者决定是否运行（见 [CICD](CICD.md)）。
 - `pnpm dev:console`：console 的样板数据模式开发服务器（`vite --mode sample`），数据全部虚构、不连控制面；地址栏加 `?sample=empty|slow|error|forbidden|unauthenticated|offline` 看各种状态。
 - `pnpm test:e2e`：浏览器回归。以样板数据模式构建 console（`app/console/.sample-dist/`，已忽略），在 127.0.0.1:4174 预览，用 Playwright 跑 `tests/e2e/`；报告在 `playwright-report/`，验收截图在 `test-results/evidence/`（都已忽略）。第一次运行前 `pnpm exec playwright install chromium`，浏览器下载到用户缓存目录（macOS 是 `~/Library/Caches/ms-playwright`），不进仓库。4174 端口被占用时它直接失败，不复用已有的服务。
-- 还没有的命令：`dev:control`（#3）、`check:environments` 与 `release:plan`（#7）、`test:vm`（#12）。
+- `pnpm test:vm`：一次性 VM 的可行性实验（`tests/integration/vm/run.sh`），只能在有 `/dev/kvm` 和 Docker 的 Linux 主机上运行，macOS 本机跑不了（脚本会直接以 2 退出）。宿主上只起一个临时实验容器，跑完删除容器、镜像和缓存卷；`--keep` 保留镜像与下载的 cloud 镜像，环境变量 `GEEKBOT_VM_RESULTS=<目录>` 把全部产物复制出来。流程与结论见 [VM 可行性实测](../services/node/vm-feasibility.md)。
+- 还没有的命令：`dev:control`（#3）、`check:environments` 与 `release:plan`（#7）。
 
 ## Git 钩子
 
@@ -105,7 +106,7 @@ node scripts/task.mjs finish <issue>
 | `tests/control/`、`tests/console/`、`tests/node/`、`tests/runner/`、`tests/protocol/` | 各包的单测，与 `app/<name>`、`packages/protocol` 一一对应 |
 | `tests/tooling/` | 门禁脚本与工作流辅助脚本的测试：缺服务文档、跨包导入、私网地址、模板密钥有值、PR 正文缺段等反例必须失败；经符号链接启动 CLI 的回归；分支不变量、task worktree、PR 正文契约、标签声明 |
 | `tests/e2e/` | 管理后台的浏览器回归（Playwright），入口 `pnpm test:e2e`；类型检查用 `tests/e2e/tsconfig.json` |
-| `tests/integration/vm/`（计划中，随 #12 加入） | 一次性 VM 的实测，入口 `pnpm test:vm`；需要 `/dev/kvm`，只在有它的 Linux 机器上手动运行，macOS 本机跑不了 |
+| `tests/integration/vm/` | 一次性 VM 的实测，入口 `pnpm test:vm`；需要 `/dev/kvm` 与 Docker，只在有它们的 Linux 机器上手动运行，macOS 本机跑不了。其中 `egress-proxy.test.ts` 是出网代理规则的单测，随 `pnpm test` 在任何机器上跑 |
 
 测试文件以 `.test.ts` 结尾，由根 `vitest.config.ts` 收集；浏览器回归以 `.spec.ts` 结尾，只由 Playwright 收集。测试不读 `.env`、不连真实 GitHub、不用真实数据；需要反例的字面量（私网地址、被禁词）在运行时拼出来，不写进仓库。隔离要求见 [TESTING](../conventions/TESTING.md)。
 
