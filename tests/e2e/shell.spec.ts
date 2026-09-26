@@ -3,7 +3,24 @@
  */
 import { CONSOLE_PAGES } from "../../app/console/src/shell/pages.js";
 import type { Page } from "@playwright/test";
-import { NARROW, WIDE, expect, expectPageRules, settledState, test } from "./fixtures.js";
+import { NARROW, WIDE, clippedElements, expect, expectPageRules, settledState, test } from "./fixtures.js";
+
+/**
+ * 等抽屉滑入完成：面板左边缘回到 0，且前后两次读到的宽度一致。
+ * 动画进行中做页面检查会把正在移动的内容当成被截断（#30）。
+ */
+async function drawerSettled(page: Page): Promise<void> {
+  const panel = page.locator(".tx-drawer__panel");
+  let lastWidth = -1;
+  await expect
+    .poll(async () => {
+      const box = await panel.boundingBox();
+      const settled = box !== null && box.x === 0 && box.width === lastWidth;
+      lastWidth = box?.width ?? -1;
+      return settled;
+    }, { message: "抽屉滑入完成" })
+    .toBe(true);
+}
 
 /** 抽屉打开后：焦点已经在抽屉里，连按 Tab 也出不去（W3C APG modal dialog）。 */
 async function expectFocusTrappedIn(page: Page): Promise<void> {
@@ -122,6 +139,7 @@ test.describe("窄屏（390px）", () => {
     const drawer = page.getByRole("dialog", { name: "导航" });
     await expect(drawer).toBeVisible();
     await expect(opener).toHaveAttribute("aria-expanded", "true");
+    await drawerSettled(page);
     await expectFocusTrappedIn(page);
     await expectPageRules(page);
 
@@ -153,6 +171,7 @@ test.describe("窄屏（390px）", () => {
     expect(reached, "Tab 能到达「导航」按钮").toBe(true);
     await page.keyboard.press("Enter");
     await expect(page.getByRole("dialog", { name: "导航" })).toBeVisible();
+    await drawerSettled(page);
     await expectFocusTrappedIn(page);
     await page.keyboard.press("Escape");
     await expect(page.getByRole("dialog", { name: "导航" })).toBeHidden();
@@ -172,14 +191,37 @@ test.describe("窄屏（390px）", () => {
     await expect(panel).toHaveCSS("box-shadow", "none");
   });
 
+  test("截断检查的自测：真实截断会报出来，只放过 v-wave 的波纹容器（#30）", async ({ page }) => {
+    await page.goto("/overview");
+    await settledState(page);
+    expect(await clippedElements(page)).toEqual([]);
+    await page.evaluate(() => {
+      const wide = () => {
+        const inner = document.createElement("div");
+        inner.style.width = "900px";
+        inner.textContent = "wide";
+        return inner;
+      };
+      const ripple = document.createElement("div");
+      ripple.setAttribute("data-v-wave-container-internal", "");
+      ripple.style.overflow = "hidden";
+      ripple.append(wide());
+      const clipped = document.createElement("div");
+      clipped.className = "probe-clipped";
+      clipped.style.overflow = "hidden";
+      clipped.append(wide());
+      document.querySelector(".shell__main")!.append(ripple, clipped);
+    });
+    expect(await clippedElements(page)).toEqual(["div.probe-clipped"]);
+  });
+
   test("验收截图：窄屏概览与打开的抽屉", async ({ page }) => {
     await page.goto("/overview");
     await settledState(page);
     await page.screenshot({ path: "test-results/evidence/console-narrow-390x844.png", fullPage: true });
     await page.getByRole("button", { name: "导航", exact: true }).click();
     await expect(page.getByRole("dialog", { name: "导航" })).toBeVisible();
-    // 等滑入动画结束：面板左边缘回到 0 再截图。
-    await expect.poll(async () => (await page.locator(".tx-drawer__panel").boundingBox())?.x).toBe(0);
+    await drawerSettled(page);
     await page.screenshot({ path: "test-results/evidence/console-narrow-390x844-drawer.png" });
   });
 });
