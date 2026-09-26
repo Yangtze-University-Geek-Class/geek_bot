@@ -4,7 +4,7 @@
 
 状态：`proposed` · 更新：2026-09-26 · 适用：全部 `app/*`、`packages/protocol` 与部署文件（由 #3、#5、#7、#9–#14、#17–#20 实现）
 
-本文写的是设计要求，还没有任何一条被代码实现。每条不变量后面括号里是实现它的 issue；实现时必须带上「验证」一节列出的测试。改动涉及 GitHub 令牌、写入白名单、节点协议、VM 或 sandbox 隔离、模型中继时，先读本文，再按 [CODE-REVIEW](../conventions/CODE-REVIEW.md) 第 11–14 项审查。`proposed` 文档是审查时不得放宽的基线，不能拿来证明功能已经实现。
+本文写的是设计要求。#3 实现了其中几条的一部分：S-16 的 control 侧打码（日志、审计、告警）、S-17 的本机加密备份与每日恢复校验、S-20 的监听地址与 origin 启动检查、S-01 的 master key 只从文件读取（令牌加密随 #5）；其余都还没有实现，实现范围以 [control 服务契约](../services/control/README.md) 为准。每条不变量后面括号里是实现它的 issue；实现时必须带上「验证」一节列出的测试。改动涉及 GitHub 令牌、写入白名单、节点协议、VM 或 sandbox 隔离、模型中继时，先读本文，再按 [CODE-REVIEW](../conventions/CODE-REVIEW.md) 第 11–14 项审查。`proposed` 文档是审查时不得放宽的基线，不能拿来证明功能已经实现。
 
 相关文档：架构见 [ARCHITECTURE](ARCHITECTURE.md)；机器人对 GitHub 的每一种写入见 [写入白名单](../services/control/write-whitelist.md)（W、D 编号）；节点消息见 [节点协议](../services/node/protocol.md)；密钥扫描与公开安全检查见 [TESTING](../conventions/TESTING.md)。
 

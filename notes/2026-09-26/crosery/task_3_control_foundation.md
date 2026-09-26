@@ -25,3 +25,9 @@
 - 执行者：agent-claude-geek-bot-821e-control3（Claude Code，claude-opus-5-5）
 - 做了什么：feat(tooling): 密钥门禁把 BACKUP_KEY 当作密钥名（scripts/check-secrets.mjs 的 SECRET_KEY_RE 加 BACKUP_KEY，tests/tooling/secrets.test.ts 加反例，TESTING 同步）；同一提交并入 task.mjs start 带进来的 #4 收尾暂存记录；提交前在完整改动上跑 pnpm verify 与 pnpm exec vitest run tests/tooling/secrets.test.ts
 - 结果：tests/tooling/secrets.test.ts 20 passed；完整改动上 pnpm verify 退出码 0（Tests 389 passed）；这个提交单独的树另在临时 worktree 里核对
+
+## 12:23:11 +08:00 · 提交 · #3 · control 骨架：迁移、健康检查、加密备份、日志打码与优雅停机
+
+- 执行者：agent-claude-geek-bot-821e-control3（Claude Code，claude-opus-5-5）
+- 做了什么：feat(control): 迁移器、健康检查、加密备份、日志打码与优雅停机（依赖 fastify、better-sqlite3、@types/better-sqlite3；src 下 config、secrets、db、log、ops、routes、app、services、index、cli；tests/control 六个测试文件；dev:control；.env.example；control 契约、data-model、behavior、STACK、TESTING、LOCAL-DEV、ADR-0002/0003/0008/0009 等文档）；镜像与 CI 的 docker job 留在下一个提交
+- 结果：完整改动上 pnpm verify 退出码 0（Test Files 29 passed，Tests 389 passed）、pnpm test:e2e 42 passed；这个提交单独的树另在临时 worktree 里核对

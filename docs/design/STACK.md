@@ -17,7 +17,7 @@
 
 ## 已引入
 
-#1 引入开发工具；#4 引入管理后台的依赖，这是第一批生产依赖（所有者 2026-09-26 批准）。control、node、runner、protocol 仍然没有第三方运行时依赖。
+#1 引入开发工具；#4 引入管理后台的依赖，这是第一批生产依赖（所有者 2026-09-26 批准）；#3 引入 control 的 Fastify 与 better-sqlite3（所有者 2026-09-26 批准）。node、runner、protocol 仍然没有第三方运行时依赖。
 
 | 层 | 方案 | 声明 | 锁文件解析 |
 |---|---|---|---|
@@ -33,6 +33,8 @@
 | 前端构建（#4） | Vite、@vitejs/plugin-vue、vue-tsc；console 的类型检查是 vue-tsc；Tuffex 的按需样式用它自带的 Vite 插件 | `vite: ^7.3.6`、`@vitejs/plugin-vue: ^6.0.9`、`vue-tsc: ^3.3.11` | vite 7.3.6、plugin-vue 6.0.9、vue-tsc 3.3.11 |
 | 图标（#4） | UnoCSS 的图标预设 + Carbon 图标集；只用图标预设，不引入原子类样式体系 | `@unocss/vite`、`@unocss/preset-icons`: `^66.10.5`；`@iconify-json/carbon: ^1.2.27` | 66.10.5；carbon 1.2.27 |
 | 浏览器回归（#4） | Playwright（只装 Chromium），入口 `pnpm test:e2e`；浏览器下载到用户缓存目录，不进仓库 | `@playwright/test: ^1.63.0`（根开发依赖） | 1.63.0 |
+| 控制面 HTTP（#3） | Fastify 5，只在 `app/control`；构造（`src/app.ts`）与监听（`src/index.ts`）分离，路由测试用 `inject`；日志用 control 自带的结构化日志（`loggerInstance`），请求日志关闭改由 `onResponse` 记录 | `fastify: ^5.12.5` | 5.12.5 |
+| 持久化（#3） | SQLite（WAL、独占锁）+ better-sqlite3，只在 `app/control`；只有 control 进程写库 | `better-sqlite3: ^13.0.3`（`engines.node >=22`，N-API）；类型 `@types/better-sqlite3: ^9.6.0`（开发依赖） | better-sqlite3 13.0.3（内嵌 SQLite 3.53.4）；@types 9.6.0。13.x 的包里自带 linux（glibc、musl）、darwin、win32 的 x64 与 arm64 预编译二进制，运行时直接加载；本机 `pnpm install` 时包里的 `binding.gyp` 仍会触发一次 node-gyp，检测到预编译二进制后不编译（实测只写两个 stamp 文件），但需要本机有 python3 与 make |
 
 包之间的导入方向见 [模块化开发规范](../conventions/MODULAR-DEVELOPMENT.md)；命令与验收见 [TESTING](../conventions/TESTING.md)。
 
@@ -42,8 +44,6 @@
 
 | 层 | 选型 | issue | 引入时要核对的事 |
 |---|---|---|---|
-| 控制面 HTTP | Fastify 5 | #3 | 构造与监听分离，路由测试用 `inject` |
-| 持久化 | SQLite（WAL）+ better-sqlite3 | #3 | 原生模块：在 Node 22 上核对预编译包和 ABI；只有 control 写库 |
 | 容器与发布 | Docker、Docker Compose v2、ghcr | #3（control 镜像）、#7（release.yml、compose、部署脚本） | 镜像非 root、带健康检查；同一 digest 跨环境 |
 | sandbox 执行器 | 无网、根只读的独立容器 | #14 | 容器里没有任何令牌文件 |
 | VM 执行器 | QEMU/KVM 一次性 VM，默认 1 vCPU / 2 GiB | #12 实测，#17 实现 | 节点容器里能否用 `/dev/kvm`、用户态网络能否隔离、2 GiB 是否够用，以 #12 的实测为准 |
@@ -58,7 +58,8 @@
 
 - 管理后台只用 Vue 3.5 与 Tuffex，不引入别的 UI 框架和组件库，不另建平行的通用 UI 体系（[Tuffex 使用政策](../components/tuffex/USAGE-POLICY.md)）。
 - 不做 SSR；console 是单页应用，由 control 托管静态产物，不另起 nginx。
-- 数据层不用 ORM 或迁移框架，迁移是按编号的 SQL 文件（#3）。
+- 数据层不用 ORM 或迁移框架，迁移是按编号的 SQL 文件（#3，`app/control/src/db/migrations/`）。
+- control 不直接依赖 pino、ajv 这些 Fastify 的传递依赖；日志打码、CLI 参数解析、加密都只用 Node 自带模块（`node:crypto`、`node:util`）。
 - 容器编排只用 Docker Compose；多节点调度由 control 自己完成，不引入 Kubernetes。
 - 第一版不做深色主题，也不引入多语言框架（见 [DESIGN](DESIGN.md)）。
 

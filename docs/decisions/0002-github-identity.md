@@ -99,10 +99,10 @@
 
 ## 实施状态
 
-本篇只是设计，还没有代码。
+#3 之外都还没有代码。
 
 - #5：认领码、device flow 与 web flow、机器人账号绑定与 scope 校验、管理员邀请与令牌吊销、令牌加密、每日校验、会话与重新认证、`rotate-master-key`。
-- #3：master key 从 `*_FILE` 读取，control 的运维命令入口。
+- #3（已实现）：master key 从 `*_FILE` 读取并校验（读不到或格式不对拒绝启动，报错不含密钥内容），control 的运维命令入口 `geek-bot`。
 - #6：仓库发现、组织访问限制的识别与提示、可分配性检查。
 - #9：「暂停全部写入」在 publisher 里的强制执行；preview 与 production 的仓库互斥。
 - #7：每个环境的 OAuth App 与密钥文件写进部署文档。

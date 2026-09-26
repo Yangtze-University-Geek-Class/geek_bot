@@ -5,9 +5,14 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.json && node scripts/copy-migrations.mjs"
   },
   "dependencies": {
-    "@geek-bot/protocol": "workspace:*"
+    "@geek-bot/protocol": "workspace:*",
+    "better-sqlite3": "^13.0.3",
+    "fastify": "^5.12.5"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0"
   }
 }

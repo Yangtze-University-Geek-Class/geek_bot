@@ -51,7 +51,7 @@ issue 表单（`.github/ISSUE_TEMPLATE/`）只在进入默认分支 `main` 后�
 **必填**：
 
 - 分支与完整 commit SHA（`main` / `stage` / `task/<issue>/<slug>`），不写不存在的分支名；
-- 实例版本：正式 `X.Y.Z`，预发布 `X.Y.Z-rc.N@<sha12>`，能对应到发布 tag 时一并写上；版本取自后台页脚或 control 的版本接口（计划中，#3、#7），展示规则以 [RELEASES](RELEASES.md) 为准；本机开发写分支与 SHA 即可；
+- 实例版本：正式 `X.Y.Z`，预发布 `X.Y.Z-rc.N@<sha12>`，能对应到发布 tag 时一并写上；版本取自后台页脚或 control 的版本接口（计划中，#7），展示规则以 [RELEASES](RELEASES.md) 为准；本机开发写分支与 SHA 即可；
 - 部署方式：本机、预发布实例还是正式实例；control 与出问题的 node 各是哪个版本。只写环境名，不写实例的内部地址或主机名。
 
 **按问题类型补充**（与问题无关的不写，不为凑字段填）：

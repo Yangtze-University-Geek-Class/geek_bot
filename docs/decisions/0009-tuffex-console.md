@@ -2,7 +2,7 @@
 
 > console 是 Vue 3.5 + vue-router 4 + Tuffex 0.6.0 + Vite 的单页应用，版本钉死；构建产物打进 control 镜像，与后台 API 和 SSE 同源提供，不另起静态服务器。
 
-状态：`accepted` · 更新：2026-09-26 · 适用：`app/console` 的技术选型与构建产物的托管方式（由 #4 实现，同源托管随 #3、#7 的 control 镜像落地）
+状态：`accepted` · 更新：2026-09-26 · 适用：`app/console` 的技术选型与构建产物的托管方式（由 #4 实现，同源托管随 #7 的 control 镜像落地）
 
 ## 背景
 
@@ -39,12 +39,12 @@
 - Tuffex 0.6.0 上游声明 Node >=26。#4 实测它在 Node 22 上能安装、构建和运行，不需要换 Node 版本；另为它传递依赖里的 Electron peer 加了 `pnpm.packageExtensions`。结论见 [console 服务契约](../services/console/README.md)「Tuffex 0.6.0 在 Node 22 上的实测」。
 - beta 组件的接口可能变化；版本钉死，升级单独立项并重新验收。
 - 部署者在前面加 TLS 反代时，必须对 SSE 路径关闭缓冲；写进 DEPLOY（#7 写入）。
-- control 多了托管静态文件的职责，负载很小；静态文件的缓存头和安全响应头由 #3 在 control 托管静态产物时定；#4 只产出 `dist/`，不涉及响应头。
+- control 多了托管静态文件的职责，负载很小；静态文件的缓存头和安全响应头在 control 托管静态产物时定（#3 没有做托管，随 #7）；#4 只产出 `dist/`，不涉及响应头。
 
 ## 实施状态
 
 - #4（已实现）：console 外壳、依赖引入、样板数据模式、浏览器回归，以及 Node 22 兼容性实测（能装、能构建、能跑，结论见 [console 服务契约](../services/console/README.md)）。
-- #3：control 托管静态产物（与 control 的 Dockerfile 一起）。
+- #3：没有托管静态文件，也没有把 console 产物打进镜像；这两件随 #7（见 [control 服务契约](../services/control/README.md)「已知限制」）。
 - #14：SSE 实时推送。
 - #7：镜像构建与发布。
 

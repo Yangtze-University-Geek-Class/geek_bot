@@ -27,7 +27,8 @@ pnpm install --frozen-lockfile
 
 - 锁文件不可变：安装不应改动 `pnpm-lock.yaml`。要加依赖，按 [CONTRIBUTING](../conventions/CONTRIBUTING.md) 在 PR 里说明目的、许可和维护代价。
 - 每个 task worktree 各装一次；pnpm 的全局 store 会复用已下载的包。
-- 生产依赖目前只有 console 的 Vue、vue-router、Tuffex（#4）；Fastify、better-sqlite3 由 #3 引入。版本见 [STACK](../design/STACK.md)。
+- 生产依赖目前是 console 的 Vue、vue-router、Tuffex（#4）和 control 的 Fastify、better-sqlite3（#3）。版本见 [STACK](../design/STACK.md)。
+- better-sqlite3 13 的包里自带各平台的预编译二进制；安装时它的 `binding.gyp` 仍会触发一次 node-gyp（检测到预编译二进制后不编译），本机需要有 python3 与 make（macOS 装了 Xcode 命令行工具即可）。
 - Tuffex 依赖的 `@talex-touch/utils` 把 Electron 声明为 peer；根 `package.json` 的 `pnpm.packageExtensions` 把它标成可选，安装时不会下载 Electron（[console 服务契约](../services/console/README.md)「Tuffex 0.6.0 在 Node 22 上的实测」）。
 
 ## 验证：`pnpm verify`
@@ -44,7 +45,7 @@ pnpm install --frozen-lockfile
 | `check:public-safety` | `node scripts/check-public-safety.mjs` | 不出现私网、CGNAT、链路本地地址和带 mesh 子域的组网主机名；被禁词按 SHA-256 比对；确需保留的放行项逐条写进 `scripts/public-safety-allow.json` 并写明理由。文件名、目录名、符号链接目标同样扫描；`notes/` 下的路径和内容不做被禁词比对（记录必须写负责人的 GitHub 用户名，见 [NOTES](../conventions/NOTES.md) §7），地址和主机名规则照常；放行清单自己的 `path`、`reason` 照常扫描；`docs/components/tuffex/reference/`、`snapshot/` 下只跳过清单（`manifest.json`）里登记过的文件内容 |
 | `typecheck` | `pnpm -r --if-present run typecheck && tsc -p tsconfig.json` | 每个包 `tsc -p tsconfig.json --noEmit`；再用根 `tsconfig.json` 对 `tests/**` 与 `vitest.config.ts` 做类型检查，不产出文件 |
 | `test` | `vitest run` | 运行 `tests/` 下的全部单测 |
-| `build` | `pnpm check:runtime && pnpm -r --if-present run build` | 每个包 `tsc -p tsconfig.json`，产物进各包的 `dist/`（已被 `.gitignore` 忽略） |
+| `build` | `pnpm check:runtime && pnpm -r --if-present run build` | 每个包 `tsc -p tsconfig.json`，产物进各包的 `dist/`（已被 `.gitignore` 忽略）；control 另把 `src/db/migrations/*.sql` 复制进 `dist/db/migrations/`；console 是 `vite build` |
 
 另外几条命令不在 `verify` 里：
 
@@ -55,7 +56,9 @@ pnpm install --frozen-lockfile
 - `pnpm labels:plan`：只打印创建标签的 `gh label create` 命令，不执行，由所有者决定是否运行（见 [CICD](CICD.md)）。
 - `pnpm dev:console`：console 的样板数据模式开发服务器（`vite --mode sample`），数据全部虚构、不连控制面；地址栏加 `?sample=empty|slow|error|forbidden|unauthenticated|offline` 看各种状态。
 - `pnpm test:e2e`：浏览器回归。以样板数据模式构建 console（`app/console/.sample-dist/`，已忽略），在 127.0.0.1:4174 预览，用 Playwright 跑 `tests/e2e/`；报告在 `playwright-report/`，验收截图在 `test-results/evidence/`（都已忽略）。第一次运行前 `pnpm exec playwright install chromium`，浏览器下载到用户缓存目录（macOS 是 `~/Library/Caches/ms-playwright`），不进仓库。4174 端口被占用时它直接失败，不复用已有的服务。
-- 还没有的命令：`dev:control`（#3）、`check:environments` 与 `release:plan`（#7）、`test:vm`（#12）。
+- `pnpm dev:control`：本机运行 control（先构建 protocol 与 control，再运行 `app/control/scripts/dev.mjs`）。库、加密备份和运维本地通道放在仓库根的 `data/`（已忽略）；第一次运行时在 `data/dev-secrets/` 生成本机用的一次性 master key 与备份加密密钥（0600），它们不是任何实例的密钥。默认实例角色 `preview`、只绑 `127.0.0.1:8080`、日志级别 `debug`；仓库根有 `.env.local`（从 `.env.example` 复制）时先读它，环境变量里有值的项优先，例如端口被占时 `GEEK_BOT_PORT=18080 pnpm dev:control`。Ctrl-C 触发优雅停机。起来以后 `curl http://127.0.0.1:8080/readyz` 应返回 `{"status":"ready"}`。
+- control 的运维命令（`backup`、`verify-backup`、`restore --dry-run`）在本机用构建产物运行，环境变量要和 `dev:control` 一致，例如 `GEEK_BOT_INSTANCE_ROLE=preview GEEK_BOT_DB_PATH=./data/geek-bot.db GEEK_BOT_MASTER_KEY_FILE=./data/dev-secrets/master_key GEEK_BOT_BACKUP_KEY_FILE=./data/dev-secrets/backup_key node app/control/dist/cli.js backup`；control 在运行时命令经 `data/run/control.sock` 交给它执行，没在运行时独占打开库自己执行（[control 服务契约](../services/control/README.md)「运维命令与单写者」）。
+- 还没有的命令：`check:environments` 与 `release:plan`（#7）、`test:vm`（#12）。
 
 ## Git 钩子
 

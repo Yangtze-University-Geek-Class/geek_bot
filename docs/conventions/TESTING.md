@@ -21,7 +21,7 @@
 
 - **工具测试**在临时目录里合成夹具（临时 Git 仓库、临时 `app/`、`docs/`），不改真实仓库的文件和 refs，不 fetch、不联网。需要仓库根目录的脚本通过 `--root <dir>` 或导出的纯函数接收根目录，反例都在夹具里跑。
 - **被禁字面量不进仓库**：`check-public-safety` 的反例在运行时拼出来（如把地址按段 `join('.')`），或者给纯函数注入测试自己的哈希表；测试文件、夹具里不留明文。
-- **control 的路由测试**（随 #3 起）用 `buildApp`/`inject` 注册真实路由，SQLite 用内存库，GitHub API 与模型网关经注入的 `fetch` 打桩并默认拒绝网络，需要响应的用例显式注入模拟。不复制 handler 去验证另一份实现，不读取 `.env`、目标机配置或真实数据库，不对真实仓库发任何写请求。时间相关的规则（静默窗口、5 天提醒、7 天关闭）用可注入的假时钟。
+- **control 的路由测试**（#3 起）用 `buildApp`/`inject` 注册真实路由，SQLite 用系统临时目录里的库文件或内存库，密钥文件每次随机生成，GitHub API 与模型网关经注入的 `fetch` 打桩并默认拒绝网络，需要响应的用例显式注入模拟。不复制 handler 去验证另一份实现，不读取 `.env`、目标机配置或真实数据库，不对真实仓库发任何写请求。时间相关的规则（静默窗口、5 天提醒、7 天关闭）用可注入的假时钟。
 - **浏览器测试**（`tests/e2e/`，#4 起）连样板数据或 mock API；每次使用自己创建的临时浏览器 profile，不打开、不清理用户已有的浏览器配置和数据；只关闭本次创建的进程，禁止广泛 `pkill`。样板数据全部虚构。
 - **node 与 runner 测试**默认把 VM 与容器驱动打桩；真实 KVM 冒烟只在有 `/dev/kvm` 的节点上手动跑，结果单独记录（#12、#17）。恶意夹具仓库（带 `.omp/hooks`、`mcp.json`、`.env`）只在 sandbox 或 VM 里使用。
 
@@ -45,7 +45,9 @@
 | 标签声明（`scripts/labels.mjs`） | `tests/tooling/labels.test.ts` | `labels.yml` 颜色或说明不合规；issue 模板引用了没声明的标签；「端」下拉不是八个端；不认识的参数以 0 退出 |
 | PR 目标分支（`issue-lifecycle.yml` 的 `pr-base`） | `tests/tooling/labels.test.ts` | PR 指向 `stage` 以外的分支（`main`、`dev/alice`、`task/12/review_queue`、`stage2`、空）时不以 1 退出；`pr-base` 不随 edited 触发；`pr-contract`、`close-on-merge` 没限定只处理指向 `stage` 的 PR |
 
-各包（`app/control`、`app/node`、`app/runner`、`packages/protocol`）现在只有最小源码，各有一份最小测试：`tests/control/config.test.ts`（配置默认值与环境变量校验）、`tests/node/config.test.ts`（节点配置校验）、`tests/runner/omp-args.test.ts`（omp 参数）、`tests/protocol/protocol.test.ts`（协议常量与通道映射）。另由各包的 `typecheck` 与 `build` 证明各包能编译、能类型导入 `@geek-bot/protocol`。这些测试只证明工作区与工具链可用，不证明任何业务功能。
+`app/node`、`app/runner`、`packages/protocol` 现在只有最小源码，各有一份最小测试：`tests/node/config.test.ts`（节点配置校验）、`tests/runner/omp-args.test.ts`（omp 参数）、`tests/protocol/protocol.test.ts`（协议常量与通道映射）；另由各包的 `typecheck` 与 `build` 证明各包能编译、能类型导入 `@geek-bot/protocol`。这些测试只证明工作区与工具链可用，不证明任何业务功能。
+
+control（#3）：`tests/control/` 在系统临时目录里起真实的库和 control（不监听或监听随机端口），不读 `.env`、不联网，密钥每次随机生成，时间用假时钟。`config.test.ts`：产品默认值与部署配置（实例角色必填、S-20 的监听与 origin、密钥变量直接写值被拒且不回显、两个密钥文件不能相同）；`logging.test.ts`：S-16 列出的每种密钥形态、已知密钥原值、敏感键名在日志与打码里都被替换，另有一条「不打码就会带出令牌」的反例；`database.test.ts`：连接参数与独占锁（第二个连接打不开）、迁移器（空库迁到最新、上一版本的库迁到最新、兼容版本高于代码拒绝、回滚情形、迁移中途失败回滚、迁移文件被改、不是本产品的库）、审计只追加、告警去重；`backup.test.ts`：备份→恢复→`integrity_check` 往返、密文里没有明文、改字节或改头部或换密钥或登记不符都判失败并写告警、保留策略、启动时补登记、每日任务的到点与 weekly 判定；`server.test.ts`：`/healthz`、`/readyz`（含 503 的检查项）、错误格式与多余字段 400、415、413、400，拒绝启动的各种原因（删掉 master key 后报错与日志不含任何密钥内容），迁移前备份，上一版代码打开新库能启动能读写，第二个 control 拒绝启动，SIGTERM 后 WAL 已 checkpoint（只拷库文件本身就能读到停机前的行）；`cli.test.ts`：`backup`、`verify-backup` 经本地通道与离线执行、离线拿不到锁时失败、`restore --dry-run` 不改任何东西、用法错误以 2 退出。
 
 console（#4）：`tests/console/` 覆盖 `lib/` 与样板数据（时长格式化；API 客户端的错误格式、网络错误、非 JSON 响应、取消、路径白名单与各种写法的点段；页面状态映射；SSE 的连接、断线轮询、CLOSED 后退避重建、`reset`、`session_expired`；样板数据的各场景与「不调用真实 fetch」；浏览器回归所用被禁符号正则的逐类自测）。`tests/e2e/` 是浏览器回归：每个页面在 1280px 与 390px 下断言没有原生 select 与 checkbox、emoji 与被禁符号扫描为 0、图标都有图形、没有页面级横向溢出；外壳与主内容区没有被 overflow 截掉的内容；另有侧栏与抽屉导航、键盘（跳过链接、Tab 与 Enter、纯键盘打开抽屉、焦点进入并圈在抽屉里、Esc 与焦点归还、关闭的抽屉键盘进不去）、断网提示、样板数据标识、各数据状态；每个用例结束时断言没有请求离开浏览器（上下文级的外部请求、WebSocket 与 `/api/` 请求都为 0）。
 
@@ -55,7 +57,7 @@ console（#4）：`tests/console/` 覆盖 `lib/` 与样板数据（时长格式�
 
 | 包 | 必须覆盖 | 随哪个 issue 加入 |
 |---|---|---|
-| control | 迁移前生成备份；库的兼容版本高于代码认识的版本时拒绝启动，上一版代码打开只扩不缩的新库仍能启动、能读写（ADR-0008）；备份→恢复→`integrity_check` 往返一致；日志打码覆盖 `ghp_`、`gho_`、`github_pat_`、`sk-`、`gbn_`、`gbt_`、`Bearer`；SIGTERM 后 WAL 已 checkpoint | #3 |
+| control | 迁移前生成备份；库的兼容版本高于代码认识的版本时拒绝启动，上一版代码打开只扩不缩的新库仍能启动、能读写（ADR-0008）；备份→恢复→`integrity_check` 往返一致；日志打码覆盖 `ghp_`、`gho_`、`github_pat_`、`sk-`、`gbn_`、`gbt_`、`Bearer`；SIGTERM 后 WAL 已 checkpoint（已加入：`tests/control/`，见上文「control（#3）」） | #3 |
 | control | device flow 的 `authorization_pending`、`slow_down`、`expired_token`；没有认领码不能成为 owner；`X-OAuth-Scopes` 超出 `repo`、`read:org` 的令牌被拒（旧拒绝名里的 5 个 scope 作为样例）；没有会话访问后台接口 401，operator、viewer 调用 owner 专属操作 403，超过 10 分钟未重新认证的 owner 做 SECURITY S-09 清单里的操作被拒；缺 Origin 的写请求 403；被邀请管理员的登录令牌被吊销；响应和日志里没有令牌；库里令牌列是密文 | #5 |
 | control | 权限到能力映射的每一行；需要组织批准的识别；仓库消失记为 lost；已归档仓库禁用写入开关 | #6 |
 | control | ETag 条件请求与 304；受理规则每一条；静默窗口不被机器人自身写入重置、判断回复时排除 `[bot]` 账号；新 head 让旧审查变为 superseded；两通道优先级 | #8 |
@@ -82,7 +84,7 @@ console（#4）：`tests/console/` 覆盖 `lib/` 与样板数据（时长格式�
 
 `tests/tooling/release-tags.test.ts` 覆盖 tag 语法：tag 正则与 [RELEASES](RELEASES.md) 逐字一致；`vX.Y.Z-rc.N` → preview、`vX.Y.Z` → production；拒绝分支名、`latest`、短 SHA 与格式错误的 tag。
 
-发布规划器的测试（随 #7 加入）在临时 Git 仓库里覆盖：拒绝不在 `stage` 上的 rc、不在 `main` 上的正式 tag、同一提交没有同版本 rc 的正式 tag、版本与该提交 `package.json` 不符、已正式发布的版本再打 rc、本地 tag 指向别的提交；镜像引用是 ghcr，正式版复用 rc 的 digest；以及「规划只读」（不写文件、不改 refs、不动工作区）。部署脚本的测试（`tests/tooling/deploy-scripts.test.ts`，随 #7 加入）覆盖 digest 核对、串行锁、健康门失败自动回滚。展示值的测试（随 #3、#7 加入）覆盖：预发布只接受 `X.Y.Z-rc.N@<sha12>`，正式只接受 `X.Y.Z`。任何规划输出都**不授予**部署批准（`deploymentAuthorized: false`），自动测试也不替代人工试用。
+发布规划器的测试（随 #7 加入）在临时 Git 仓库里覆盖：拒绝不在 `stage` 上的 rc、不在 `main` 上的正式 tag、同一提交没有同版本 rc 的正式 tag、版本与该提交 `package.json` 不符、已正式发布的版本再打 rc、本地 tag 指向别的提交；镜像引用是 ghcr，正式版复用 rc 的 digest；以及「规划只读」（不写文件、不改 refs、不动工作区）。部署脚本的测试（`tests/tooling/deploy-scripts.test.ts`，随 #7 加入）覆盖 digest 核对、串行锁、健康门失败自动回滚。展示值的测试（随 #7 加入）覆盖：预发布只接受 `X.Y.Z-rc.N@<sha12>`，正式只接受 `X.Y.Z`。任何规划输出都**不授予**部署批准（`deploymentAuthorized: false`），自动测试也不替代人工试用。
 
 ## 报告
 

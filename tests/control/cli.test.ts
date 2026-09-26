@@ -1,0 +1,164 @@
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { runCli } from "../../app/control/src/cli.js";
+import { openDatabase } from "../../app/control/src/db/database.js";
+import { startControl, type ControlHandle } from "../../app/control/src/services.js";
+import { cleanupTempDirs, fixture, memorySink, realMigrations, type Fixture } from "./helpers.js";
+
+const handles: ControlHandle[] = [];
+afterEach(async () => {
+  for (const handle of handles.splice(0)) await handle.shutdown("test_cleanup").catch(() => undefined);
+  cleanupTempDirs();
+});
+
+async function running(fx: Fixture, listen = true): Promise<ControlHandle> {
+  const handle = await startControl({ env: fx.env, sink: memorySink(), dailyJobs: false, opsChannel: true, port: 0 });
+  handles.push(handle);
+  if (listen) await handle.listen();
+  return handle;
+}
+
+async function cli(fx: Fixture, ...argv: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
+  let stdout = "";
+  let stderr = "";
+  const code = await runCli(argv, { env: fx.env, cwd: fx.dir, stdout: text => void (stdout += text), stderr: text => void (stderr += text) });
+  return { code, stdout, stderr };
+}
+
+describe("CLI：backup、verify-backup（单写者：交给运行中的 control）", () => {
+  it("control 在运行时经本地通道执行：备份记为 cli 操作，CLI 不开写连接", async () => {
+    const fx = fixture();
+    const handle = await running(fx);
+    const backup = await cli(fx, "backup");
+    expect(backup.code).toBe(0);
+    expect(backup.stderr).toBe("");
+    expect(backup.stdout).toMatch(/^备份完成\n {2}文件 geek-bot-manual-.*\.gbbk\n/);
+    const [record] = handle.backups.list();
+    expect(record).toMatchObject({ kind: "manual", schema_version: realMigrations().length });
+    expect(handle.db.prepare("SELECT actor_type, action FROM audit_logs WHERE action = 'backup.create'").all()).toEqual([{ actor_type: "cli", action: "backup.create" }]);
+
+    const deploy = await cli(fx, "backup", "--kind", "pre_deploy");
+    expect(deploy.code).toBe(0);
+    expect(handle.backups.list()[0]?.kind).toBe("pre_deploy");
+
+    const verify = await cli(fx, "verify-backup", record?.file ?? "");
+    expect(verify.code).toBe(0);
+    expect(verify.stdout).toContain(`恢复校验通过：${record?.file}`);
+    expect(verify.stdout).toContain("恢复出的库：user_version");
+    expect(handle.db.prepare("SELECT verify_result FROM backups WHERE file = ?").get(record?.file)).toEqual({ verify_result: "ok" });
+    const latest = await cli(fx, "verify-backup");
+    expect(latest.code).toBe(0);
+    expect(latest.stdout).toContain(handle.backups.list()[0]?.file ?? "missing");
+  });
+
+  it("恢复校验失败时以 1 退出，control 写 critical 告警", async () => {
+    const fx = fixture();
+    const handle = await running(fx);
+    expect((await cli(fx, "backup")).code).toBe(0);
+    const [record] = handle.backups.list();
+    const path = join(fx.backupDir, record?.file ?? "");
+    const bytes = readFileSync(path);
+    bytes[bytes.length - 20] = (bytes[bytes.length - 20] as number) ^ 1;
+    writeFileSync(path, bytes);
+    const verify = await cli(fx, "verify-backup");
+    expect(verify.code).toBe(1);
+    expect(verify.stdout).toContain(`恢复校验失败：${record?.file}`);
+    expect(verify.stdout).toContain("问题：备份文件的 sha256 与登记的不一致");
+    expect(handle.db.prepare("SELECT kind, severity FROM alerts WHERE resolved_at IS NULL").all()).toEqual([{ kind: "backup_verify_failed", severity: "critical" }]);
+  });
+
+  it("control 没在运行时离线执行：独占打开库，做完关库", async () => {
+    const fx = fixture();
+    const handle = await running(fx, false);
+    await handle.shutdown("stopped");
+    const backup = await cli(fx, "backup");
+    expect(backup.code).toBe(0);
+    expect(backup.stderr).toContain("control 没有在运行");
+    expect(backup.stderr).toContain("改为独占打开库在本进程里执行");
+    const verify = await cli(fx, "verify-backup");
+    expect(verify.code).toBe(0);
+    const db = openDatabase(fx.dbPath);
+    expect(db.prepare("SELECT kind, verify_result FROM backups").all()).toEqual([{ kind: "manual", verify_result: "ok" }]);
+    db.close();
+  });
+
+  it("反例：库被别的连接独占、又没有本地通道时，离线执行拿不到锁而失败", async () => {
+    const fx = fixture();
+    const handle = await running(fx, false);
+    await handle.shutdown("stopped");
+    const holder = openDatabase(fx.dbPath);
+    try {
+      const backup = await cli(fx, "backup");
+      expect(backup.code).toBe(1);
+      expect(backup.stderr).toContain("库正被另一个进程占用");
+    } finally {
+      holder.close();
+    }
+  });
+
+  it("用法错误以 2 退出：不认识的命令、--kind 取值不对、verify-backup 给了路径", async () => {
+    const fx = fixture();
+    for (const argv of [["frobnicate"], [], ["backup", "--kind", "daily"], ["backup", "--unknown"], ["verify-backup", "../etc/passwd"], ["verify-backup", "a", "b"]]) {
+      const result = await cli(fx, ...argv);
+      expect(result.code, argv.join(" ")).toBe(2);
+      expect(result.stderr).toContain("用法：geek-bot <命令>");
+    }
+    expect((await cli(fx, "help")).stdout).toContain("restore --dry-run <文件>");
+  });
+});
+
+describe("CLI：restore --dry-run", () => {
+  it("只做恢复校验并报告会恢复到哪个库版本和时间点，不改任何东西", async () => {
+    const fx = fixture();
+    const handle = await running(fx);
+    expect((await cli(fx, "backup")).code).toBe(0);
+    const [record] = handle.backups.list();
+    const filesBefore = readdirSync(fx.backupDir).sort();
+    const rowBefore = handle.db.prepare("SELECT * FROM backups").all();
+    const auditBefore = handle.db.prepare("SELECT count(*) AS n FROM audit_logs").get();
+
+    const result = await cli(fx, "restore", "--dry-run", record?.file ?? "");
+    expect(result.code).toBe(0);
+    const current = realMigrations().length;
+    expect(result.stdout).toContain(`恢复演练（--dry-run）通过：${join(fx.backupDir, record?.file ?? "")}`);
+    expect(result.stdout).toContain(`会恢复到：${new Date(record?.created_at ?? 0).toISOString()} 的库，user_version ${current}，兼容版本 0；这版代码认识到第 ${current} 号迁移`);
+    expect(result.stdout).toContain("库版本与这版代码一致：可以直接启动");
+    expect(result.stdout).toContain("没有改动任何文件");
+    expect(readdirSync(fx.backupDir).sort()).toEqual(filesBefore);
+    expect(handle.db.prepare("SELECT * FROM backups").all()).toEqual(rowBefore);
+    expect(handle.db.prepare("SELECT count(*) AS n FROM audit_logs").get()).toEqual(auditBefore);
+
+    // 用绝对路径指到备份目录以外的一份副本同样可以演练。
+    const copy = join(fx.dir, "offsite.gbbk");
+    writeFileSync(copy, readFileSync(join(fx.backupDir, record?.file ?? "")));
+    expect((await cli(fx, "restore", "--dry-run", copy)).code).toBe(0);
+  });
+
+  it("反例：备份被改动时演练失败；没写 --dry-run 的正式恢复没有实现，以 2 退出", async () => {
+    const fx = fixture();
+    const handle = await running(fx);
+    expect((await cli(fx, "backup")).code).toBe(0);
+    const [record] = handle.backups.list();
+    const path = join(fx.backupDir, record?.file ?? "");
+    const bytes = readFileSync(path);
+    bytes[bytes.length - 1] = (bytes[bytes.length - 1] as number) ^ 1;
+    writeFileSync(path, bytes);
+    const failed = await cli(fx, "restore", "--dry-run", record?.file ?? "");
+    expect(failed.code).toBe(1);
+    expect(failed.stdout).toContain("问题：备份文件解密校验失败");
+    const real = await cli(fx, "restore", record?.file ?? "");
+    expect(real.code).toBe(2);
+    expect(real.stderr).toContain("restore 目前只支持 --dry-run");
+    expect((await cli(fx, "restore", "--dry-run")).code).toBe(2);
+  });
+
+  it("备份密钥文件读不到时以 1 退出，报错只有变量名和路径", async () => {
+    const fx = fixture();
+    const env = { ...fx.env, GEEK_BOT_BACKUP_KEY_FILE: join(fx.dir, "missing_backup_key") };
+    let stderr = "";
+    const code = await runCli(["restore", "--dry-run", "x.gbbk"], { env, cwd: fx.dir, stdout: () => undefined, stderr: text => void (stderr += text) });
+    expect(code).toBe(1);
+    expect(stderr).toBe(`GEEK_BOT_BACKUP_KEY_FILE 指向的密钥文件不存在：${join(fx.dir, "missing_backup_key")}\n`);
+  });
+});
