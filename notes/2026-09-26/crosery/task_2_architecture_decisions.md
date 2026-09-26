@@ -58,3 +58,22 @@
 - 做了什么：git commit：docs(docs): ADR-0002 至 0009 按所有者结论改为 accepted；提交前 pnpm verify
 - 结果：pnpm verify 退出码 0（Test Files 19 passed，Tests 282 passed；执行记录检查通过 2 条链路）
 - 下一步：推送，更新 #25 正文的验证结果与审查结论，CI 绿后合并
+
+## 09:22:32 +08:00 · 推送 · #2 · 推送 ADR 状态提交 f50a867
+
+- 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
+- 做了什么：git push（task/2/architecture_decisions）
+- 结果：b8d3f4a..f50a867 推送成功，pre-push 钩子通过
+
+## 09:22:32 +08:00 · PR · #2 · 更新 #25 正文：验证结果与审查结论改到 f50a867
+
+- 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
+- 做了什么：gh pr edit 25；正文先经 node scripts/pr-contract.mjs check 本地核对
+- 结果：本地 pr-contract：PR 正文契约通过（9 个段落齐全）；gh pr view 25 核对正文含 f50a867 与「结论：通过」
+
+## 09:22:32 +08:00 · 审查 · #2 · 复查 f50a867，#25 审查结论改为通过
+
+- 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
+- 做了什么：按 CODE-REVIEW 第 1–15 项复核 f50a867 相对 50fc49f 的改动；在 #25 发 kind=review 记录
+- 结果：结论：通过；pnpm verify 退出码 0（Tests 282 passed）
+- 下一步：推送这三条记录，CI 全绿后合并进 stage
