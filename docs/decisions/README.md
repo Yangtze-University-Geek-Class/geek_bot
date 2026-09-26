@@ -18,12 +18,12 @@
 | 编号 | 标题 | 状态 |
 |---|---|---|
 | 0001 | [geek_bot 独立成可自部署的通用产品](0001-standalone-product.md) | `accepted`（2026-09-25） |
-| 0002 | [机器人身份用 OAuth App 用户令牌；默认「登录即成为机器人」](0002-github-identity.md) | `proposed`（2026-09-26，待所有者在 #2 的 PR 上给结论） |
-| 0003 | [控制面单进程单写者；节点只出站拉任务；control 是唯一 GitHub 写入方](0003-single-writer-control.md) | `proposed`（2026-09-26，待所有者在 #2 的 PR 上给结论） |
-| 0004 | [执行隔离：issue 通道用独立无网 sandbox 容器，PR 通道用节点容器内的 QEMU/KVM 一次性 VM](0004-execution-isolation.md) | `proposed`（2026-09-26，待所有者在 #2 的 PR 上给结论） |
-| 0005 | [规则来源只信 base 分支；机器可执行字段只来自结构化配置](0005-rules-from-base-branch.md) | `proposed`（2026-09-26，待所有者在 #2 的 PR 上给结论） |
-| 0006 | [模型目录只读 catalog 文件；密钥只在 control；每任务令牌中继](0006-model-catalog-relay.md) | `proposed`（2026-09-26，待所有者在 #2 的 PR 上给结论） |
-| 0007 | [部署：ghcr 同一 digest 跨环境、目标机拉取式部署、CI 不部署](0007-ghcr-pull-deploy.md) | `proposed`（2026-09-26，待所有者在 #2 的 PR 上给结论） |
-| 0008 | [数据：SQLite 版本化迁移只扩不缩；GitHub 标记注释可重建状态；每日恢复校验](0008-sqlite-migrations-recovery.md) | `proposed`（2026-09-26，待所有者在 #2 的 PR 上给结论） |
-| 0009 | [管理后台用 Vue 3 + Tuffex 0.6.0，由 control 同源托管](0009-tuffex-console.md) | `proposed`（2026-09-26，待所有者在 #2 的 PR 上给结论） |
+| 0002 | [机器人身份用 OAuth App 用户令牌；默认「登录即成为机器人」](0002-github-identity.md) | `accepted`（2026-09-26） |
+| 0003 | [控制面单进程单写者；节点只出站拉任务；control 是唯一 GitHub 写入方](0003-single-writer-control.md) | `accepted`（2026-09-26） |
+| 0004 | [执行隔离：issue 通道用独立无网 sandbox 容器，PR 通道用节点容器内的 QEMU/KVM 一次性 VM](0004-execution-isolation.md) | `accepted`（2026-09-26） |
+| 0005 | [规则来源只信 base 分支；机器可执行字段只来自结构化配置](0005-rules-from-base-branch.md) | `accepted`（2026-09-26） |
+| 0006 | [模型目录只读 catalog 文件；密钥只在 control；每任务令牌中继](0006-model-catalog-relay.md) | `accepted`（2026-09-26） |
+| 0007 | [部署：ghcr 同一 digest 跨环境、目标机拉取式部署、CI 不部署](0007-ghcr-pull-deploy.md) | `accepted`（2026-09-26） |
+| 0008 | [数据：SQLite 版本化迁移只扩不缩；GitHub 标记注释可重建状态；每日恢复校验](0008-sqlite-migrations-recovery.md) | `accepted`（2026-09-26） |
+| 0009 | [管理后台用 Vue 3 + Tuffex 0.6.0，由 control 同源托管](0009-tuffex-console.md) | `accepted`（2026-09-26） |
 | 0010 | [本仓库开发流程用的追踪记录头](0010-tracking-record-prefix.md) | `accepted`（2026-09-25） |

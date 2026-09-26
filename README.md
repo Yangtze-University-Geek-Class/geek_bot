@@ -29,7 +29,7 @@ geek_bot 是一个可以自己部署的通用产品。部署者在 Web 后台用
 ## 现状
 
 - **骨架阶段（#1）**：pnpm 工作区、规范文档、门禁脚本、CI 与 issue / PR 模板。五个包只有最小源码和测试，没有业务功能，也没有生产依赖。
-- 架构、安全模型、后台 API、节点协议、写入白名单和默认行为已写成设计文档（[ARCHITECTURE](docs/architecture/ARCHITECTURE.md)、[SECURITY](docs/architecture/SECURITY.md)、[API](docs/architecture/API.md)），决策记为 ADR-0002 到 ADR-0009；还没有代码，状态都是 `proposed`。
+- 架构、安全模型、后台 API、节点协议、写入白名单和默认行为已写成设计文档（[ARCHITECTURE](docs/architecture/ARCHITECTURE.md)、[SECURITY](docs/architecture/SECURITY.md)、[API](docs/architecture/API.md)），决策记为 ADR-0002 到 ADR-0009（所有者 2026-09-26 全部接受，`accepted`）；设计文档还没有对应代码，状态是 `proposed`。
 - 功能按 #22 的路线图逐个 issue 推进：控制面（#3）、后台外壳（#4）、机器人账号登录（#5）、仓库发现（#6）、预发布栈与部署（#7）、节点（#11）；第一个能看到效果的里程碑是 PR 收到机器人的只评论审查（#15）；正式上线是 #20，达到可公开状态是 #21。
 - **部署**：部署文件与部署文档随 #7 加入，现在仓库里没有可部署的东西。
 

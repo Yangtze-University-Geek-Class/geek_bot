@@ -39,3 +39,22 @@
 - 执行者：agent-claude-geek-bot-main（Claude Code，claude-opus-5-5）
 - 做了什么：上一条记录写的是更新 PR #25 正文，但当时改正文的脚本断言失败、没写入，gh pr edit 提交的是旧正文。这次修好脚本后重新 gh pr edit 25
 - 结果：gh pr view 25 核对：正文已含「被审查提交：50fc49f」和「Tests 282 passed」；本地 pr-contract 通过
+
+## 09:20:42 +08:00 · 开发 · #2 · ADR-0002 至 0009 改为 accepted，同步引用它们的文档
+
+- 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
+- 做了什么：8 篇 ADR 状态行与「所有者结论」首行改为接受；ADR-0001、ADR-0007、ADR-0008、ADR-0009 里等待确认的句子改为已确认；decisions/README 目录表、AGENTS §3、README 与 README.en 同步；pnpm docs:index
+- 结果：git diff 共 13 个文件；待跑 pnpm verify
+
+## 09:20:42 +08:00 · 验收 · #2 · 所有者接受 ADR-0002 至 0009 并确认 env 模板只放占位符
+
+- 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
+- 做了什么：所有者在维护会话里选择「ADR 全部接受」并确认 #22 第 3 项；agent 代贴 kind=accept 记录到 #25（注明代贴）
+- 结果：#25 评论 issuecomment-5841894048 已发出
+
+## 09:21:25 +08:00 · 提交 · #2 · ADR 状态改为 accepted 一起提交
+
+- 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
+- 做了什么：git commit：docs(docs): ADR-0002 至 0009 按所有者结论改为 accepted；提交前 pnpm verify
+- 结果：pnpm verify 退出码 0（Test Files 19 passed，Tests 282 passed；执行记录检查通过 2 条链路）
+- 下一步：推送，更新 #25 正文的验证结果与审查结论，CI 绿后合并
