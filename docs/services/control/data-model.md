@@ -10,7 +10,7 @@
 
 ## 存储与通用约定
 
-- **一个环境一个库。** 容器内 `/data/geek-bot.db`（`GEEK_BOT_DB_PATH`），放在该环境自己的命名卷里；preview 与 production 各一个库，互不共享（挂载方式由 #7 定）。
+- **一个环境一个库。** 容器内 `/data/geek-bot.db`（`GEEK_BOT_DB_PATH`），放在该环境自己的命名卷里；preview 与 production 各一个库，互不共享。镜像里 `/data` 属运行用户、权限 0700（#3）；compose 里的命名卷随 #7。
 - **只有 control 进程写库。** console、node、runner、部署脚本都不打开库。#3 定稿的做法：control 以 `locking_mode=EXCLUSIVE` 打开库，第一次访问后一直持有文件锁到关库为止，同一个库的任何别的连接或进程都打不开（等满 `busy_timeout` 后 SQLITE_BUSY）；会写库的 CLI 子命令（`backup`、`verify-backup`，以后的 `bootstrap-code`）经容器内的本地通道（`<库所在目录>/run/control.sock`，unix socket 上的 HTTP，`run/` 权限 0700）交给运行中的 control 执行，CLI 自己不开写连接；control 没在运行时，CLI 以同样的独占方式打开库自己执行，拿不到锁就失败。`restore` 与 `rotate-master-key` 只在 control 停止时以独占方式运行（#20、#5）。实现与测试见 [control 服务契约](README.md)「运维命令与单写者」。
 - **连接参数。** `journal_mode=WAL`、`synchronous=FULL`、`foreign_keys=ON`、`busy_timeout=5000`（毫秒），加上 `locking_mode=EXCLUSIVE`（见上一条；WAL 下先设独占再访问库，SQLite 不建 `-shm` 文件）。停机时 `wal_checkpoint(TRUNCATE)` 后关库。
 - **类型。**

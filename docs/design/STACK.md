@@ -27,14 +27,15 @@
 | Node 类型 | `@types/node` | `^22.10.0` | 22.20.4 |
 | 测试 | vitest，根 `vitest.config.ts` 收集 `tests/**/*.test.ts`，在 Node 环境里跑 | `vitest: ^3.2.4` | 3.2.7 |
 | 包间依赖 | 四个 app 依赖 `@geek-bot/protocol: workspace:*` | `workspace:*` | 工作区链接 |
-| CI | GitHub Actions：`pnpm install --frozen-lockfile` 后跑 `pnpm check`、`pnpm test`、`pnpm build`；另有浏览器回归（`console-e2e`）、分支不变量检查和 actionlint 工作流自检；不挂载任何 secrets，权限只有 `contents: read` | `.github/workflows/ci.yml` | 第三方 action 按提交 SHA 钉死；actionlint 版本和 SHA-256 写在工作流里 |
+| CI | GitHub Actions：`pnpm install --frozen-lockfile` 后跑 `pnpm check`、`pnpm test`、`pnpm build`；另有浏览器回归（`console-e2e`）、control 镜像的构建验证（`docker`，只构建不推送，#3）、分支不变量检查和 actionlint 工作流自检；不挂载任何 secrets，权限只有 `contents: read` | `.github/workflows/ci.yml` | 第三方 action 按提交 SHA 钉死；actionlint 版本和 SHA-256 写在工作流里 |
 | 管理后台（#4） | Vue、vue-router、@talex-touch/tuffex，只在 `app/console` | `vue: ^3.5.27`（Tuffex 的 peer 下限）、`vue-router: ^4.6.4`、`@talex-touch/tuffex: 0.6.0`（钉死） | vue 3.5.43、vue-router 4.6.4、tuffex 0.6.0。Tuffex 上游声明 Node >=26，在 Node 22 上的实测结论见 [console 服务契约](../services/console/README.md)「Tuffex 0.6.0 在 Node 22 上的实测」 |
 | 依赖补丁（#4） | 根 `package.json` 的 `pnpm.packageExtensions`：把 `@talex-touch/utils@2` 的 peer `electron` 标为可选，不再自动安装 Electron | 同左 | 锁文件的 `packageExtensionsChecksum` 随它变化 |
 | 前端构建（#4） | Vite、@vitejs/plugin-vue、vue-tsc；console 的类型检查是 vue-tsc；Tuffex 的按需样式用它自带的 Vite 插件 | `vite: ^7.3.6`、`@vitejs/plugin-vue: ^6.0.9`、`vue-tsc: ^3.3.11` | vite 7.3.6、plugin-vue 6.0.9、vue-tsc 3.3.11 |
 | 图标（#4） | UnoCSS 的图标预设 + Carbon 图标集；只用图标预设，不引入原子类样式体系 | `@unocss/vite`、`@unocss/preset-icons`: `^66.10.5`；`@iconify-json/carbon: ^1.2.27` | 66.10.5；carbon 1.2.27 |
 | 浏览器回归（#4） | Playwright（只装 Chromium），入口 `pnpm test:e2e`；浏览器下载到用户缓存目录，不进仓库 | `@playwright/test: ^1.63.0`（根开发依赖） | 1.63.0 |
 | 控制面 HTTP（#3） | Fastify 5，只在 `app/control`；构造（`src/app.ts`）与监听（`src/index.ts`）分离，路由测试用 `inject`；日志用 control 自带的结构化日志（`loggerInstance`），请求日志关闭改由 `onResponse` 记录 | `fastify: ^5.12.5` | 5.12.5 |
-| 持久化（#3） | SQLite（WAL、独占锁）+ better-sqlite3，只在 `app/control`；只有 control 进程写库 | `better-sqlite3: ^13.0.3`（`engines.node >=22`，N-API）；类型 `@types/better-sqlite3: ^9.6.0`（开发依赖） | better-sqlite3 13.0.3（内嵌 SQLite 3.53.4）；@types 9.6.0。13.x 的包里自带 linux（glibc、musl）、darwin、win32 的 x64 与 arm64 预编译二进制，运行时直接加载；本机 `pnpm install` 时包里的 `binding.gyp` 仍会触发一次 node-gyp，检测到预编译二进制后不编译（实测只写两个 stamp 文件），但需要本机有 python3 与 make |
+| 持久化（#3） | SQLite（WAL、独占锁）+ better-sqlite3，只在 `app/control`；只有 control 进程写库 | `better-sqlite3: ^13.0.3`（`engines.node >=22`，N-API）；类型 `@types/better-sqlite3: ^9.6.0`（开发依赖） | better-sqlite3 13.0.3（内嵌 SQLite 3.53.4）；@types 9.6.0。13.x 的包里自带 linux（glibc、musl）、darwin、win32 的 x64 与 arm64 预编译二进制，运行时直接加载；本机 `pnpm install` 时包里的 `binding.gyp` 仍会触发一次 node-gyp，检测到预编译二进制后不编译（实测只写两个 stamp 文件），但需要本机有 python3 与 make；镜像构建用 `--ignore-scripts` 跳过这一步 |
+| 容器（#3） | control 镜像：多阶段构建，基础镜像 `node:22-bookworm-slim` 按 index digest 钉死，非 root，带 HEALTHCHECK | `app/control/Dockerfile` 的 `ARG NODE_IMAGE` | `node:22-bookworm-slim@sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddfe4238355d3a30b772c`（2026-09-26 从 Docker Hub 解析；arm64 变体里 Node 为 22.23.3） |
 
 包之间的导入方向见 [模块化开发规范](../conventions/MODULAR-DEVELOPMENT.md)；命令与验收见 [TESTING](../conventions/TESTING.md)。
 
@@ -44,7 +45,7 @@
 
 | 层 | 选型 | issue | 引入时要核对的事 |
 |---|---|---|---|
-| 容器与发布 | Docker、Docker Compose v2、ghcr | #3（control 镜像）、#7（release.yml、compose、部署脚本） | 镜像非 root、带健康检查；同一 digest 跨环境 |
+| 容器与发布 | Docker Compose v2、ghcr；node 镜像 | #7（release.yml、compose、部署脚本）、#11（node 镜像） | 镜像非 root、带健康检查；同一 digest 跨环境 |
 | sandbox 执行器 | 无网、根只读的独立容器 | #14 | 容器里没有任何令牌文件 |
 | VM 执行器 | QEMU/KVM 一次性 VM，默认 1 vCPU / 2 GiB | #12 实测，#17 实现 | 节点容器里能否用 `/dev/kvm`、用户态网络能否隔离、2 GiB 是否够用，以 #12 的实测为准 |
 | agent | omp，版本钉死，按 SHA256SUMS 校验后打进 node 镜像和 VM 基础镜像 | #14 | 设计草案选的版本是 18.3.0，以 #14 的实现为准 |

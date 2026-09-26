@@ -31,3 +31,9 @@
 - 执行者：agent-claude-geek-bot-821e-control3（Claude Code，claude-opus-5-5）
 - 做了什么：feat(control): 迁移器、健康检查、加密备份、日志打码与优雅停机（依赖 fastify、better-sqlite3、@types/better-sqlite3；src 下 config、secrets、db、log、ops、routes、app、services、index、cli；tests/control 六个测试文件；dev:control；.env.example；control 契约、data-model、behavior、STACK、TESTING、LOCAL-DEV、ADR-0002/0003/0008/0009 等文档）；镜像与 CI 的 docker job 留在下一个提交
 - 结果：完整改动上 pnpm verify 退出码 0（Test Files 29 passed，Tests 389 passed）、pnpm test:e2e 42 passed；这个提交单独的树另在临时 worktree 里核对
+
+## 12:25:00 +08:00 · 提交 · #3 · control 镜像与 CI 的 docker job
+
+- 执行者：agent-claude-geek-bot-821e-control3（Claude Code，claude-opus-5-5）
+- 做了什么：build(control): control 镜像与 CI 的 docker job（app/control/Dockerfile 多阶段、非 root、HEALTHCHECK，基础镜像按 digest 钉死；.dockerignore；src/healthcheck.ts；ci.yml 加 docker job 并纳入 verify 的 needs 与汇总；tests/tooling/ci-docker.test.ts；CICD、LOCAL-DEV、STACK、TESTING、ADR-0007 等文档）；前两个提交的树在临时 worktree 里各跑了一次 pnpm verify
+- 结果：993c789 与 4196ea1 的树 pnpm verify 退出码都是 0（Tests 319、385 passed）；完整改动 pnpm verify 退出码 0（Tests 389 passed），pnpm test:e2e 42 passed，actionlint 1.7.12 退出码 0；本机 docker build 成功，docker run 后 /readyz 200、Config.User=node、HEALTHCHECK 为 CMD、状态 healthy

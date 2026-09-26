@@ -17,13 +17,13 @@ control 从不运行 omp，也不执行目标仓库里的任何代码。
 
 ## 现在有什么
 
-#3 建了控制面的骨架：配置、密钥文件、库与迁移、审计与告警表、结构化日志与打码、加密备份与每日恢复校验、`/healthz` 与 `/readyz`、运维命令和优雅停机。登录、GitHub 调用、后台页面都还没有（#5 起）。
+#3 建了控制面的骨架：配置、密钥文件、库与迁移、审计与告警表、结构化日志与打码、加密备份与每日恢复校验、`/healthz` 与 `/readyz`、运维命令、优雅停机和镜像。登录、GitHub 调用、后台页面都还没有（#5 起）。
 
 | 路径 | 内容 |
 |---|---|
 | `app/control/package.json` | 包名 `@geek-bot/control`；生产依赖 `fastify`、`better-sqlite3`，开发依赖 `@types/better-sqlite3`；脚本 `typecheck`（`tsc --noEmit`）、`build`（`tsc` 后把 `src/db/migrations/*.sql` 复制进 `dist/db/migrations/`） |
 | `app/control/tsconfig.json` | 继承根 `tsconfig.base.json`，`src/` 编译到 `dist/` |
-| `src/index.ts` | 进程入口：`startControl` → `listen` → 接 SIGTERM、SIGINT；拒绝启动时以 1 退出 |
+| `src/index.ts` | 进程入口：`startControl` → `listen` → 接 SIGTERM、SIGINT；拒绝启动时以 1 退出。镜像的 CMD 运行它 |
 | `src/services.ts` | 启动与停机的全部步骤（见下文「启动、就绪与停机」）；`startControl` 返回句柄，测试直接调用 |
 | `src/app.ts` | Fastify 组装：日志、服务端生成的 `X-Request-Id`、[API](../../architecture/API.md) 的错误格式、Ajv `removeAdditional: false`、请求体 64 KB 上限、只接受 JSON 请求体；注册路由模块 |
 | `src/config.ts` | 产品默认值 `CONTROL_DEFAULTS` 与环境变量表 `CONTROL_ENV`（轮询、静默窗口、提醒与关闭天数、追问轮数、VM 规格，以及 #3 加的备份保留份数与每日备份时刻）；部署配置 `createDeploymentConfig`（实例角色、监听地址与端口、origin、明文模式、库路径、两个密钥文件路径、日志级别、镜像版本）；`loadControlConfig` 一次读出两部分，问题合在一个 `ControlConfigError` 里一起报。都是纯函数，不读 `process.env`、不读文件 |
@@ -38,8 +38,10 @@ control 从不运行 omp，也不执行目标仓库里的任何代码。
 | `src/routes/health/{index,contracts}.ts` | `/healthz`、`/readyz`（A-53、A-54） |
 | `src/http/errors.ts` | 错误响应的形状与 JSON Schema |
 | `src/cli.ts` | 运维命令 `backup`、`verify-backup`、`restore --dry-run`（见下文「运维命令」） |
+| `src/healthcheck.ts` | 镜像 HEALTHCHECK 的探针：请求本进程的 `/readyz` |
 | `scripts/copy-migrations.mjs` | 构建的最后一步：复制迁移文件 |
 | `scripts/dev.mjs` | `pnpm dev:control` 的启动器（见 [LOCAL-DEV](../../ops/LOCAL-DEV.md)） |
+| `Dockerfile` | control 镜像（见下文「镜像」） |
 | `tests/control/` | `config.test.ts`、`logging.test.ts`、`database.test.ts`、`backup.test.ts`、`server.test.ts`、`cli.test.ts` 与夹具 `helpers.ts`，覆盖面见 [TESTING](../../conventions/TESTING.md) |
 
 新增或删除文件时同步更新本表。
@@ -75,7 +77,7 @@ control 从不运行 omp，也不执行目标仓库里的任何代码。
 
 ## 运维命令与单写者
 
-入口是构建后的 `app/control/dist/cli.js`（`node app/control/dist/cli.js <命令>`），在运行 control 的同一个数据目录上执行，环境变量与 control 一致。退出码：0 成功，1 失败，2 用法错误。
+镜像里的 `geek-bot` 等于 `node /app/app/control/dist/cli.js`，在容器里运行（例如 `docker compose exec control geek-bot backup`，compose 随 #7）。退出码：0 成功，1 失败，2 用法错误。
 
 | 命令 | 做什么 |
 |---|---|
@@ -88,6 +90,17 @@ control 从不运行 omp，也不执行目标仓库里的任何代码。
 ## 日志与打码
 
 每条日志一行 JSON：`time`（ISO 8601 UTC）、`level`、`msg`（中文）和上下文字段；Fastify 的请求日志关掉，改由 `onResponse` 记一行 `method`、`path`（去掉查询串）、`status`、`duration_ms` 与 `reqId`。整条写出之前打码（S-16）：`ghp_`、`gho_`、`ghu_`、`ghs_`、`ghr_`、`github_pat_`、`gbn_`、`gbt_`、`sk-`、`Bearer <凭据>`、私钥块，以及已登记的密钥原值（#3 起是两个密钥文件的内容）；对象里 `authorization`、`cookie`、`*_token`、`*_secret`、`*_password`、`*_key` 这类键的值整体替换。审计的 `detail_json`、`target` 和告警的 `message` 写库前同样打码。
+
+## 镜像
+
+`app/control/Dockerfile`，构建上下文是仓库根（`docker build -f app/control/Dockerfile .`）：
+
+- 多阶段：`deps` 只装 control 的生产依赖（`--ignore-scripts`：better-sqlite3 13 自带各平台的预编译二进制）；`build` 编译 protocol 与 control；`runtime` 只拷生产依赖和 `dist/`。
+- 基础镜像 `node:22-bookworm-slim` 按 index digest 钉死（S-18）；`--build-arg NODE_IMAGE=…` 可以换成同一 digest 的本机副本。
+- 以 `node` 用户（uid 1000）运行；`/data` 属 `node`、权限 0700，部署时挂命名卷；代码文件属 root，运行用户只读。
+- `HEALTHCHECK` 每 15 秒运行 `node dist/healthcheck.js` 请求本进程的 `/readyz`（超时 5 秒，启动宽限 60 秒，连续 3 次失败算不健康）。
+- 不设 `GEEK_BOT_HOST`：镜像默认只绑回环地址，部署时由 compose 设成 `0.0.0.0` 并配置 origin（#7）。
+- 镜像里没有环境身份、域名、密钥和 console 产物。CI 的 `docker` job 只构建、不推送，断言非 root 与 HEALTHCHECK 并起一次容器（[CICD](../../ops/CICD.md)）；推镜像随 #7 的 `release.yml`。
 
 ## 计划中的模块与对应 issue
 
@@ -141,15 +154,18 @@ control 从不运行 omp，也不执行目标仓库里的任何代码。
 
 ```bash
 pnpm --filter @geek-bot/control typecheck
-pnpm exec vitest run tests/control
+pnpm exec vitest run tests/control tests/tooling/ci-docker.test.ts
 pnpm --filter @geek-bot/protocol build && pnpm --filter @geek-bot/control build
+docker build -f app/control/Dockerfile -t geek-bot-control:local .   # 需要能拉到基础镜像
 ```
+
+镜像的实机检查（`docker run` 后 `/readyz`、`docker inspect` 的用户与健康检查、删掉 master key 后拒绝启动）步骤见 [LOCAL-DEV](../../ops/LOCAL-DEV.md)「control 镜像」。
 
 ## 已知限制
 
 - 登录、会话、GitHub 调用、后台页面都没有；上文「计划中」的模块、接口、默认行为落地前不能当作现状引用。
 - A-55 `/api/release` 没有实现：展示值的组合规则依赖发布 tag 的语法，而 tag 规则只在 `scripts/release-tags.mjs` 实现（[RELEASES](../../conventions/RELEASES.md)），control 不复制第二份；展示值由部署脚本写入，随 #7 一起定。console 请求它会得到 404，页脚不显示版本。
-- control 还不托管 console 的静态产物（打进镜像和同源托管都随 #7）。
+- console 的静态产物没有打进镜像，control 也不托管静态文件（随 #7）。
 - API.md 要求的「每个请求校验 `Host` 与 origin 一致」「对请求体关闭 Ajv 的类型强制转换」「按会话限速的额度」都要等第一个会话端点（#5）才有意义，#3 没有实现；#3 只做了 `removeAdditional: false`、415、413、400 的全局设置。
 - 告警只写进 `alerts` 表，后台显示与确认（A-50、A-51）和审计查询（A-52）还没有，它们都要会话鉴权；每日恢复校验失败时要看日志或用 `geek-bot verify-backup` 查。
 - 每日备份的时刻按 UTC 整点判定；control 停机错过的那次在下一次启动后补做，补做的时间点不是整点。

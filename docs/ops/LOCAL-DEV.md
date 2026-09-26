@@ -60,6 +60,33 @@ pnpm install --frozen-lockfile
 - control 的运维命令（`backup`、`verify-backup`、`restore --dry-run`）在本机用构建产物运行，环境变量要和 `dev:control` 一致，例如 `GEEK_BOT_INSTANCE_ROLE=preview GEEK_BOT_DB_PATH=./data/geek-bot.db GEEK_BOT_MASTER_KEY_FILE=./data/dev-secrets/master_key GEEK_BOT_BACKUP_KEY_FILE=./data/dev-secrets/backup_key node app/control/dist/cli.js backup`；control 在运行时命令经 `data/run/control.sock` 交给它执行，没在运行时独占打开库自己执行（[control 服务契约](../services/control/README.md)「运维命令与单写者」）。
 - 还没有的命令：`check:environments` 与 `release:plan`（#7）、`test:vm`（#12）。
 
+## control 镜像
+
+构建上下文是仓库根，只构建、不推送（推镜像只在 `release.yml`，#7）：
+
+```bash
+docker build -f app/control/Dockerfile -t geek-bot-control:local .
+```
+
+- 基础镜像按 digest 钉死，要能从 Docker Hub 拉到它；拉不到时，可以先把同一 digest 的镜像放进本机，再用 `--build-arg NODE_IMAGE=<本机镜像名>` 构建（内容与钉死的 digest 一致才算同一个基础镜像）。
+- 本机起一次容器做实机检查（密钥是临时生成的一次性值，用完删掉容器、卷和文件）：
+
+  ```bash
+  secrets=$(mktemp -d) && (umask 077; openssl rand -base64 32 > "$secrets/master_key"; openssl rand -base64 32 > "$secrets/backup_key")
+  docker run -d --name geek-bot-control-local -p 127.0.0.1:18080:8080 \
+    -e GEEK_BOT_INSTANCE_ROLE=preview -e GEEK_BOT_HOST=0.0.0.0 -e GEEK_BOT_PUBLIC_ORIGIN=https://geek-bot.example.com \
+    -v "$secrets/master_key:/run/secrets/master_key:ro" -v "$secrets/backup_key:/run/secrets/backup_key:ro" \
+    -v geek-bot-control-local-data:/data geek-bot-control:local
+  curl -i http://127.0.0.1:18080/readyz                                   # 200 {"status":"ready"}
+  docker inspect --format '{{.Config.User}} {{json .Config.Healthcheck}} {{.State.Health.Status}}' geek-bot-control-local
+  docker exec geek-bot-control-local geek-bot backup                       # 运维命令经本地通道交给运行中的 control
+  docker stop geek-bot-control-local                                       # SIGTERM：checkpoint 后以 0 退出
+  docker rm geek-bot-control-local && docker volume rm geek-bot-control-local-data && rm -rf "$secrets"
+  ```
+
+- 绑定 `0.0.0.0` 必须配 `GEEK_BOT_PUBLIC_ORIGIN`（S-20）；本机 `curl` 走的是端口映射，origin 只是占位。
+- 删掉 master key 文件（或不挂它）再起，容器以 1 退出，`docker logs` 里只有变量名和路径，没有密钥内容。
+
 ## Git 钩子
 
 ```bash
