@@ -2,7 +2,7 @@
 
 > 发版只靠打 tag：`vX.Y.Z-rc.N` 打在 `stage` 的提交上发预发布，所有者在预发布验收通过后，在同一提交上打 `vX.Y.Z` 发正式。tag 不可移动、不可删除，版本号不自动提升；正式实例运行的就是预发布验过的那个镜像 digest。
 
-状态：`current` · 更新：2026-09-26 · 适用：本仓库的发布 tag、版本号、镜像与预发布 / 正式实例 · 依据：[ADR-0001](../decisions/0001-standalone-product.md)（独立产品，env 模板只放占位符）；部署方式是 ghcr 同一 digest 加目标机拉取，详细决策 ADR-0007 由 #2 写入。分支规则见 [BRANCHING](BRANCHING.md)。
+状态：`current` · 更新：2026-09-26 · 适用：本仓库的发布 tag、版本号、镜像与预发布 / 正式实例 · 依据：[ADR-0001](../decisions/0001-standalone-product.md)（独立产品，env 模板只放占位符）；部署方式是 ghcr 同一 digest 加目标机拉取，详细决策见 [ADR-0007](../decisions/0007-ghcr-pull-deploy.md)。分支规则见 [BRANCHING](BRANCHING.md)。
 
 本文中标「计划中」的部分（release.yml、部署与回滚脚本、compose、env 模板、发布规划器、版本接口）还不存在，分别由 #3、#7、#11、#17、#20 实现；tag 格式、授权门禁、rc 编号、版本号与 tag 不可变这些规则现在就生效。
 
@@ -53,7 +53,7 @@
    ```
 
 9. `release.yml` 核对同一提交已有同版本 rc 的镜像，只给同一 digest 加 `:v0.2.0` 别名，不重新构建（计划中，#7）。
-10. 所有者授权部署正式实例后，维护者在目标机运行部署脚本。脚本先核对预发布实例正在运行同一 digest，不一致就拒绝部署（计划中，#20）。
+10. 所有者授权部署正式实例后，维护者在目标机运行部署脚本。脚本先核对部署历史：预发布实例部署并验收过的正是这组 digest，不是就拒绝部署；不要求预发布实例此刻还在运行（计划中，#20，见 [ADR-0007](../decisions/0007-ghcr-pull-deploy.md)）。
 
 ## 授权门禁
 
@@ -67,7 +67,7 @@
 - 每个 `X.Y.Z` 的 rc 从 `rc.1` 开始按顺序递增，已推送的编号不复用。一次只推一个发布 tag（一次推送超过三个 tag 时 GitHub 不触发工作流）。
 - 内容有任何变化都要打新的 rc。同一个 rc 需要重新部署时，在目标机对同一 digest 重新运行部署脚本，不重新构建。只有这个 tag 的构建没有触发、或没有成功推出镜像时，才手工运行 `release.yml`：「Use workflow from」选这个 tag，输入框里也填这个 tag（计划中，#7）。前提是 `release.yml` 已经进入 `main`（GitHub 只对默认分支上的工作流提供手工运行入口，见 [CICD](../ops/CICD.md)「触发与职责」）；第一个正式版之前没有这个入口，处理办法由 #7 写明。已经推出镜像的 rc 不再重新构建，否则它的别名会指向另一个 digest。不要为了重新部署或重新构建而新建或移动 tag。
 - 某个版本打过正式 tag 后，不能再给它打 rc。下一次发版先升 `version`。
-- 正式 tag 必须和其中一个 rc 落在同一提交上，而且部署正式实例时预发布实例必须仍在运行这个提交的 digest（部署脚本核对，计划中，#20）。如果之后又有别的 rc 部署到了预发布，要么正式发布那个 rc 的提交，要么先把被验收的 rc 重新部署回预发布。
+- 正式 tag 必须和其中一个 rc 落在同一提交上，而且部署历史里要有预发布实例部署并验收过这个提交的 digest 的记录（部署脚本核对，计划中，#20）；预发布实例平时可以关着，之后又部署过别的 rc 也不影响，只要被验收的那组 digest 有记录。
 
 ## 版本号
 
@@ -138,7 +138,7 @@ Agent 可以整理候选改动、测试结果、差异和空白模板，**不能
 
 - tag 语法与相关的 Git 查询只在 `scripts/release-tags.mjs` 实现，`scripts/check-branch-invariants.mjs` 引用它：CI 的分支守卫用 `--require-remote-refs`，本地 pre-push 用 `--push`。它只读 Git 证据，不 fetch、不改 refs、不创建 tag。
 - 发布规划器（`release:plan`，随 #7 加入）是只读的：核对 tag 格式、tag 指向传入的提交、`X.Y.Z` 等于该提交的 `package.json` `version`、rc 提交在 `stage` 上且该版本还没有正式 tag、正式提交在 `main` 上且同一提交有同版本的 rc tag，并给出 ghcr 镜像引用。输出里 `deploymentAuthorized` 恒为 `false`。它不创建 tag、不写文件、不连服务器，也不证明人工批准；拒绝分支名、`latest`、短 SHA 与格式错误的 tag。
-- 「正式复用 rc 的 digest」由 `release.yml` 核对（计划中，#7）；「预发布实例正在运行同一 digest」由部署脚本在目标机核对（计划中，#20）。
+- 「正式复用 rc 的 digest」由 `release.yml` 核对（计划中，#7）；「预发布实例验收过同一 digest」由部署脚本按部署历史在目标机核对（计划中，#20）。
 - **规范不等于远程保护已启用**：GitHub 计划能力需维护者实测确认（见 [CICD](../ops/CICD.md)）。
 - 机器检查（`pnpm verify`、CI 全绿、构建成功、规划器输出）**不构成**人工验收记录，也不授权任何部署或发版动作。
 - `deploy/environments.json`（计划中，#7）只保存环境身份，不写真实域名；发布 tag 规则只在 `scripts/release-tags.mjs` 实现，不在别处复制第二份。

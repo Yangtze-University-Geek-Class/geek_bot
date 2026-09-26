@@ -31,7 +31,7 @@ Approving and merging always stay with humans. Each repository is handled by its
 ## Status
 
 - **Skeleton stage (#1)**: pnpm workspace, conventions, gate scripts, CI and issue / pull request templates. The five packages contain minimal source and tests only; there is no product feature and no production dependency yet.
-- Architecture and security model are drafts ([ARCHITECTURE](docs/architecture/ARCHITECTURE.md), [SECURITY](docs/architecture/SECURITY.md), status `proposed`), finalized in #2.
+- Architecture, security model, console API, node protocol, write whitelist and default behavior are written as design documents ([ARCHITECTURE](docs/architecture/ARCHITECTURE.md), [SECURITY](docs/architecture/SECURITY.md), [API](docs/architecture/API.md), status `proposed` until implemented); the decisions are ADR-0002 to ADR-0009, accepted by the owner on 2026-09-26.
 - Features land issue by issue following the roadmap in #22: control plane (#3), console shell (#4), bot account sign-in (#5), repository discovery (#6), preview stack and deployment (#7), nodes (#11). The first visible milestone is a pull request receiving a comment-only review from the bot (#15); production launch is #20 and public readiness is #21.
 - **Deployment**: deployment files and docs arrive with #7. Nothing in the repository can be deployed yet.
 

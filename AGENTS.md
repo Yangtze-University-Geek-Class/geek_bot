@@ -55,7 +55,7 @@
 
 - 部署文件（compose、env 模板、部署与回滚脚本、`release.yml`）随 #7 加入。在那之前仓库里没有可部署的东西，任何人都不部署。
 - 环境变量只走 `deploy/env/.env.production` / `deploy/env/.env.preview`（随 #7 加入），由 `docker compose --env-file` 消费；不得另建环境文件或在别处定义第二份环境变量。根 `.env.example` 只用于本机开发。
-- **env 模板只放占位符和通用默认值**：实例的真实非密值（origin、主机、端口、路径）只在目标机的 `.env.<环境>` 里；**密钥一律用 `*_FILE` 指向目标机上的密钥文件，模板里的密钥项只能留空或写 `*_FILE` 路径**。理由（[ADR-0001](docs/decisions/0001-standalone-product.md)）：仓库以后可能公开，模板随仓库公开、也会被每个部署者原样拿去用，写进实例值就等于公开内部主机和网段；免费计划的私有仓库也没有 Environments，CI 没法按环境填值。#22 第 3 项按推荐推进（所有者未提出修改），#1 的 PR 里再请所有者确认一次。
+- **env 模板只放占位符和通用默认值**：实例的真实非密值（origin、主机、端口、路径）只在目标机的 `.env.<环境>` 里；**密钥一律用 `*_FILE` 指向目标机上的密钥文件，模板里的密钥项只能留空或写 `*_FILE` 路径**。理由（[ADR-0001](docs/decisions/0001-standalone-product.md)）：仓库以后可能公开，模板随仓库公开、也会被每个部署者原样拿去用，写进实例值就等于公开内部主机和网段；免费计划的私有仓库也没有 Environments，CI 没法按环境填值。#22 第 3 项已由所有者 2026-09-26 在 #2 的 PR（#25）上明确确认。
 - 密钥不得入库、不得进镜像、不得进日志或发布记录。
 - CI 只构建和推镜像，不部署：发布 tag 触发 `release.yml`（随 #7 加入），`vX.Y.Z-rc.N` 构建一次并推到 ghcr，`vX.Y.Z` 给同一 digest 加别名、不重新构建。部署由维护者在所有者授权后到目标机运行部署脚本，按 digest 拉取。
 - AI 不得自行部署，不得创建/推送/移动/删除发布 tag，不得修改版本号、镜像 tag 或 digest，不得触发流水线。
@@ -92,11 +92,11 @@
 
 | 包目录 | 服务契约 | 管辖规范 |
 |---|---|---|
-| `app/control`（控制面） | [docs/services/control/README.md](docs/services/control/README.md) | `MODULAR-DEVELOPMENT`、`SECURITY`、`API`（#2、#3 写入） |
+| `app/control`（控制面） | [docs/services/control/README.md](docs/services/control/README.md) | `MODULAR-DEVELOPMENT`、`SECURITY`、`API` |
 | `app/console`（管理后台，Vue 3 + Tuffex） | [docs/services/console/README.md](docs/services/console/README.md) | `DESIGN`、Tuffex 使用政策、`TESTING` |
 | `app/node`（工作节点代理） | [docs/services/node/README.md](docs/services/node/README.md) | `SECURITY`、`NODES`（#11 写入） |
 | `app/runner`（sandbox / VM 里的 omp 驱动） | [docs/services/runner/README.md](docs/services/runner/README.md) | `SECURITY`、`MODULAR-DEVELOPMENT` |
-| `packages/protocol`（类型与 JSON Schema） | [docs/services/protocol/README.md](docs/services/protocol/README.md) | `MODULAR-DEVELOPMENT`、`API`（#2、#3 写入） |
+| `packages/protocol`（类型与 JSON Schema） | [docs/services/protocol/README.md](docs/services/protocol/README.md) | `MODULAR-DEVELOPMENT`、`API` |
 
 新增包 = 新增 `app/<name>` 或 `packages/<name>` + 新增 `docs/services/<name>/README.md`，两处缺一视为未完成（`pnpm check:docs` 强制）；模块细节放同目录子文档。完整目录清单见生成物 [docs/INDEX.md](docs/INDEX.md)，不要手工编辑。
 

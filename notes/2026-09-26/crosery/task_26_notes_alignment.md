@@ -60,3 +60,15 @@
 - 做了什么：对照移植代理的两个提交逐项核对 1–15 项；重跑 pnpm verify、actionlint、残留搜索
 - 结果：pnpm verify 退出码 0（Tests 282 passed）；残留搜索为空；审查结论写在 PR #27 正文「审查结论」段，结论：通过
 - 下一步：提交这三条记录，推送后看 CI 的执行记录检查
+
+## 03:20:13 +08:00 · 合并 · #26 · PR #27 合并进 stage
+
+- 执行者：agent-claude-geek-bot-main（Claude Code，claude-opus-5-5）
+- 做了什么：gh pr merge 27 --merge --match-head-commit 1e7985a
+- 结果：合并提交 4d7dccf43e475d16faef3f40bda307572ffc07f0；issue-lifecycle 关闭 #26，branch-hygiene 删除远端 task 分支
+
+## 03:20:27 +08:00 · 收尾 · #26 · PR #27 已合并，清理 worktree
+
+- 执行者：agent-claude-geek-bot-main（Claude Code，claude-opus-5-5）
+- 做了什么：node scripts/task.mjs finish 26：删 worktree .claude/worktrees/task-26 与本地分支 task/26/notes_alignment
+- 结果：PR 已合并

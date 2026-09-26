@@ -2,7 +2,7 @@
 
 > 在 sandbox 容器或一次性 VM 里驱动 omp 的单文件程序，只用 Node 标准库。
 
-状态：`proposed` · 更新：2026-09-25 · 适用：`app/runner`（`@geek-bot/runner`）、`tests/runner`
+状态：`proposed` · 更新：2026-09-26 · 适用：`app/runner`（`@geek-bot/runner`）、`tests/runner`
 
 ## 职责
 
@@ -57,6 +57,6 @@ pnpm exec vitest run tests/runner
 ## 已知限制
 
 - #1 没有实现任何 omp 调用；上文的模块和接口都是计划。
-- pr 通道还没有工具白名单：`buildOmpArgs` 在 pr 通道不带 `--tools`，不符合 [SECURITY](../../architecture/SECURITY.md) S-04 和 [ARCHITECTURE](../../architecture/ARCHITECTURE.md)「执行隔离」一节对 VM 里 omp 使用工具白名单的要求；一次性 VM 和工具白名单两层都要有，VM 不能代替白名单。白名单由 #17 加入，工具清单来自 TaskSpec 的 omp 参数（TaskSpec 由 #11 定义）；在那之前，真实任务不能使用 pr 通道这组不带 `--tools` 的参数。#15 的审查过渡期在只读 sandbox 里执行，同样不能沿用这组参数：实现 #15 时要么给审查任务单独配只读工具白名单，要么把 #17 的白名单提前到 #15。
+- pr 通道还没有工具白名单：`buildOmpArgs` 在 pr 通道不带 `--tools`，不符合 [SECURITY](../../architecture/SECURITY.md) S-04 和 [ARCHITECTURE](../../architecture/ARCHITECTURE.md)「10. 执行与隔离」一节对 VM 里 omp 使用工具白名单的要求；一次性 VM 和工具白名单两层都要有，VM 不能代替白名单。白名单由 #17 加入，工具清单来自 TaskSpec 的 omp 参数（TaskSpec 由 #11 定义）；在那之前，真实任务不能使用 pr 通道这组不带 `--tools` 的参数。#15 的审查过渡期在只读 sandbox 里执行，同样不能沿用这组参数：实现 #15 时要么给审查任务单独配只读工具白名单，要么把 #17 的白名单提前到 #15。
 - omp 在本轮已有输出后失败时以退出码 1 结束、不会自己降级，这是外层降级存在的原因；具体分类以 #14 的夹具测试为准。
 - 宿主的用户级规则曾经漏进 omp 的回复；干净 HOME 是必须的，由 #14 的探针测试证明。

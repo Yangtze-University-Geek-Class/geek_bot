@@ -2,7 +2,7 @@
 
 > 五个工作区包职责清楚、依赖单向、只经 `@geek-bot/protocol` 共享契约；`app/`、`packages/` 与 `docs/services/` 严格对齐，不为目录形式制造部署复杂度。
 
-状态：`current` · 更新：2026-09-25 · 适用：`app/control`、`app/console`、`app/node`、`app/runner`、`packages/protocol` 与 `scripts/check-boundaries.mjs`
+状态：`current` · 更新：2026-09-26 · 适用：`app/control`、`app/console`、`app/node`、`app/runner`、`packages/protocol` 与 `scripts/check-boundaries.mjs`
 
 ## 当前边界
 
@@ -50,7 +50,7 @@ control 内部（计划中）：index -> app -> routes/<module> -> 服务 -> pub
 ## 数据与事务
 
 - SQLite 只属于 control：库文件放在 control 栈的命名卷里，不跨环境共享；只有 control 进程写入（单写者）。console、node、runner 都不打开数据库，只经 control 的接口读写。
-- 迁移用版本化 SQL 文件，只扩不缩（加表、加列、回填），保证上一版镜像仍能读库；迁移前自动备份，库版本比代码新时拒绝启动（计划中，#3）。
+- 迁移用版本化 SQL 文件，只扩不缩（加表、加列、回填），保证上一版镜像仍能读库；迁移前自动备份；库里另记一个兼容版本，只有收缩类改动才抬高它，兼容版本比代码认识的新时拒绝启动，所以上一版镜像仍能打开新库、可以回滚（[ADR-0008](../decisions/0008-sqlite-migrations-recovery.md)，计划中，#3）。
 - SQL 值一律参数化，动态列名只来自代码里的允许列表。
 - 一次本地业务状态变化及派生计数处于同一事务。外部请求（GitHub、模型网关）不能放进长事务。
 - 对 GitHub 的写入先在事务里记下意图（outbox，带去重键），提交后再发送；结果未知时记为 unknown，发送前先复核 GitHub 当前状态，不能盲目重试；重试不得产生第二条写入（计划中，#9）。
@@ -63,11 +63,11 @@ control 内部（计划中）：index -> app -> routes/<module> -> 服务 -> pub
 3. 加入对应包的路由模块或 feature；对 GitHub 的写入只经 publisher，不绕过白名单。
 4. 复用既有服务，不跨模块取数据库实现。
 5. 补真实路由测试或协议契约测试（见 [TESTING](TESTING.md)）。
-6. 更新服务契约、API 文档（#2、#3 写入）与 [LOCAL-DEV](../ops/LOCAL-DEV.md)。
+6. 更新服务契约、[API](../architecture/API.md) 与 [LOCAL-DEV](../ops/LOCAL-DEV.md)。
 7. 通过根 `pnpm verify`。
 
 ## 拆分尺度
 
 按职责拆，不按任意行数拆。新增抽象必须至少解决一个真实重复、生命周期问题或测试隔离问题；公用文件不自动承接所有「以后可能复用」的代码。
 
-现有五个包按运行位置与信任边界划分：control 持有令牌和网关密钥；console 跑在浏览器里；node 跑在可能是另一台主机的节点上；runner 跑在不可信的 sandbox 或 VM 里；protocol 只有类型和 Schema。只有出现新的运行位置、安全隔离、部署周期或扩缩容需求时，才评估新增包或新服务；不为目录审美增加服务或数据库。背景见 [ADR-0001](../decisions/0001-standalone-product.md)；单进程单写者与节点只出站的决策 ADR-0003 由 #2 写入。
+现有五个包按运行位置与信任边界划分：control 持有令牌和网关密钥；console 跑在浏览器里；node 跑在可能是另一台主机的节点上；runner 跑在不可信的 sandbox 或 VM 里；protocol 只有类型和 Schema。只有出现新的运行位置、安全隔离、部署周期或扩缩容需求时，才评估新增包或新服务；不为目录审美增加服务或数据库。背景见 [ADR-0001](../decisions/0001-standalone-product.md)；单进程单写者与节点只出站的决策见 [ADR-0003](../decisions/0003-single-writer-control.md)。

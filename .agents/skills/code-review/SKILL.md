@@ -74,7 +74,7 @@ gh pr checkout <N>   # 需要跑脚本或看完整仓库上下文时
    pnpm check:secrets
    git diff origin/stage...HEAD | grep -nE '^\+' | grep -niE 'secret|token|passw|private|api_key|_file|bearer|ghp_|gho_|github_pat_|sk-'
    ```
-   `check:secrets` 只覆盖部分文本模式，**通过它不等于没有泄漏**。人眼过一遍 diff 中所有新增字符串：OAuth client secret、会话密钥、令牌加密密钥、模型网关密钥、节点加入令牌与节点令牌、机器人账号的 GitHub 令牌、会话 Cookie、SSH 私钥都不得出现真值。
+   `check:secrets` 只覆盖部分文本模式，**通过它不等于没有泄漏**。人眼过一遍 diff 中所有新增字符串：OAuth client secret、会话密钥、令牌加密密钥、模型网关密钥、节点令牌、每任务模型令牌、机器人账号的 GitHub 令牌、会话 Cookie、SSH 私钥都不得出现真值。
 4. **env 模板只放占位符**：
    ```bash
    git diff origin/stage...HEAD -- deploy/env .env.example
@@ -120,7 +120,7 @@ gh pr checkout <N>   # 需要跑脚本或看完整仓库上下文时
     git diff origin/stage...HEAD -- scripts .github/workflows .githooks
     ```
     看：迁移是否只扩不缩、有没有恢复路径；有没有删除数据、覆盖配置、顺带升级无关依赖、修改生产凭据；有没有删断言、改校验器、放宽既有校验换绿色；有没有「以测试通过代替人工验收」的表述。
-11. **publisher 写入白名单**（实现计划中，#9；白名单文档 #2 写入）：
+11. **publisher 写入白名单**（实现计划中，#9；逐条清单见 [`write-whitelist.md`](../../../docs/services/control/write-whitelist.md)）：
     ```bash
     git diff origin/stage...HEAD -- app/control/src/publisher docs/services/control
     git diff origin/stage...HEAD | grep -nE 'APPROVE|REQUEST_CHANGES|COMMENT|event|refs/tags|refs/heads|force|merge|\.github/workflows|DELETE|ALLOWLIST|allowlist'
@@ -132,7 +132,7 @@ gh pr checkout <N>   # 需要跑脚本或看完整仓库上下文时
     git diff origin/stage...HEAD | grep -nE 'scope|X-OAuth-Scopes|read:org|read:user|workflow|admin:org|delete_repo|write:packages|admin:repo_hook'
     grep -rn 'decrypt' app/control/src | grep -v -e '/publisher/' -e '/secrets/' -e '/github/client\.ts:'
     ```
-    `/secrets/` 是解密的实现处；`/github/client.ts` 是 GitHub 读取层的计划路径（[control 服务契约](../../../docs/services/control/README.md)「计划中的模块与对应 issue」，#6）。只排除读取客户端这一个文件，`src/github/` 下的其它文件（例如 #9 的 `markers.ts`）照样要查；#6 实际落地的路径不同时，同步改这条命令。申请的 scope 增加、拒绝名单删减或放宽，都要写明理由并有所有者批准；publisher 与 GitHub 读取层以外调用令牌解密即阻塞。
+    `/secrets/` 是解密的实现处；`/github/client.ts` 是 GitHub 读取层的计划路径（[control 服务契约](../../../docs/services/control/README.md)「计划中的模块与对应 issue」，#6）。只排除读取客户端这一个文件，`src/github/` 下的其它文件（例如 #9 的 `markers.ts`）照样要查；#6 实际落地的路径不同时，同步改这条命令。申请的 scope 增加、允许名单扩大（当前只有 `repo`、`read:org`），都要写明理由并有所有者批准；publisher 与 GitHub 读取层以外调用令牌解密即阻塞。
 13. **执行环境不持有凭据**（计划中，#11、#14、#17）：
     ```bash
     git diff origin/stage...HEAD -- app/node app/runner deploy/compose | grep -nE 'environment|env|process\.env|fw_cfg|volumes|mount|docker\.sock|HOME|TOKEN|KEY|SECRET'

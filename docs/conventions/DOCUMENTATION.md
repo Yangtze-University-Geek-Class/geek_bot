@@ -2,7 +2,7 @@
 
 > 区分当前事实、已接受决策、未实施提议和历史材料；`docs/` 与 `app/`、`packages/` 严格对齐；仓库可能公开，docs 里任何内容都要能公开。
 
-状态：`current` · 更新：2026-09-25 · 适用：根 `README*`、`AGENTS.md`、`docs/**`、`.agents/skills/**`
+状态：`current` · 更新：2026-09-26 · 适用：根 `README*`、`AGENTS.md`、`docs/**`、`.agents/skills/**`
 
 ## 存放与结构
 
@@ -44,12 +44,12 @@
 
 ## 同步规则
 
-- 变更 control 的接口 → API 文档（#2、#3 写入）+ 对应 `docs/services/*` 契约；
+- 变更 control 的接口 → [API](../architecture/API.md)（节点接口是 [节点协议](../services/node/protocol.md)）+ 对应 `docs/services/*` 契约；
 - 变更节点协议、TaskSpec、结果或 catalog 格式 → `packages/protocol` + [protocol 契约](../services/protocol/README.md) + [node 契约](../services/node/README.md)；
-- 变更数据库结构 → 架构文档与迁移、恢复说明（#3 起）；
+- 变更数据库结构 → [data-model](../services/control/data-model.md) + 迁移与恢复说明（#3 起）；
 - 变更环境变量或端口 → env 模板（#7 引入）+ ENVIRONMENTS 与 DEPLOY（#7 写入）+ [LOCAL-DEV](../ops/LOCAL-DEV.md)；
-- 变更写入白名单 → 写入白名单文档（#2 写入）+ publisher 的允许与拒绝用例；
-- 变更机器人的默认行为 → [control 契约](../services/control/README.md) 的默认行为一节；
+- 变更写入白名单 → [写入白名单](../services/control/write-whitelist.md) + publisher 的允许与拒绝用例；
+- 变更机器人的默认行为 → [默认行为](../services/control/behavior.md)（编号 B-xx 与配置项一览）+ [control 契约](../services/control/README.md) 的摘要；
 - 变更构建或验收命令 → 根 [README](../../README.md) + [TESTING](TESTING.md) + [LOCAL-DEV](../ops/LOCAL-DEV.md)；
 - 变更服务边界或目录 → [MODULAR-DEVELOPMENT](MODULAR-DEVELOPMENT.md) 与 `docs/services/**`；
 - 变更文档标题、摘要或路径 → 重新生成 INDEX（`pnpm docs:index`）。

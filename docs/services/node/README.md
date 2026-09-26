@@ -2,7 +2,7 @@
 
 > 工作节点代理：只向外连 control 领任务，不开入站端口；管理 issue 通道的无网 sandbox 容器和 PR 通道的一次性 QEMU/KVM VM。
 
-状态：`proposed` · 更新：2026-09-25 · 适用：`app/node`（`@geek-bot/node`）、`tests/node`
+状态：`proposed` · 更新：2026-09-26 · 适用：`app/node`（`@geek-bot/node`）、`tests/node`
 
 ## 职责
 
@@ -38,12 +38,13 @@
 | `src/executors/qemu/`、`src/egress-proxy/`、`src/endpoint/`、`src/gc/`、`vm/{build,guest}/`、`Dockerfile.vmimage` | QEMU/KVM 执行器、出网代理、VM 基础镜像配方、泄漏回收 | #17 |
 | 多节点：标签、容量、信任等级、排空、滚动升级 | 第二台节点加入后的分配与接管 | #19 |
 
-子文档 protocol（消息表）由 #2 写入；vm、sandbox、health、egress 的说明随 #11、#14、#17 写入。节点运维手册 NODES 由 #11 写入 ops。
+子文档：[节点协议](protocol.md)（消息表）；vm、sandbox、health、egress 的说明随 #11、#14、#17 写入。节点运维手册 NODES 由 #11 写入 ops。
 
 ## 接口与数据归属（计划中）
 
-- 对 control：`POST /heartbeat`（每 10 秒）、`POST /lease`（长轮询）、`GET /tasks/:id/bundle`、`POST /tasks/:id/events`、`POST /tasks/:id/result`、`/model/v1/*`。请求带 `Authorization: Bearer <节点令牌>` 和协议版本头；消息形状定义在 `@geek-bot/protocol`。
-- epoch 不匹配或租约已被收回时，control 返回 409，节点丢弃结果。
+- 对 control：只由节点主动发起，路径前缀 `/api/node/v1`，逐条消息（N-01 起）见 [节点协议](protocol.md)。请求带 `Authorization: Bearer <节点令牌>` 和协议版本头；消息形状计划放进 `@geek-bot/protocol`（#11）。
+- 节点令牌由 owner 在后台生成，节点从只读挂载的密钥文件读取，路径由 `GEEK_BOT_NODE_TOKEN_FILE` 指定（计划中，#11；密钥的存放与轮换见 [SECURITY](../../architecture/SECURITY.md) 的密钥表）。
+- epoch 不匹配、租约已被收回或租约不属于本节点时，control 拒绝请求，节点丢弃结果（细节见 [节点协议](protocol.md)）。
 - 对 sandbox：共享卷里的 unix socket。对 VM：QEMU 用户态网络的 guestfwd 转发（只有两条：模型代理和出网代理），任务输入输出走原始盘上的 tar，实时事件走 virtio-serial。
 - 节点本地只保存：节点令牌文件、未确认事件的 spool、VM 工作目录；任务结束后清理。节点没有数据库。
 
@@ -59,5 +60,5 @@ VM 相关测试只能在有 KVM 的机器上手动跑（`test:vm` 随 #12 加入
 ## 已知限制
 
 - #1 没有实现任何节点功能；上文的模块和接口都是计划。
-- 在节点容器里用 QEMU 用户态网络做隔离、cloud 镜像能否被纯 QEMU 引导、1 vCPU / 2 GiB 是否够用，这些都没有验证，以 #12 的实测结论为准；不通过时按 ADR-0004（#2 写入）列出的退路改选。
+- 在节点容器里用 QEMU 用户态网络做隔离、cloud 镜像能否被纯 QEMU 引导、1 vCPU / 2 GiB 是否够用，这些都没有验证，以 #12 的实测结论为准；不通过时按 [ADR-0004](../../decisions/0004-execution-isolation.md) 列出的退路改选。
 - 执行隔离的安全要求见 [SECURITY](../../architecture/SECURITY.md)。

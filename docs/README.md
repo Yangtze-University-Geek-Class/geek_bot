@@ -12,11 +12,11 @@ Agent 进入仓库的第一件事是**确认当前分支**（`git branch --show-
 
 | 仓库路径 | `docs/` 路径 | 管辖规范 |
 |---|---|---|
-| `app/control/` | [services/control](services/control/README.md) | [MODULAR-DEVELOPMENT](conventions/MODULAR-DEVELOPMENT.md)、[SECURITY](architecture/SECURITY.md)、API（#2、#3 写入） |
+| `app/control/` | [services/control](services/control/README.md) | [MODULAR-DEVELOPMENT](conventions/MODULAR-DEVELOPMENT.md)、[SECURITY](architecture/SECURITY.md)、[API](architecture/API.md) |
 | `app/console/` | [services/console](services/console/README.md) | [DESIGN](design/DESIGN.md)、[Tuffex 使用政策](components/tuffex/USAGE-POLICY.md)、[TESTING](conventions/TESTING.md) |
 | `app/node/` | [services/node](services/node/README.md) | [SECURITY](architecture/SECURITY.md)、NODES（#11 写入） |
 | `app/runner/` | [services/runner](services/runner/README.md) | [SECURITY](architecture/SECURITY.md)、[MODULAR-DEVELOPMENT](conventions/MODULAR-DEVELOPMENT.md) |
-| `packages/protocol/` | [services/protocol](services/protocol/README.md) | [MODULAR-DEVELOPMENT](conventions/MODULAR-DEVELOPMENT.md)、API（#2、#3 写入） |
+| `packages/protocol/` | [services/protocol](services/protocol/README.md) | [MODULAR-DEVELOPMENT](conventions/MODULAR-DEVELOPMENT.md)、[API](architecture/API.md)、[节点协议](services/node/protocol.md) |
 | `deploy/`（计划中，#7 加入） | DEPLOY、ENVIRONMENTS（#7 写入）· [ops/CICD](ops/CICD.md) | [RELEASES](conventions/RELEASES.md)、[BRANCHING](conventions/BRANCHING.md) |
 | `docs/`（本文档树） | [INDEX](INDEX.md)（生成物） | [DOCUMENTATION](conventions/DOCUMENTATION.md) |
 | `notes/`（执行记录，入口 `notes/INDEX.md` 是生成物） | [NOTES](conventions/NOTES.md) | [NOTES](conventions/NOTES.md)、[CODE-REVIEW](conventions/CODE-REVIEW.md) |
@@ -46,7 +46,7 @@ Agent 进入仓库的第一件事是**确认当前分支**（`git branch --show-
 | 各包的契约与源码地图 | [services](services/README.md)：[control](services/control/README.md)、[console](services/console/README.md)、[node](services/node/README.md)、[runner](services/runner/README.md)、[protocol](services/protocol/README.md) |
 | 系统架构（草案） | [architecture](architecture/README.md)、[ARCHITECTURE](architecture/ARCHITECTURE.md) |
 | 安全不变量（草案） | [SECURITY](architecture/SECURITY.md) |
-| API 契约及错误、幂等约定 | API（#2、#3 写入） |
+| API 契约及错误、幂等约定 | [API](architecture/API.md)、[节点协议](services/node/protocol.md) |
 | 界面设计与技术栈 | [design](design/README.md)、[DESIGN](design/DESIGN.md)、[STACK](design/STACK.md) |
 | Tuffex 组件文档、AI 检索与使用政策 | [components](components/README.md)、[Tuffex 文档库](components/tuffex/README.md)、[使用政策](components/tuffex/USAGE-POLICY.md) |
 | 本机开发、`pnpm verify`、task worktree | [LOCAL-DEV](ops/LOCAL-DEV.md) |
@@ -55,7 +55,7 @@ Agent 进入仓库的第一件事是**确认当前分支**（`git branch --show-
 | 部署、回滚、环境与 env 模板、主机前置条件、故障处理 | DEPLOY、ENVIRONMENTS、HOST-PREREQS（#7 写入）、RUNBOOK（#7 起草，#20 补全） |
 | 加节点、槽位与节点健康 | NODES（#11 写入） |
 | 备份与恢复演练、告警与观测 | BACKUP、OBSERVABILITY（#20 写入） |
-| 架构决策 | [decisions](decisions/README.md)：[ADR-0001](decisions/0001-standalone-product.md)、[ADR-0010](decisions/0010-tracking-record-prefix.md)；ADR-0002 至 ADR-0009 由 #2 写入 |
+| 架构决策 | [decisions](decisions/README.md)：[ADR-0001](decisions/0001-standalone-product.md)、[ADR-0010](decisions/0010-tracking-record-prefix.md)；ADR-0002 至 ADR-0009 见目录表 |
 
 ## 文档类别与优先级
 
