@@ -133,3 +133,9 @@
 - 执行者：agent-claude-geek-bot-821e-control3（Claude Code，claude-opus-5-5）
 - 做了什么：ci(control): docker job 断言基础镜像按 digest 钉死与停机 checkpoint 日志；提交前跑 pnpm check、ci-docker.test 与 actionlint
 - 结果：pnpm check 退出码 0；ci-docker.test 8 passed；actionlint 退出码 0
+
+## 13:21:05 +08:00 · 返工 · #3 · 返工后的整体验证与镜像实测
+
+- 执行者：agent-claude-geek-bot-821e-control3（Claude Code，claude-opus-5-5）
+- 做了什么：在 f5a0777 上跑 pnpm verify、pnpm test:e2e（4174 空闲）、actionlint；按钉死的 index digest 经本机代理取 arm64 各层、逐个核对 sha256 后载入，用 --build-arg NODE_IMAGE 构建镜像，起容器核对 /readyz、用户、HEALTHCHECK、backup 与 restore --dry-run 后 /data/tmp 为空、docker stop 的退出码与 checkpoint 日志，再跑缺 master key、把密钥原文填进 *_KEY_FILE（control 与 CLI 各一次）；用完删掉自己建的容器、卷、镜像和临时文件
+- 结果：pnpm verify 退出码 0（Test Files 29 passed，Tests 409 passed）；actionlint 1.7.12 退出码 0；pnpm test:e2e 三次：前两次 41 passed 1 failed（都是 shell.spec.ts 窄屏抽屉导航的「被 overflow 截掉的内容」断言），第三次 42 passed，这个用例单独 --repeat-each 10 全部通过，console 与 e2e 的输入自 22f4653 起没有改动；镜像：/readyz 200 {"status":"ready"}，User=node、uid=1000、HEALTHCHECK 为 CMD、状态 healthy，/data/tmp 为 drwx------ 且为空，docker stop 后 ExitCode=0，日志有 busy 为 0 的 WAL 已 checkpoint，库已关闭，CI 的 checkpoint 断言按同样写法通过；缺 master key 退出码 1，密钥原文出现 0 次；密钥原文填进 GEEK_BOT_MASTER_KEY_FILE 时 control 退出码 1、填进 GEEK_BOT_BACKUP_KEY_FILE 时 CLI 退出码 1，原文与前 16 个字符都出现 0 次
