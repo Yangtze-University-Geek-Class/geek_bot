@@ -15,7 +15,7 @@ AI 先执行 [AGENT-START](AGENT-START.md) 的阅读门禁，不能先运行下�
 - Node 22（`engines` 要求 `>=22.13.0 <23`，版本写在 `.nvmrc` 与 `.node-version`）；pnpm 固定为 `pnpm@9.15.9`。
 - 安装：`pnpm install --frozen-lockfile`。不要在没有授权时改锁文件；新增依赖见下文。
 - 启用本仓库的 git hook：`pnpm hooks:enable`（把 `.githooks/` 设为 hook 目录，推送前运行分支不变量检查，见 [BRANCHING](BRANCHING.md)）。
-- 本机启动命令：`pnpm dev:console`（console 的样板数据模式，#4）；`pnpm dev:control` 随 #3 加入。本机运行说明见 [LOCAL-DEV](../ops/LOCAL-DEV.md)。本机开发不需要任何真实令牌或正式配置。
+- 本机启动命令：`pnpm dev:console`（console 的样板数据模式，#4）；`pnpm dev:control`（本机运行 control，自动生成本机用的一次性密钥，#3）。本机运行说明见 [LOCAL-DEV](../ops/LOCAL-DEV.md)。本机开发不需要任何真实令牌或正式配置。
 
 ## 分支与改动
 

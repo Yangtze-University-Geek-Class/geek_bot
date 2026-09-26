@@ -20,7 +20,7 @@ geek_bot 是一个可自部署的通用产品。部署者在 Web 后台用一个
 
 | 目录 | 包名 | 职责 |
 |---|---|---|
-| `app/control` | `@geek-bot/control` | 控制面。Fastify 5 + better-sqlite3（计划中）。唯一的 SQLite 写入者、唯一的 GitHub 写入者（publisher 白名单 + outbox）；负责登录、令牌加密存放、仓库发现、轮询、调度、模型中继；同源托管 console 的静态产物。见 [control](../services/control/README.md) |
+| `app/control` | `@geek-bot/control` | 控制面。Fastify 5 + better-sqlite3（#3 引入）。唯一的 SQLite 写入者、唯一的 GitHub 写入者（publisher 白名单 + outbox）；负责登录、令牌加密存放、仓库发现、轮询、调度、模型中继；同源托管 console 的静态产物。见 [control](../services/control/README.md) |
 | `app/console` | `@geek-bot/console` | 管理后台。Vue 3.5 + vue-router 4 + @talex-touch/tuffex 0.6.0 + Vite 7（#4 引入外壳）。不用原生下拉框和复选框，不用 emoji。见 [console](../services/console/README.md) |
 | `app/node` | `@geek-bot/node` | 工作节点代理。只向外连 control（HTTP 长轮询 `/api/node/v1`），不开入站端口；管理 issue 通道的无网只读 sandbox 容器和 PR 通道的一次性 QEMU/KVM VM。见 [node](../services/node/README.md) |
 | `app/runner` | `@geek-bot/runner` | 在 sandbox 或 VM 里驱动 omp 的单文件程序，只用 Node 标准库。见 [runner](../services/runner/README.md) |

@@ -31,8 +31,11 @@
 # Playwright 断言没有原生 select/checkbox、没有 emoji、390px 没有页面级横向溢出、抽屉与键盘可用、不发外部请求。
 # 验收截图（test-results/evidence/）每次都作为 artifact 上传；失败时另传报告与失败截图。
 #
+# docker：control 镜像的构建验证（#3）。只构建、不推送；断言镜像以非 root 运行、带 HEALTHCHECK，
+# 再用一次性的随机密钥起一次容器，确认 /readyz 返回 200、SIGTERM 后以 0 退出。推镜像只在 release.yml（#7）。
+#
 # 暂未包含、随后续 issue 加入的 job：
-#   * docker（镜像构建验证：只构建、不推送，断言健康检查与非 root）：随 #3（control 镜像）与 #7（发布与部署栈）加入；
+#   * docker 的 node 镜像部分：随 #11 加入；
 #   * env-contract（pnpm check:environments，env 模板 ↔ 环境契约 ↔ compose）：随 #7 加入。
 # 加入时同步写进 verify 的 needs 与汇总条件，否则它们变红也不会让 required check 变红。
 
@@ -186,6 +189,113 @@ jobs:
             test-results/e2e/
           retention-days: 14
 
+  # control 镜像（#3）：构建上下文是仓库根，只构建、不推送，不登录任何镜像仓库。
+  docker:
+    name: docker (control 镜像：只构建、不推送)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # SECURITY S-18：基础镜像按 digest 钉死。每个 FROM 要么引用前面的阶段名，要么是带 @sha256:<64 位十六进制> 的镜像；
+      # 写成 ${ARG} 的按 ARG 的默认值核对（CI 构建不传 --build-arg，用的就是默认值）。
+      - name: 断言基础镜像按 digest 钉死
+        shell: bash
+        run: |
+          set -euo pipefail
+          awk '
+            function pinned(ref,   hex) {
+              if (ref !~ /@sha256:[0-9a-f]+$/) return 0
+              hex = ref
+              sub(/^.*@sha256:/, "", hex)
+              return length(hex) == 64
+            }
+            toupper($1) == "ARG" && index($2, "=") > 0 {
+              eq = index($2, "=")
+              value = substr($2, eq + 1)
+              gsub(/"/, "", value)
+              args[substr($2, 1, eq - 1)] = value
+            }
+            toupper($1) == "FROM" {
+              i = 2
+              while (i <= NF && $i ~ /^--/) i++
+              ref = $i
+              if (ref ~ /^\$\{[A-Za-z_][A-Za-z0-9_]*\}$/) ref = args[substr(ref, 3, length(ref) - 3)]
+              else if (ref ~ /^\$[A-Za-z_][A-Za-z0-9_]*$/) ref = args[substr(ref, 2)]
+              key = tolower(ref)
+              if ((key in stages) || pinned(ref)) {
+                count++
+                printf "FROM 已钉死：%s\n", $0
+              } else {
+                printf "FROM 没有按 digest 钉死（要写成 <镜像>@sha256:<digest>）：%s\n", $0 > "/dev/stderr"
+                bad++
+              }
+              for (j = i + 1; j < NF; j++) if (toupper($j) == "AS") stages[tolower($(j + 1))] = 1
+            }
+            END {
+              if (bad > 0) exit 1
+              if (count == 0) { print "app/control/Dockerfile 里没有 FROM" > "/dev/stderr"; exit 1 }
+            }
+          ' app/control/Dockerfile
+
+      - name: 构建 control 镜像（不推送）
+        shell: bash
+        run: docker build -f app/control/Dockerfile -t geek-bot-control:ci .
+
+      - name: 断言镜像以非 root 运行、带 HEALTHCHECK
+        shell: bash
+        run: |
+          set -euo pipefail
+          user="$(docker image inspect --format '{{.Config.User}}' geek-bot-control:ci)"
+          healthcheck="$(docker image inspect --format '{{json .Config.Healthcheck}}' geek-bot-control:ci)"
+          echo "Config.User=${user}"
+          echo "Config.Healthcheck=${healthcheck}"
+          case "${user}" in
+            "" | root | 0 | root:* | 0:*) echo "镜像必须以非 root 用户运行（Config.User 为空或是 root）" >&2; exit 1 ;;
+          esac
+          uid="$(docker run --rm --entrypoint id geek-bot-control:ci -u)"
+          echo "容器里的 uid=${uid}"
+          if [ "${uid}" = "0" ]; then echo "容器里的进程以 root 运行" >&2; exit 1; fi
+          if [ "${healthcheck}" = "null" ] || ! grep -q '"Test":\["CMD"' <<<"${healthcheck}"; then
+            echo "镜像必须带 HEALTHCHECK（CMD 形式）" >&2
+            exit 1
+          fi
+
+      # 密钥是这一步现场生成的随机值，只给这个一次性容器用，跑完即删；CI 不挂任何 GitHub secrets。
+      - name: 起一次容器：/readyz 返回 200，SIGTERM 后以 0 退出并 checkpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          secrets="$(mktemp -d)"
+          openssl rand -base64 32 > "${secrets}/master_key"
+          openssl rand -base64 32 > "${secrets}/backup_key"
+          chmod 0400 "${secrets}/master_key" "${secrets}/backup_key"
+          sudo chown 1000:1000 "${secrets}/master_key" "${secrets}/backup_key"
+          docker run -d --name geek-bot-control-ci -p 127.0.0.1:18080:8080 \
+            -e GEEK_BOT_INSTANCE_ROLE=preview -e GEEK_BOT_HOST=0.0.0.0 -e GEEK_BOT_PUBLIC_ORIGIN=https://geek-bot.example.com \
+            -v "${secrets}/master_key:/run/secrets/master_key:ro" -v "${secrets}/backup_key:/run/secrets/backup_key:ro" \
+            geek-bot-control:ci
+          ready=""
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:18080/readyz; then ready="yes"; echo; break; fi
+            sleep 2
+          done
+          docker stop geek-bot-control-ci
+          code="$(docker inspect --format '{{.State.ExitCode}}' geek-bot-control-ci)"
+          logs="$(docker logs geek-bot-control-ci 2>&1)"
+          printf '%s\n' "${logs}"
+          sudo rm -rf "${secrets}"
+          if [ -z "${ready}" ]; then echo "/readyz 没有返回 200" >&2; exit 1; fi
+          if [ "${code}" != "0" ]; then echo "SIGTERM 后退出码是 ${code}，不是 0" >&2; exit 1; fi
+          # 停机的最后一步：wal_checkpoint(TRUNCATE) 做完（busy 为 0）才关库。
+          if ! grep -F 'WAL 已 checkpoint，库已关闭' <<<"${logs}" | grep -F '"busy":0' >/dev/null; then
+            echo "停机日志里没有 busy 为 0 的「WAL 已 checkpoint，库已关闭」" >&2
+            exit 1
+          fi
+
   # 汇总 job：给 required check 用的单一名称（免费计划的私有仓库暂时配不了分支保护，
   # 名称先固定下来，以后能配时直接引用）。
   # if: always() 是必须的——若上游 job 被跳过或取消，required check 不能因“没跑”而算通过。
@@ -194,7 +304,7 @@ jobs:
   # 它只汇总机器结果，不代表人工验收，也不授权任何部署。
   verify:
     name: verify (required check)
-    needs: [branch-guard, core, console-e2e, lint-workflows]
+    needs: [branch-guard, core, console-e2e, docker, lint-workflows]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -205,12 +315,14 @@ jobs:
           BRANCH_GUARD_RESULT: ${{ needs.branch-guard.result }}
           CORE_RESULT: ${{ needs.core.result }}
           CONSOLE_E2E_RESULT: ${{ needs.console-e2e.result }}
+          DOCKER_RESULT: ${{ needs.docker.result }}
           LINT_WORKFLOWS_RESULT: ${{ needs.lint-workflows.result }}
         run: |
           set -u
-          echo "branch-guard=${BRANCH_GUARD_RESULT} core=${CORE_RESULT} console-e2e=${CONSOLE_E2E_RESULT} lint-workflows=${LINT_WORKFLOWS_RESULT}"
+          echo "branch-guard=${BRANCH_GUARD_RESULT} core=${CORE_RESULT} console-e2e=${CONSOLE_E2E_RESULT} docker=${DOCKER_RESULT} lint-workflows=${LINT_WORKFLOWS_RESULT}"
           if [ "$BRANCH_GUARD_RESULT" != "success" ] || [ "$CORE_RESULT" != "success" ] \
-             || [ "$CONSOLE_E2E_RESULT" != "success" ] || [ "$LINT_WORKFLOWS_RESULT" != "success" ]; then
+             || [ "$CONSOLE_E2E_RESULT" != "success" ] || [ "$DOCKER_RESULT" != "success" ] \
+             || [ "$LINT_WORKFLOWS_RESULT" != "success" ]; then
             echo "机器验证未通过：failure / cancelled / skipped 一律视为失败。" >&2
             exit 1
           fi

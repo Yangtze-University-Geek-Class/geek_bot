@@ -10,7 +10,7 @@
 
 | 包 | 源码 | 包名 | 职责 | 契约 | 镜像（计划中） |
 |---|---|---|---|---|---|
-| control | `app/control/` | `@geek-bot/control` | 控制面：唯一的 SQLite 写入者、唯一的 GitHub 写入者；登录、令牌、发现、轮询、调度、模型中继；同源托管 console | [control](control/README.md) | `geek-bot-control`（内含 console 产物，#3、#7） |
+| control | `app/control/` | `@geek-bot/control` | 控制面：唯一的 SQLite 写入者、唯一的 GitHub 写入者；登录、令牌、发现、轮询、调度、模型中继；同源托管 console | [control](control/README.md) | `geek-bot-control`（#3 建镜像；打进 console 产物随 #7） |
 | console | `app/console/` | `@geek-bot/console` | 管理后台：Vue 3.5 + Tuffex 0.6.0 | [console](console/README.md) | 随 `geek-bot-control` 发布 |
 | node | `app/node/` | `@geek-bot/node` | 工作节点代理：只向外连 control，管理 sandbox 容器和一次性 VM | [node](node/README.md) | `geek-bot-node`、`geek-bot-vmimage`（#11、#17） |
 | runner | `app/runner/` | `@geek-bot/runner` | 在 sandbox 或 VM 里驱动 omp 的单文件程序，只用 Node 标准库 | [runner](runner/README.md) | 打进 `geek-bot-node` 与 VM 基础镜像 |

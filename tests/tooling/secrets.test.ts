@@ -51,7 +51,7 @@ describe("env 模板：密钥项只能留空或写 *_FILE 路径", () => {
   });
 
   it("密钥名覆盖 API_KEY、SETUP_KEY、JOIN_KEY 等；CLIENT_ID、MAX_TOKENS 这类不是密钥", () => {
-    for (const key of ["MODEL_GATEWAY_API_KEY", "NODE_SETUP_KEY", "NODE_JOIN_KEY", "GEEK_BOT_MASTER_KEY", "SESSION_SECRET", "GITHUB_TOKEN", "DB_PASSWORD", "TOKEN_ENCRYPTION_KEY", "DEPLOY_SSH_KEY", "APP_PRIVATE_KEY", "MODEL_GATEWAY_API_KEY_FILE"]) {
+    for (const key of ["MODEL_GATEWAY_API_KEY", "NODE_SETUP_KEY", "NODE_JOIN_KEY", "GEEK_BOT_MASTER_KEY", "GEEK_BOT_BACKUP_KEY", "GEEK_BOT_BACKUP_KEY_FILE", "SESSION_SECRET", "GITHUB_TOKEN", "DB_PASSWORD", "TOKEN_ENCRYPTION_KEY", "DEPLOY_SSH_KEY", "APP_PRIVATE_KEY", "MODEL_GATEWAY_API_KEY_FILE"]) {
       expect(SECRET_KEY_RE.test(key), key).toBe(true);
     }
     for (const key of ["GITHUB_OAUTH_CLIENT_ID", "MODEL_MAX_TOKENS", "GEEK_BOT_PUBLIC_ORIGIN", "MODEL_GATEWAY_BASE_URL", "KEYBOARD_LAYOUT"]) {
@@ -71,11 +71,13 @@ describe("env 模板：密钥项只能留空或写 *_FILE 路径", () => {
     expect(findings(".env.example", 'export MODEL_GATEWAY_API_KEY="placeholder"')).toContain("MODEL_GATEWAY_API_KEY");
   });
 
-  it("SETUP_KEY、JOIN_KEY、MASTER_KEY 有值：失败", () => {
-    const text = findings("deploy/env/.env.preview", "NODE_SETUP_KEY=abc\nNODE_JOIN_KEY='abc'\nGEEK_BOT_MASTER_KEY=abc\n");
+  it("SETUP_KEY、JOIN_KEY、MASTER_KEY、BACKUP_KEY 有值：失败", () => {
+    const text = findings("deploy/env/.env.preview", "NODE_SETUP_KEY=abc\nNODE_JOIN_KEY='abc'\nGEEK_BOT_MASTER_KEY=abc\nGEEK_BOT_BACKUP_KEY=abc\nGEEK_BOT_BACKUP_KEY_FILE=not a path\n");
     expect(text).toContain(":1: NODE_SETUP_KEY");
     expect(text).toContain(":2: NODE_JOIN_KEY");
     expect(text).toContain(":3: GEEK_BOT_MASTER_KEY");
+    expect(text).toContain(":4: GEEK_BOT_BACKUP_KEY 在模板 env 里必须留空");
+    expect(text).toContain(":5: GEEK_BOT_BACKUP_KEY_FILE 是密钥文件引用，值只能是文件路径");
   });
 
   it("*_FILE 只能是文件路径；留空、占位默认值与行尾注释都通过", () => {

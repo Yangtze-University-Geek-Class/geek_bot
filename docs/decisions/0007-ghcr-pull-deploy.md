@@ -17,7 +17,7 @@
 ### 镜像
 
 - 三个镜像：`geek-bot-control`（内含 console 的构建产物，见 [ADR-0009](0009-tuffex-console.md)）、`geek-bot-node`（内含 runner、omp、qemu 和 sandbox 入口）、`geek-bot-vmimage`（VM 基础镜像的载体，见 [ADR-0004](0004-execution-isolation.md)）。
-- 构建上下文是仓库根。control 与 node 镜像以非 root 运行、带 `HEALTHCHECK`，由 CI 断言；基础镜像按草案用 `node:22-bookworm-slim`，#3、#11 引入时核对。
+- 构建上下文是仓库根。control 与 node 镜像以非 root 运行、带 `HEALTHCHECK`，由 CI 断言；基础镜像按草案用 `node:22-bookworm-slim`，#3 引入 control 镜像时按 index digest 钉死（见 [STACK](../design/STACK.md)），#11 引入 node 镜像时再核对。
 - 镜像里不烘焙环境身份、域名或密钥；两个环境的差异只来自运行时 env 与 `*_FILE` 指向的密钥文件。
 
 ### 构建与发布：CI 只构建，不部署
@@ -86,9 +86,7 @@
 
 ## 实施状态
 
-本篇只是设计，还没有代码。
-
-- #3：control 镜像的 Dockerfile、`/readyz`、备份命令。
+- #3（已实现）：control 镜像的 Dockerfile（多阶段、非 root、带 HEALTHCHECK，构建上下文是仓库根）、CI 里只构建不推送的 `docker` job、`/readyz`、备份命令（`geek-bot backup --kind pre_deploy` 供部署脚本在部署前调用）。console 产物还没打进镜像，随 #7。
 - #7：`release.yml`、compose、env 模板、部署与回滚脚本、DEPLOY、ENVIRONMENTS、HOST-PREREQS；在第一台节点上跑起 preview 栈。
 - #11：node 镜像与 node 栈。
 - #17：`geek-bot-vmimage`。

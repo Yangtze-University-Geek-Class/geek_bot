@@ -16,7 +16,7 @@
 ### control：一个进程，独占写入
 
 - control 是一个 Fastify 5 进程，独占 better-sqlite3 的写连接。调度、租约、outbox、publisher、模型中继的记账都在这个进程里：同一个任务不会被两个节点领走，同一条写入不会从两个出口各发一次。
-- 同一个库不允许第二个进程写。control 的运维命令（认领码、备份、恢复、master key 轮换）也要守住这一条：计划做法见 [data-model](../services/control/data-model.md)「存储与通用约定」，#3 定稿，并用测试证明。
+- 同一个库不允许第二个进程写。control 的运维命令（认领码、备份、恢复、master key 轮换）也要守住这一条：#3 定稿的做法（独占文件锁加容器内本地通道）见 [data-model](../services/control/data-model.md)「存储与通用约定」，测试见 `tests/control/database.test.ts`、`server.test.ts`、`cli.test.ts`。
 - control 从不运行 omp，也不执行目标仓库里的任何代码（[ADR-0004](0004-execution-isolation.md)）。
 
 ### 节点：只出站
@@ -59,9 +59,7 @@
 
 ## 实施状态
 
-本篇只是设计，还没有代码。
-
-- #3：control 进程、数据库，以及运维命令的单写者约束。
+- #3（已实现）：control 进程（Fastify 5）与数据库；单写者约束：control 以 `locking_mode=EXCLUSIVE` 独占库，第二个 control 或别的连接打不开；会写库的运维命令经容器内本地通道交给运行中的 control，control 没在运行时 CLI 独占打开库自己执行（[control 服务契约](../services/control/README.md)「运维命令与单写者」）。
 - #11：节点 API、节点令牌、心跳、租约与 epoch、失联判定、cordon。
 - #9：outbox 与 publisher。
 - #14：事件回传。

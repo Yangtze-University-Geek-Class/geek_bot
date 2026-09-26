@@ -19,7 +19,7 @@
 | `packages/protocol/package.json` | 包名 `@geek-bot/protocol`，没有任何依赖；`exports` 的类型入口指向 `src/index.ts`，运行时入口是 `dist/index.js`；脚本 `typecheck`（`tsc --noEmit`）、`build` |
 | `packages/protocol/tsconfig.json` | 继承根 `tsconfig.base.json`，`src/` 编译到 `dist/` 并输出声明文件；不加载 Node 类型 |
 | `packages/protocol/src/index.ts` | 节点协议版本 `NODE_PROTOCOL_VERSION = 1`；任务类型 `TASK_KINDS`（review、triage、followup、fix、rework）、通道 `CHANNELS`（issue、pr）、执行器 `EXECUTORS`（sandbox、vm）及对应类型；映射 `TASK_CHANNEL`（triage、followup 走 issue 通道，其余走 pr 通道）与 `CHANNEL_EXECUTOR`（issue → sandbox，pr → vm）；PR 通道默认优先级 `PR_CHANNEL_PRIORITY`（审查别人的 PR > 返工自己的 PR > 修分给机器人的 issue > 修自己决定修的 issue） |
-| `packages/protocol/src/index.ts`（后台 API 部分，#4） | 纯类型：错误响应 `ApiErrorBody`、列表响应 `ApiList<T>`、后台角色 `AdminRole`、A-08 的 `MeResponse`、A-55 的 `ReleaseInfo`、A-56 的 `StreamTopic`（[API](../../architecture/API.md)）。端点的请求与响应以 control 路由的 `contracts.ts` 为准，#3 起两边对齐 |
+| `packages/protocol/src/index.ts`（后台 API 部分，#4） | 纯类型：错误响应 `ApiErrorBody`、列表响应 `ApiList<T>`、后台角色 `AdminRole`、A-08 的 `MeResponse`、A-55 的 `ReleaseInfo`、A-56 的 `StreamTopic`（[API](../../architecture/API.md)）。端点的请求与响应以 control 路由的 `contracts.ts` 为准，#3 起两边对齐（#3 的 `/healthz`、`/readyz` 不是 console 调用的端点，没有进 protocol；错误响应复用 `ApiErrorBody`） |
 | `tests/protocol/protocol.test.ts` | 取值固定、映射完整、优先级顺序、常量在运行时不可修改 |
 
 目前 node 在运行时导入 `EXECUTORS`，runner 只 type 导入 `Channel`，console 只 type 导入后台 API 的类型，control 还没有导入。新增或删除文件时同步更新本表。
