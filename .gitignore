@@ -9,6 +9,8 @@ dist/
 coverage/
 test-results/
 playwright-report/
+# console 样板数据模式的构建产物（pnpm test:e2e 用，不随 control 发布）
+.sample-dist/
 *.log
 .DS_Store
 

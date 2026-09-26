@@ -28,7 +28,8 @@ geek_bot 是一个可以自己部署的通用产品。部署者在 Web 后台用
 
 ## 现状
 
-- **骨架阶段（#1）**：pnpm 工作区、规范文档、门禁脚本、CI 与 issue / PR 模板。五个包只有最小源码和测试，没有业务功能，也没有生产依赖。
+- **骨架阶段（#1）**：pnpm 工作区、规范文档、门禁脚本、CI 与 issue / PR 模板。
+- **后台外壳（#4）**：`app/console` 有了 Tuffex 外壳（侧栏、窄屏抽屉、各种状态）和样板数据模式，`pnpm dev:console` 可以在本机打开；各页面的内容还没做，也还不连控制面。其余四个包只有最小源码和测试，没有业务功能。
 - 架构、安全模型、后台 API、节点协议、写入白名单和默认行为已写成设计文档（[ARCHITECTURE](docs/architecture/ARCHITECTURE.md)、[SECURITY](docs/architecture/SECURITY.md)、[API](docs/architecture/API.md)），决策记为 ADR-0002 到 ADR-0009（所有者 2026-09-26 全部接受，`accepted`）；设计文档还没有对应代码，状态是 `proposed`。
 - 功能按 #22 的路线图逐个 issue 推进：控制面（#3）、后台外壳（#4）、机器人账号登录（#5）、仓库发现（#6）、预发布栈与部署（#7）、节点（#11）；第一个能看到效果的里程碑是 PR 收到机器人的只评论审查（#15）；正式上线是 #20，达到可公开状态是 #21。
 - **部署**：部署文件与部署文档随 #7 加入，现在仓库里没有可部署的东西。
@@ -43,6 +44,8 @@ geek_bot 是一个可以自己部署的通用产品。部署者在 Web 后台用
    pnpm install --frozen-lockfile
    pnpm verify          # 运行时、包边界、文档、执行记录、密钥、公开安全、类型检查 → 单测 → 构建
    pnpm hooks:enable    # pre-push 核对分支不变量与发布 tag 规则
+   pnpm dev:console     # 本机打开后台（样板数据模式，数据全部虚构）
+   pnpm test:e2e        # 后台的浏览器回归；第一次先 pnpm exec playwright install chromium
    ```
 
 4. 一件事一个 issue、一个 `task/<issue>/<slug>` 分支、一个 worktree、一个 PR 回 `stage`：见 [CONTRIBUTING](docs/conventions/CONTRIBUTING.md) 与 [BRANCHING](docs/conventions/BRANCHING.md)。

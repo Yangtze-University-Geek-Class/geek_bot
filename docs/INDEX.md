@@ -33,7 +33,7 @@
 
 ## services/console/
 
-管理后台：Vue 3.5 + vue-router 4 + Tuffex 0.6.0 + Vite 的单页应用，构建产物由 control 同源托管。
+管理后台：Vue 3.5 + vue-router 4 + Tuffex 0.6.0 + Vite 7 的单页应用，构建产物由 control 同源托管。
 
 ## services/control/
 

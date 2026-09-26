@@ -2,7 +2,7 @@
 
 > 已经引入的工具和计划中的选型分开写；版本以 manifest、锁文件和运行时检查为准，路线图不写成现状。
 
-状态：`current` · 更新：2026-09-25 · 适用：根与各包的 `package.json`、`pnpm-lock.yaml`、`.nvmrc`、`.node-version`，以及以后的镜像与部署文件
+状态：`current` · 更新：2026-09-26 · 适用：根与各包的 `package.json`、`pnpm-lock.yaml`、`.nvmrc`、`.node-version`，以及以后的镜像与部署文件
 
 ## 版本从哪里来
 
@@ -15,9 +15,9 @@
 
 声明 `^3.2.4` 不等于装的是 3.2.4，要看锁文件。本文只记录这些来源里已经有的内容；和它们不一致时，以它们为准，并在同一次改动里修正本文。
 
-## 已引入（#1）
+## 已引入
 
-#1 只引入开发工具，五个包都没有第三方运行时依赖。
+#1 引入开发工具；#4 引入管理后台的依赖，这是第一批生产依赖（所有者 2026-09-26 批准）。control、node、runner、protocol 仍然没有第三方运行时依赖。
 
 | 层 | 方案 | 声明 | 锁文件解析 |
 |---|---|---|---|
@@ -27,7 +27,12 @@
 | Node 类型 | `@types/node` | `^22.10.0` | 22.20.4 |
 | 测试 | vitest，根 `vitest.config.ts` 收集 `tests/**/*.test.ts`，在 Node 环境里跑 | `vitest: ^3.2.4` | 3.2.7 |
 | 包间依赖 | 四个 app 依赖 `@geek-bot/protocol: workspace:*` | `workspace:*` | 工作区链接 |
-| CI | GitHub Actions：`pnpm install --frozen-lockfile` 后跑 `pnpm check`、`pnpm test`、`pnpm build`；另有分支不变量检查和 actionlint 工作流自检；不挂载任何 secrets，权限只有 `contents: read` | `.github/workflows/ci.yml` | 第三方 action 按提交 SHA 钉死；actionlint 版本和 SHA-256 写在工作流里 |
+| CI | GitHub Actions：`pnpm install --frozen-lockfile` 后跑 `pnpm check`、`pnpm test`、`pnpm build`；另有浏览器回归（`console-e2e`）、分支不变量检查和 actionlint 工作流自检；不挂载任何 secrets，权限只有 `contents: read` | `.github/workflows/ci.yml` | 第三方 action 按提交 SHA 钉死；actionlint 版本和 SHA-256 写在工作流里 |
+| 管理后台（#4） | Vue、vue-router、@talex-touch/tuffex，只在 `app/console` | `vue: ^3.5.27`（Tuffex 的 peer 下限）、`vue-router: ^4.6.4`、`@talex-touch/tuffex: 0.6.0`（钉死） | vue 3.5.43、vue-router 4.6.4、tuffex 0.6.0。Tuffex 上游声明 Node >=26，在 Node 22 上的实测结论见 [console 服务契约](../services/console/README.md)「Tuffex 0.6.0 在 Node 22 上的实测」 |
+| 依赖补丁（#4） | 根 `package.json` 的 `pnpm.packageExtensions`：把 `@talex-touch/utils@2` 的 peer `electron` 标为可选，不再自动安装 Electron | 同左 | 锁文件的 `packageExtensionsChecksum` 随它变化 |
+| 前端构建（#4） | Vite、@vitejs/plugin-vue、vue-tsc；console 的类型检查是 vue-tsc；Tuffex 的按需样式用它自带的 Vite 插件 | `vite: ^7.3.6`、`@vitejs/plugin-vue: ^6.0.9`、`vue-tsc: ^3.3.11` | vite 7.3.6、plugin-vue 6.0.9、vue-tsc 3.3.11 |
+| 图标（#4） | UnoCSS 的图标预设 + Carbon 图标集；只用图标预设，不引入原子类样式体系 | `@unocss/vite`、`@unocss/preset-icons`: `^66.10.5`；`@iconify-json/carbon: ^1.2.27` | 66.10.5；carbon 1.2.27 |
+| 浏览器回归（#4） | Playwright（只装 Chromium），入口 `pnpm test:e2e`；浏览器下载到用户缓存目录，不进仓库 | `@playwright/test: ^1.63.0`（根开发依赖） | 1.63.0 |
 
 包之间的导入方向见 [模块化开发规范](../conventions/MODULAR-DEVELOPMENT.md)；命令与验收见 [TESTING](../conventions/TESTING.md)。
 
@@ -39,10 +44,6 @@
 |---|---|---|---|
 | 控制面 HTTP | Fastify 5 | #3 | 构造与监听分离，路由测试用 `inject` |
 | 持久化 | SQLite（WAL）+ better-sqlite3 | #3 | 原生模块：在 Node 22 上核对预编译包和 ABI；只有 control 写库 |
-| 管理后台 | Vue 3.5、vue-router 4、@talex-touch/tuffex 0.6.0 | #4 | Tuffex 0.6.0 上游声明 Node >=26，要实测它在 Node 22 上安装、构建与运行，结论写进 [console 服务契约](../services/console/README.md) |
-| 前端构建 | Vite 7、@vitejs/plugin-vue、vue-tsc | #4 | console 的类型检查改为 vue-tsc；构建产物由 control 同源托管 |
-| 图标 | UnoCSS 的图标预设 | #4 | 只用图标预设，不引入原子类样式体系 |
-| 浏览器回归 | Playwright | #4 | 随 #4 加入 `test:e2e`；浏览器下载目录不进仓库 |
 | 容器与发布 | Docker、Docker Compose v2、ghcr | #3（control 镜像）、#7（release.yml、compose、部署脚本） | 镜像非 root、带健康检查；同一 digest 跨环境 |
 | sandbox 执行器 | 无网、根只读的独立容器 | #14 | 容器里没有任何令牌文件 |
 | VM 执行器 | QEMU/KVM 一次性 VM，默认 1 vCPU / 2 GiB | #12 实测，#17 实现 | 节点容器里能否用 `/dev/kvm`、用户态网络能否隔离、2 GiB 是否够用，以 #12 的实测为准 |

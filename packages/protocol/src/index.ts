@@ -58,3 +58,48 @@ export const PR_CHANNEL_PRIORITY: readonly PrPriorityEntry[] = Object.freeze([
   Object.freeze({ reason: "fix_assigned_issue", kind: "fix", priority: 30 }),
   Object.freeze({ reason: "fix_self_chosen_issue", kind: "fix", priority: 40 }),
 ] satisfies PrPriorityEntry[]);
+
+// ---------------------------------------------------------------------------
+// 后台 API 的共用形状（docs/architecture/API.md「约定」）。console 只对这些类型做 type 导入；
+// 端点的请求与响应以 control 路由的 contracts.ts 为准，随各端点的 issue 增加并与这里保持一致。
+// ---------------------------------------------------------------------------
+
+/** 所有错误响应的形状：只有 code 与 message。code 是稳定的 snake_case 标识，console 按它分支；message 只给人看。 */
+export interface ApiErrorBody {
+  readonly error: {
+    readonly code: string;
+    readonly message: string;
+  };
+}
+
+/** 列表响应：游标分页，最后一页 next_cursor 为 null。 */
+export interface ApiList<T> {
+  readonly items: readonly T[];
+  readonly next_cursor: string | null;
+}
+
+/** 后台角色（ADR-0002）：owner 认领实例；operator 做日常操作；viewer 只读。 */
+export type AdminRole = "owner" | "operator" | "viewer";
+
+/** A-08 `GET /api/v1/me`：当前会话的账号。时间是 ISO 8601 的 UTC 字符串。 */
+export interface MeResponse {
+  readonly github_id: number;
+  readonly login: string;
+  readonly role: AdminRole;
+  readonly is_bot_account: boolean;
+  readonly reauth_valid_until: string | null;
+  readonly session_expires_at: string;
+}
+
+/**
+ * A-55 `GET /api/release`：发布身份。display 是界面上显示的版本
+ * （正式 `X.Y.Z`，预发布 `X.Y.Z-rc.N@<sha12>`，本机「本地开发 · 未发布」），由部署脚本写入运行时环境。
+ */
+export interface ReleaseInfo {
+  readonly display: string;
+  readonly version: string;
+  readonly commit: string;
+}
+
+/** A-56 `GET /api/v1/stream` 的 topic：每个连接最多 20 个。 */
+export type StreamTopic = "overview" | "queue" | "nodes" | "repos" | "alerts" | `task:${string}`;

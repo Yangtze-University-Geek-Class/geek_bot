@@ -35,8 +35,8 @@ node scripts/tuffex-docs.mjs check
 
 ## 实现边界
 
-geek_bot 的管理后台 `app/console` 全部用 Tuffex 0.6.0（Vue 3.5），由 #4 引入依赖和外壳。在那之前，本目录只是离线参考：仓库里还没有安装 `@talex-touch/tuffex`，也没有任何页面代码。
+geek_bot 的管理后台 `app/console` 全部用 Tuffex 0.6.0（Vue 3.5），#4 已引入依赖（钉死 0.6.0）和外壳；本目录是离线参考，实际运行的是 `app/console` 安装的包。
 
-上游快照的源码包版本为 0.6.0，其 manifest 声明 Node >=26 和 Vue ^3.5.27；本仓库的运行基线是 Node 22（至少 22.13）。#4 接入时要实测 0.6.0 在 Node 22 上的安装、构建与运行，并把结论写进 console 服务文档。文档中的 since 字段不是 npm 包版本。
+上游快照的源码包版本为 0.6.0，其 manifest 声明 Node >=26 和 Vue ^3.5.27；本仓库的运行基线是 Node 22（至少 22.13）。#4 实测了 0.6.0 在 Node 22 上的安装、构建与运行，结论见 [console 服务契约](../../services/console/README.md)「Tuffex 0.6.0 在 Node 22 上的实测」。
 
 本目录是开发用的组件参考，不是 geek_bot 的产品使用文档。更新前先审阅上游版本差异，再显式同步并运行完整性检查；升级 Tuffex 版本单独立项。

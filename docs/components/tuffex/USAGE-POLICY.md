@@ -22,4 +22,4 @@ geek_bot 的管理后台（`app/console`）全部用 Tuffex 0.6.0（Vue 3.5）�
 
 ## 版本治理
 
-运行版本以 `app/console/package.json` 与 `pnpm-lock.yaml` 为准，版本钉死。上游快照的 manifest 声明 Node >=26、Vue ^3.5.27，与本仓库的 Node 22 基线不同；#4 接入时实测并记录结论。文档固定的源码提交不等于已经核实 npm latest；接入和升级都要同步更新匹配的参考资料。普通开发和检查不自动更新上游文档。升级 Tuffex 版本单独立项。新增页面的验收必须基于真实使用的组件和工具链。
+运行版本以 `app/console/package.json` 与 `pnpm-lock.yaml` 为准，版本钉死。上游快照的 manifest 声明 Node >=26、Vue ^3.5.27，与本仓库的 Node 22 基线不同；#4 的实测结论（能装、能构建、能跑，以及为 Electron peer 加的 `packageExtensions`）见 [console 服务契约](../../services/console/README.md)。文档固定的源码提交不等于已经核实 npm latest；接入和升级都要同步更新匹配的参考资料。普通开发和检查不自动更新上游文档。升级 Tuffex 版本单独立项。新增页面的验收必须基于真实使用的组件和工具链。

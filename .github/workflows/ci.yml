@@ -27,6 +27,10 @@
 # 第一次 stage→main 之前只能在本地跑 pnpm verify）。
 # push 只写了 branches、没写 tags：推送 tag 不会触发 CI（GitHub 对未声明的 ref 类型不运行）。
 #
+# console-e2e：管理后台的浏览器回归（pnpm test:e2e，#4）。以样板数据模式构建 console，在回环地址预览，
+# Playwright 断言没有原生 select/checkbox、没有 emoji、390px 没有页面级横向溢出、抽屉与键盘可用、不发外部请求。
+# 验收截图（test-results/evidence/）每次都作为 artifact 上传；失败时另传报告与失败截图。
+#
 # 暂未包含、随后续 issue 加入的 job：
 #   * docker（镜像构建验证：只构建、不推送，断言健康检查与非 root）：随 #3（control 镜像）与 #7（发布与部署栈）加入；
 #   * env-contract（pnpm check:environments，env 模板 ↔ 环境契约 ↔ compose）：随 #7 加入。
@@ -131,6 +135,57 @@ jobs:
         shell: bash
         run: pnpm build
 
+  # 管理后台的浏览器回归：样板数据模式，数据全部虚构、不连任何服务。浏览器由 Playwright 下载到 runner 的缓存目录。
+  console-e2e:
+    name: console-e2e (Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: 安装 pnpm（读取根 packageManager）
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - name: 安装 Node（读取 .nvmrc）
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: 依赖安装（锁文件不可变）
+        shell: bash
+        run: pnpm install --frozen-lockfile
+
+      - name: 安装 Chromium 与系统依赖
+        shell: bash
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: 浏览器回归（pnpm test:e2e）
+        shell: bash
+        run: pnpm test:e2e
+
+      - name: 上传验收截图
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: console-e2e-evidence
+          path: test-results/evidence/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: 上传失败报告
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: console-e2e-report
+          path: |
+            playwright-report/
+            test-results/e2e/
+          retention-days: 14
+
   # 汇总 job：给 required check 用的单一名称（免费计划的私有仓库暂时配不了分支保护，
   # 名称先固定下来，以后能配时直接引用）。
   # if: always() 是必须的——若上游 job 被跳过或取消，required check 不能因“没跑”而算通过。
@@ -139,7 +194,7 @@ jobs:
   # 它只汇总机器结果，不代表人工验收，也不授权任何部署。
   verify:
     name: verify (required check)
-    needs: [branch-guard, core, lint-workflows]
+    needs: [branch-guard, core, console-e2e, lint-workflows]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -149,12 +204,13 @@ jobs:
         env:
           BRANCH_GUARD_RESULT: ${{ needs.branch-guard.result }}
           CORE_RESULT: ${{ needs.core.result }}
+          CONSOLE_E2E_RESULT: ${{ needs.console-e2e.result }}
           LINT_WORKFLOWS_RESULT: ${{ needs.lint-workflows.result }}
         run: |
           set -u
-          echo "branch-guard=${BRANCH_GUARD_RESULT} core=${CORE_RESULT} lint-workflows=${LINT_WORKFLOWS_RESULT}"
+          echo "branch-guard=${BRANCH_GUARD_RESULT} core=${CORE_RESULT} console-e2e=${CONSOLE_E2E_RESULT} lint-workflows=${LINT_WORKFLOWS_RESULT}"
           if [ "$BRANCH_GUARD_RESULT" != "success" ] || [ "$CORE_RESULT" != "success" ] \
-             || [ "$LINT_WORKFLOWS_RESULT" != "success" ]; then
+             || [ "$CONSOLE_E2E_RESULT" != "success" ] || [ "$LINT_WORKFLOWS_RESULT" != "success" ]; then
             echo "机器验证未通过：failure / cancelled / skipped 一律视为失败。" >&2
             exit 1
           fi

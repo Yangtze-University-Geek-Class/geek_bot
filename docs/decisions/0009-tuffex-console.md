@@ -43,9 +43,7 @@
 
 ## 实施状态
 
-本篇只是设计，还没有代码。
-
-- #4：console 外壳、依赖引入、样板数据模式、浏览器回归，以及 Node 22 兼容性实测。
+- #4（已实现）：console 外壳、依赖引入、样板数据模式、浏览器回归，以及 Node 22 兼容性实测（能装、能构建、能跑，结论见 [console 服务契约](../services/console/README.md)）。
 - #3：control 托管静态产物（与 control 的 Dockerfile 一起）。
 - #14：SSE 实时推送。
 - #7：镜像构建与发布。

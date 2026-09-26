@@ -4,7 +4,16 @@
     "noEmit": true,
     "allowJs": true,
     "checkJs": false,
-    "types": ["node", "vitest"]
+    "types": [
+      "node",
+      "vitest"
+    ]
   },
-  "include": ["tests/**/*.ts", "vitest.config.ts"]
+  "include": [
+    "tests/**/*.ts",
+    "vitest.config.ts"
+  ],
+  "exclude": [
+    "tests/e2e/**"
+  ]
 }
