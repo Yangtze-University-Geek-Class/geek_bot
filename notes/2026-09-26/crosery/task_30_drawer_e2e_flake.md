@@ -19,3 +19,21 @@
 - 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
 - 做了什么：git commit：test(console): 抽屉用例等滑入完成再检查，截断检查放过 v-wave 波纹容器；提交前 pnpm verify、pnpm test:e2e
 - 结果：pnpm verify 退出码 0；pnpm test:e2e 43 passed
+
+## 13:32:43 +08:00 · 推送 · #30 · 推送 task/30/drawer_e2e_flake
+
+- 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
+- 做了什么：git push -u origin task/30/drawer_e2e_flake（HEAD 702ada5）
+- 结果：推送成功，pre-push 钩子通过
+
+## 13:32:43 +08:00 · PR · #30 · 开 PR #31 指向 stage
+
+- 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
+- 做了什么：gh pr create --base stage；正文先经 pr-contract 本地核对
+- 结果：PR #31；pr-contract 通过
+
+## 13:32:43 +08:00 · 审查 · #30 · 作者按 CODE-REVIEW 自查 702ada5，结论通过
+
+- 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
+- 做了什么：逐项核对第 1–15 项；只改 tests/e2e，截断检查只放过 v-wave 波纹容器且有自测
+- 结果：结论：通过，写在 #31 正文「审查结论」段
