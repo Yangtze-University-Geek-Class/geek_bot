@@ -36,10 +36,10 @@
 ## 后果
 
 - 改后台就要重新构建 control 镜像，两者一起发版；后台没有独立的版本号。
-- Tuffex 0.6.0 能否在 Node 22 上安装、构建和运行，没有验证，由 #4 实测并写回 [console 服务契约](../services/console/README.md)。不行时由 #4 提出办法（例如只在镜像构建阶段用别的 Node 版本），经所有者批准后执行。
+- Tuffex 0.6.0 上游声明 Node >=26。#4 实测它在 Node 22 上能安装、构建和运行，不需要换 Node 版本；另为它传递依赖里的 Electron peer 加了 `pnpm.packageExtensions`。结论见 [console 服务契约](../services/console/README.md)「Tuffex 0.6.0 在 Node 22 上的实测」。
 - beta 组件的接口可能变化；版本钉死，升级单独立项并重新验收。
 - 部署者在前面加 TLS 反代时，必须对 SSE 路径关闭缓冲；写进 DEPLOY（#7 写入）。
-- control 多了托管静态文件的职责，负载很小；静态文件的缓存头和安全响应头由 #3、#4 定。
+- control 多了托管静态文件的职责，负载很小；静态文件的缓存头和安全响应头由 #3 在 control 托管静态产物时定；#4 只产出 `dist/`，不涉及响应头。
 
 ## 实施状态
 

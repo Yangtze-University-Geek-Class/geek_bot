@@ -15,6 +15,9 @@ import { useConsoleContext } from "../components/context.js";
 import { NARROW_QUERY, useMediaQuery, useOnline } from "../components/use-environment.js";
 import { CONSOLE_PAGES, PAGE_GROUPS } from "./pages.js";
 
+/** 后台角色的中文名（ADR-0002）；接口里的机器值不直接显示。 */
+const ROLE_LABELS: Readonly<Record<MeResponse["role"], string>> = { owner: "所有者", operator: "操作员", viewer: "只读成员" };
+
 const { api, sampleMode } = useConsoleContext();
 const route = useRoute();
 const router = useRouter();
@@ -29,7 +32,7 @@ const navItems: SidebarNavItem[] = CONSOLE_PAGES.map(page => ({ value: page.name
 const navGroups = PAGE_GROUPS.map(group => ({ key: group.key, label: group.label }));
 const activePage = computed(() => (typeof route.name === "string" ? route.name : ""));
 const versionText = computed(() => release.value?.display ?? "版本未知");
-const accountText = computed(() => (me.value ? `${me.value.login} · ${me.value.role}` : ""));
+const accountText = computed(() => (me.value ? `${me.value.login} · ${ROLE_LABELS[me.value.role]}` : ""));
 
 function navigate(value: SidebarNavValue) {
   const page = CONSOLE_PAGES.find(candidate => candidate.name === value);

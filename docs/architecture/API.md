@@ -245,4 +245,4 @@
 
 - 每个端点至少有一个真实路由测试（Fastify inject）：正确路径、未登录 401、角色不够 403、缺 `Origin` 的写请求 403、未知字段 400、需要重新认证的端点在超时后 403（#3 起各 issue，见 [TESTING](../conventions/TESTING.md) 的回归矩阵）。
 - 响应里没有令牌和密文列：对每个端点的响应做密钥形态扫描（#5）。
-- console 的 DTO 与 `contracts.ts` 的 JSON Schema 一致，由 `@geek-bot/protocol` 的契约测试证明（#4 起）。
+- console 的 DTO 与 `contracts.ts` 的 JSON Schema 一致，由 `@geek-bot/protocol` 的契约测试证明（#3 起；#4 先在 protocol 里加了 console 用到的类型）。

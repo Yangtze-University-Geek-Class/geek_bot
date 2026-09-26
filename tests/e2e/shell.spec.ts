@@ -2,7 +2,18 @@
  * 后台外壳：宽屏侧栏、390px 窄屏抽屉、键盘可达、样板数据标识、断网提示与验收截图（#4）。
  */
 import { CONSOLE_PAGES } from "../../app/console/src/shell/pages.js";
+import type { Page } from "@playwright/test";
 import { NARROW, WIDE, expect, expectPageRules, settledState, test } from "./fixtures.js";
+
+/** 抽屉打开后：焦点已经在抽屉里，连按 Tab 也出不去（W3C APG modal dialog）。 */
+async function expectFocusTrappedIn(page: Page): Promise<void> {
+  const insideDialog = () => page.evaluate(() => Boolean(document.activeElement?.closest("[role=dialog]")));
+  await expect.poll(insideDialog, { message: "打开后焦点进入抽屉" }).toBe(true);
+  for (let step = 0; step < 14; step += 1) {
+    await page.keyboard.press("Tab");
+    expect(await insideDialog(), `第 ${step + 1} 次 Tab 后焦点仍在抽屉里`).toBe(true);
+  }
+}
 
 test.describe("宽屏（1280px）", () => {
   test.use({ viewport: WIDE });
@@ -57,7 +68,7 @@ test.describe("宽屏（1280px）", () => {
     await expect(page.locator("header").getByText("样板数据", { exact: true })).toBeVisible();
     await expect(page.locator("footer")).toContainText("样板数据模式：页面上的数据全部虚构");
     await expect(page.locator("footer")).toContainText("版本 本地开发 · 未发布");
-    await expect(page.locator("header")).toContainText("example-owner · owner");
+    await expect(page.locator("header")).toContainText("example-owner · 所有者");
   });
 
   test("断网时顶部出现提示，恢复后消失", async ({ page, context }) => {
@@ -111,6 +122,7 @@ test.describe("窄屏（390px）", () => {
     const drawer = page.getByRole("dialog", { name: "导航" });
     await expect(drawer).toBeVisible();
     await expect(opener).toHaveAttribute("aria-expanded", "true");
+    await expectFocusTrappedIn(page);
     await expectPageRules(page);
 
     await drawer.getByRole("button", { name: "队列" }).click();
@@ -127,6 +139,24 @@ test.describe("窄屏（390px）", () => {
     await opener.click();
     await drawer.getByRole("button", { name: "关闭导航" }).click();
     await expect(drawer).toBeHidden();
+  });
+
+  test("纯键盘：Tab 到「导航」按 Enter 打开抽屉，焦点进入并圈在抽屉里，Esc 关闭后回到按钮", async ({ page }) => {
+    await page.goto("/overview");
+    await settledState(page);
+    const opener = page.getByRole("button", { name: "导航", exact: true });
+    let reached = false;
+    for (let step = 0; step < 5 && !reached; step += 1) {
+      await page.keyboard.press("Tab");
+      reached = await opener.evaluate(element => element === document.activeElement);
+    }
+    expect(reached, "Tab 能到达「导航」按钮").toBe(true);
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("dialog", { name: "导航" })).toBeVisible();
+    await expectFocusTrappedIn(page);
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog", { name: "导航" })).toBeHidden();
+    await expect(opener).toBeFocused();
   });
 
   test("抽屉关闭时键盘进不去，面板完全在视口外、不漏阴影", async ({ page }) => {

@@ -47,7 +47,7 @@
 
 各包（`app/control`、`app/node`、`app/runner`、`packages/protocol`）现在只有最小源码，各有一份最小测试：`tests/control/config.test.ts`（配置默认值与环境变量校验）、`tests/node/config.test.ts`（节点配置校验）、`tests/runner/omp-args.test.ts`（omp 参数）、`tests/protocol/protocol.test.ts`（协议常量与通道映射）。另由各包的 `typecheck` 与 `build` 证明各包能编译、能类型导入 `@geek-bot/protocol`。这些测试只证明工作区与工具链可用，不证明任何业务功能。
 
-console（#4）：`tests/console/` 覆盖 `lib/` 与样板数据（时长格式化；API 客户端的错误格式、网络错误、非 JSON 响应、取消、路径白名单；页面状态映射；SSE 的连接、断线轮询、`reset`、`session_expired`；样板数据的各场景与「不调用真实 fetch」）。`tests/e2e/` 是浏览器回归：每个页面在 1280px 与 390px 下断言没有原生 select 与 checkbox、emoji 与被禁符号扫描为 0、图标都有图形、没有页面级横向溢出；另有侧栏与抽屉导航、键盘（跳过链接、Tab 与 Enter、Esc 与焦点归还、关闭的抽屉键盘进不去）、断网提示、样板数据标识、各数据状态；每个用例结束时断言没有请求离开浏览器（外部请求数与 `/api/` 请求数都为 0）。
+console（#4）：`tests/console/` 覆盖 `lib/` 与样板数据（时长格式化；API 客户端的错误格式、网络错误、非 JSON 响应、取消、路径白名单与各种写法的点段；页面状态映射；SSE 的连接、断线轮询、CLOSED 后退避重建、`reset`、`session_expired`；样板数据的各场景与「不调用真实 fetch」；浏览器回归所用被禁符号正则的逐类自测）。`tests/e2e/` 是浏览器回归：每个页面在 1280px 与 390px 下断言没有原生 select 与 checkbox、emoji 与被禁符号扫描为 0、图标都有图形、没有页面级横向溢出；外壳与主内容区没有被 overflow 截掉的内容；另有侧栏与抽屉导航、键盘（跳过链接、Tab 与 Enter、纯键盘打开抽屉、焦点进入并圈在抽屉里、Esc 与焦点归还、关闭的抽屉键盘进不去）、断网提示、样板数据标识、各数据状态；每个用例结束时断言没有请求离开浏览器（上下文级的外部请求、WebSocket 与 `/api/` 请求都为 0）。
 
 ## 回归矩阵（计划中，随对应 issue 加入）
 

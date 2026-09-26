@@ -3,6 +3,9 @@
  *
  * - 用浏览器的 EventSource 连接；断线重连时浏览器自己带 Last-Event-ID，control 从环形缓冲补发。
  * - 连接出错后退回每 5 秒轮询一次（由调用方提供 poll，调对应的 GET 端点），重新连上后停止轮询。
+ * - 浏览器只在网络断开时自己重连；响应不是 200（control 重启时的 503、反代的 502、会话过期后的 401）时
+ *   EventSource 进入 CLOSED、不再重连。这时本模块按 5 秒起、翻倍、最长 60 秒退避，自己重建连接；
+ *   重建的连接不带 Last-Event-ID，连上后调 onReset 让页面重新拉取。
  * - 收到 `reset` 表示补发不了，调用方要重新拉取当前页的数据；收到 `session_expired` 关闭连接、不再重连。
  * - 事件里的文本已由 control 打码，渲染时仍按纯文本处理（S-05）。
  *
@@ -12,6 +15,11 @@ import type { StreamTopic } from "@geek-bot/protocol";
 
 /** 断线后轮询对应 GET 端点的间隔（API.md「SSE」）。 */
 export const POLL_INTERVAL_MS = 5_000;
+/** EventSource 进入 CLOSED 后自己重建连接的退避：从 5 秒起，每次翻倍，最长 60 秒。 */
+export const RECONNECT_BASE_MS = 5_000;
+export const RECONNECT_MAX_MS = 60_000;
+/** EventSource.readyState 的 CLOSED。 */
+const EVENT_SOURCE_CLOSED = 2;
 /** 每个连接最多订阅的 topic 数（A-56）。 */
 export const MAX_TOPICS = 20;
 /** 连接上要监听的事件类型（API.md「SSE」事件表）。 */
@@ -53,6 +61,8 @@ export interface StreamMessage {
  * onopen、onerror 的事件参数不读取：浏览器与 Node 的类型声明对它的类型写法不同，用 never 让两者都能赋值。
  */
 export interface EventSourceLike {
+  /** 0 CONNECTING、1 OPEN、2 CLOSED。 */
+  readonly readyState: number;
   onopen: ((event: never) => void) | null;
   onerror: ((event: never) => void) | null;
   addEventListener(type: string, listener: (event: StreamMessage) => void): void;
@@ -70,6 +80,8 @@ export interface StreamOptions {
   readonly createEventSource?: (url: string) => EventSourceLike;
   readonly setInterval?: (handler: () => void, ms: number) => unknown;
   readonly clearInterval?: (handle: unknown) => void;
+  readonly setTimeout?: (handler: () => void, ms: number) => unknown;
+  readonly clearTimeout?: (handle: unknown) => void;
 }
 
 export interface StreamHandle {
@@ -86,11 +98,16 @@ export function streamUrl(topics: readonly StreamTopic[]): string {
 export function openStream(options: StreamOptions): StreamHandle {
   const url = streamUrl(options.topics);
   const create: (target: string) => EventSourceLike = options.createEventSource ?? (target => new EventSource(target, { withCredentials: true }));
-  const startTimer = options.setInterval ?? ((handler, ms) => globalThis.setInterval(handler, ms));
-  const stopTimer = options.clearInterval ?? (handle => globalThis.clearInterval(handle as ReturnType<typeof globalThis.setInterval>));
+  const startInterval = options.setInterval ?? ((handler, ms) => globalThis.setInterval(handler, ms));
+  const stopInterval = options.clearInterval ?? (handle => globalThis.clearInterval(handle as ReturnType<typeof globalThis.setInterval>));
+  const startTimeout = options.setTimeout ?? ((handler, ms) => globalThis.setTimeout(handler, ms));
+  const stopTimeout = options.clearTimeout ?? (handle => globalThis.clearTimeout(handle as ReturnType<typeof globalThis.setTimeout>));
 
   let status: StreamStatus | null = null;
   let pollTimer: unknown = null;
+  let reconnectTimer: unknown = null;
+  let reconnectDelay = RECONNECT_BASE_MS;
+  let source: EventSourceLike;
   const setStatus = (next: StreamStatus) => {
     if (next === status) return;
     status = next;
@@ -98,44 +115,69 @@ export function openStream(options: StreamOptions): StreamHandle {
   };
   const stopPolling = () => {
     if (pollTimer === null) return;
-    stopTimer(pollTimer);
+    stopInterval(pollTimer);
     pollTimer = null;
   };
   const startPolling = () => {
     if (pollTimer !== null) return;
-    pollTimer = startTimer(options.poll, POLL_INTERVAL_MS);
+    pollTimer = startInterval(options.poll, POLL_INTERVAL_MS);
   };
-
-  setStatus("connecting");
-  const source = create(url);
   const close = () => {
     stopPolling();
+    if (reconnectTimer !== null) stopTimeout(reconnectTimer);
+    reconnectTimer = null;
     source.close();
     setStatus("closed");
   };
+  const scheduleReconnect = () => {
+    if (reconnectTimer !== null) return;
+    const delay = reconnectDelay;
+    reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX_MS);
+    reconnectTimer = startTimeout(() => {
+      reconnectTimer = null;
+      if (status !== "closed") connect(true);
+    }, delay);
+  };
 
-  source.onopen = () => {
-    if (status === "closed") return;
-    stopPolling();
-    setStatus("live");
-  };
-  // EventSource 出错后会自己重连；重连成功前退回轮询，页面顶部只显示一条提示，不换成错误页。
-  source.onerror = () => {
-    if (status === "closed") return;
-    startPolling();
-    setStatus("polling");
-  };
-  for (const type of STREAM_EVENT_TYPES) {
-    source.addEventListener(type, event => {
-      if (status === "closed") return;
-      options.onEvent({ type, id: event.lastEventId, data: parseData(event.data) });
+  /** 建一条连接并挂上处理函数；旧连接上迟到的回调一律忽略。rebuilt 表示这是 CLOSED 之后自己重建的连接。 */
+  const connect = (rebuilt: boolean) => {
+    const current = create(url);
+    source = current;
+    const active = () => source === current && status !== "closed";
+
+    current.onopen = () => {
+      if (!active()) return;
+      reconnectDelay = RECONNECT_BASE_MS;
+      stopPolling();
+      setStatus("live");
+      // 重建的连接没带 Last-Event-ID，断开期间的事件补发不回来，让页面重新拉取。
+      if (rebuilt) options.onReset();
+    };
+    // 出错后先退回轮询，页面顶部只显示一条提示，不换成错误页；浏览器放弃重连（CLOSED）时自己退避重建。
+    current.onerror = () => {
+      if (!active()) return;
+      startPolling();
+      setStatus("polling");
+      if (current.readyState === EVENT_SOURCE_CLOSED) {
+        current.close();
+        scheduleReconnect();
+      }
+    };
+    for (const type of STREAM_EVENT_TYPES) {
+      current.addEventListener(type, event => {
+        if (active()) options.onEvent({ type, id: event.lastEventId, data: parseData(event.data) });
+      });
+    }
+    current.addEventListener("reset", () => {
+      if (active()) options.onReset();
     });
-  }
-  source.addEventListener("reset", () => {
-    if (status !== "closed") options.onReset();
-  });
-  source.addEventListener("session_expired", () => close());
+    current.addEventListener("session_expired", () => {
+      if (active()) close();
+    });
+  };
 
+  setStatus("connecting");
+  connect(false);
   return { url, close };
 }
 

@@ -24,13 +24,13 @@
 | `src/shell/AppShell.vue` | 外壳：宽屏是 `TxSidebarNav`，窄屏收进左侧 `TxDrawer`（「导航」按钮打开，Esc、遮罩、「关闭导航」关闭，焦点回到「导航」按钮）；顶栏显示样板数据标识（`TxStatusBadge`）与当前账号；断网时顶部显示 `TxAlert`；页脚显示版本（A-55 的展示值）；有「跳到主要内容」链接 |
 | `src/components/StateView.vue`、`ResourcePage.vue` | 数据页：读取页面清单里的 API，按结果显示加载（`TxLoadingState`）、空（`TxEmptyState`）、成功、失败（`TxErrorState`，可重试）、未登录与无权限（`TxPermissionState`）、离线（`TxOfflineState`）。失败类状态带 `HTTP 状态 · 机器码 · request id`，用 `role=alert` 播报；加载与空用 `role=status` |
 | `src/components/context.ts`、`use-environment.ts` | 注入 API 客户端与运行模式；在线状态与窄屏断点的组合函数 |
-| `src/lib/api.ts` | API 客户端：只接受 `/api/v1/*` 与 `/api/release`，同源带 cookie；错误统一成 `ApiError`（`http`、`network`、`invalid_response`，带状态码、机器码、`X-Request-Id`）；`describeError` 生成 `HTTP 状态 · 机器码 · request id`。`fetch` 由调用方注入 |
+| `src/lib/api.ts` | API 客户端：只接受 `/api/v1/*` 与 `/api/release`（`isApiPath`：拒绝完整 URL、协议相对地址和任何写法的点段，按浏览器规则规范化后必须原样不变），同源带 cookie；错误统一成 `ApiError`（`http`、`network`、`invalid_response`，带状态码、机器码、`X-Request-Id`）；`describeError` 生成 `HTTP 状态 · 机器码 · request id`。`fetch` 由调用方注入 |
 | `src/lib/page-state.ts` | 页面状态：列表没有条目算空；401 → 未登录，403 → 无权限，没有响应 → 离线，其余 → 失败 |
-| `src/lib/sse.ts` | SSE 客户端（A-56）：`EventSource` 连接、监听事件表里的全部类型、断线后每 5 秒轮询、重新连上后停止轮询、`reset` 时让页面重新拉取、`session_expired` 时关闭。服务端 SSE 由 #14 实现，在那之前外壳不建立连接 |
+| `src/lib/sse.ts` | SSE 客户端（A-56）：`EventSource` 连接、监听事件表里的全部类型、断线后每 5 秒轮询、重新连上后停止轮询、`reset` 时让页面重新拉取、`session_expired` 时关闭。响应不是 200 时浏览器会放弃重连（CLOSED），这时按 5 秒起、翻倍、最长 60 秒退避自己重建；重建的连接不带 Last-Event-ID，连上后让页面重新拉取。服务端 SSE 由 #14 实现，在那之前外壳不建立连接 |
 | `src/lib/format.ts` | `formatDuration(ms)`：毫秒格式化成中文时长，最多两级单位 |
 | `src/mocks/` | 样板数据模式：替代 `fetch`，全部虚构、不发网络请求；地址栏的 `?sample=` 切换数据端点的响应（`ok`、`empty`、`slow`、`error`、`forbidden`、`unauthenticated`、`offline`），外壳用的 `/api/v1/me`、`/api/release` 不受影响 |
 | `src/pages/NotFoundPage.vue` | 未知地址 |
-| `tests/console/` | `format`、`api`（错误格式、网络错误、非 JSON、取消、路径白名单、页面状态映射）、`sse`（连接、轮询、reset、session_expired、非 JSON）、`mocks`（场景、不调用真实 fetch、页面清单） |
+| `tests/console/` | `format`、`api`（错误格式、网络错误、非 JSON、取消、路径白名单与点段、页面状态映射）、`sse`（连接、轮询、CLOSED 后退避重建、旧连接的迟到事件、reset、session_expired、非 JSON）、`mocks`（场景、不调用真实 fetch、页面清单）、`glyphs`（浏览器回归用的被禁符号正则逐类自测） |
 | `tests/e2e/` | Playwright 浏览器回归，见「验证」 |
 
 console 对 `@geek-bot/protocol` 只做 type 导入（`ApiErrorBody`、`ApiList`、`MeResponse`、`ReleaseInfo`、`StreamTopic`），不依赖它的运行时产物。新增或删除文件时同步更新本表。
@@ -86,19 +86,19 @@ pnpm dev:console                               # 本机开发：样板数据模�
   - 原生 `select` 与 `input[type=checkbox]` 数量为 0；
   - emoji 与被禁 unicode 符号扫描为 0，扫描范围是文字、常见属性和 `::before`/`::after`；
   - 每个 `i-carbon-*` 图标都生成了图形；
-  - `document.documentElement.scrollWidth` 不超过视口宽度。
+  - `document.documentElement.scrollWidth` 不超过 `clientWidth`，外壳与主内容区里也没有被 `overflow: hidden` 截掉的内容（带 `title` 的单行省略除外）。
 - 侧栏的当前项带 `aria-current`，页面标题同步。
 - 键盘：第一个 Tab 到「跳到主要内容」，Tab 与 Enter 能切换页面。
-- 窄屏抽屉：能打开、导航后自动关闭；Esc 关闭后焦点回到「导航」按钮；关闭时键盘进不去，面板完全在视口外。
+- 窄屏抽屉：鼠标和纯键盘都能打开；打开后焦点进入抽屉，连按 Tab 出不去；导航后自动关闭；Esc 关闭后焦点回到「导航」按钮；关闭时键盘进不去，面板完全在视口外。
 - 样板数据标识与页脚版本。
 - 断网提示：出现后能自动消失。
 - 各数据状态：加载、空、失败与重试、401、403、离线。
-- 每个用例结束时断言：没有发往预览地址以外的请求，也没有 `/api/` 请求离开浏览器。
+- 每个用例结束时断言：浏览器上下文（含 service worker）没有发往预览地址以外的请求和 WebSocket，也没有 `/api/` 请求离开浏览器。
 - 验收截图写到 `test-results/evidence/`，CI 的 `console-e2e` job 把它上传为 artifact。
 
 ## 已知限制
 
-- 各业务页面的内容由上表的 issue 实现；#4 的页面在成功时只显示「数据已就绪」和返回的条数。
+- 各业务页面的内容由上表的 issue 实现；#4 的页面在成功时只显示「数据已就绪」和返回的条数。概览、模型池、机器人账号三个端点不是列表，不会显示空状态；机器人账号未绑定（`bound: false`）时也显示「数据已就绪」，由 #5、#13 按各自的数据改写。
 - SSE 客户端只有单测；服务端 SSE（#14）落地前，外壳不建立连接，也不显示「实时推送已断开」提示。
 - 登录由 #5 实现；在那之前，真实模式下 `/api/v1/me` 返回 401 时，顶栏不显示账号，页面显示「需要登录」。
 - 对比度、屏幕阅读器、多浏览器（只跑了 Chromium）和文字放大还没有单独测过（DESIGN「验收」）。

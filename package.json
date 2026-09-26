@@ -22,7 +22,7 @@
     "build": "pnpm check:runtime && pnpm -r --if-present run build",
     "verify": "pnpm check && pnpm test && pnpm build",
     "dev:console": "pnpm --filter @geek-bot/console dev",
-    "test:e2e": "pnpm check:runtime && pnpm --filter @geek-bot/console build:sample && playwright test"
+    "test:e2e": "pnpm check:runtime && playwright test"
   },
   "engines": {
     "node": ">=22.13.0 <23"

@@ -35,13 +35,30 @@ export interface ApiClient {
   get<T>(path: string, options?: { signal?: AbortSignal }): Promise<T>;
 }
 
-/** 只允许后台 API 的路径：`/api/v1/*`、`/api/release`；不接受完整 URL（防止请求被带到别的源），也不接受 `..`（浏览器会把它规范化成别的路径）。 */
+/** 字面上只允许以 `/` 开头的后台 API 路径（不接受完整 URL 与 `//` 开头的协议相对地址，防止请求被带到别的源）。 */
 const API_PATH_RE = /^\/api\/(?:v1\/[A-Za-z0-9_\-/.?=&%:,]*|release)$/;
+/** 占位源：只用来按浏览器的规则（WHATWG URL）规范化路径，不会真的发请求。 */
+const NORMALIZE_BASE = "http://geek-bot.invalid";
+
+/** 点段的各种写法：字面的 `..` 与百分号编码的点。浏览器不折叠的写法（例如 `..%2f`）服务端解码后仍可能当作点段。 */
+const DOT_SEGMENT_RE = /\.\.|%2e/i;
+
+/**
+ * 路径是否仍是后台 API：不含任何写法的点段；按浏览器的规则（WHATWG URL）规范化后，
+ * 路径仍在 `/api/v1/` 下或等于 `/api/release`，并且和原样一致，没有被改写成别的路径。
+ */
+export function isApiPath(path: string): boolean {
+  if (!API_PATH_RE.test(path) || DOT_SEGMENT_RE.test(path)) return false;
+  const url = new URL(path, NORMALIZE_BASE);
+  if (url.origin !== NORMALIZE_BASE) return false;
+  const inScope = url.pathname === "/api/release" || url.pathname.startsWith("/api/v1/");
+  return inScope && `${url.pathname}${url.search}` === path;
+}
 
 export function createApiClient(fetchImpl: FetchLike): ApiClient {
   return {
     async get<T>(path: string, options: { signal?: AbortSignal } = {}): Promise<T> {
-      if (!API_PATH_RE.test(path) || path.includes("..")) throw new TypeError(`不是后台 API 的路径：${path}`);
+      if (!isApiPath(path)) throw new TypeError(`不是后台 API 的路径：${path}`);
       let response: Response;
       try {
         response = await fetchImpl(path, {
@@ -55,7 +72,7 @@ export function createApiClient(fetchImpl: FetchLike): ApiClient {
         throw new ApiError("network", "没有收到控制面的响应");
       }
       const requestId = response.headers.get("X-Request-Id");
-      const body = await readJson(response);
+      const body = await readJson(response, options.signal);
       if (!response.ok) {
         const error = errorBodyOf(body);
         throw new ApiError("http", error?.message ?? `请求失败（HTTP ${response.status}）`, {
@@ -70,10 +87,12 @@ export function createApiClient(fetchImpl: FetchLike): ApiClient {
   };
 }
 
-async function readJson(response: Response): Promise<unknown> {
+/** 响应体解析不了时返回 undefined；读的过程中被取消则原样抛出取消，不改写成「不是 JSON」。 */
+async function readJson(response: Response, signal?: AbortSignal): Promise<unknown> {
   try {
     return await response.json();
-  } catch {
+  } catch (cause) {
+    if (signal?.aborted) throw cause;
     return undefined;
   }
 }

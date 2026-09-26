@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ApiError, createApiClient, describeError, type FetchLike } from "../../app/console/src/lib/api.js";
+import { ApiError, createApiClient, describeError, isApiPath, type FetchLike } from "../../app/console/src/lib/api.js";
 import { isEmptyResult, stateFromData, stateFromError } from "../../app/console/src/lib/page-state.js";
 
 const json = (status: number, body: unknown, requestId: string | null = "req-1") =>
@@ -41,6 +41,22 @@ describe("createApiClient", () => {
     await expect(api.get("/api/v1/overview")).rejects.toMatchObject({ kind: "invalid_response", requestId: "req-7" });
   });
 
+  it("读响应体时被取消，原样抛出取消，不改写成 invalid_response", async () => {
+    const controller = new AbortController();
+    const api = createApiClient(async () => {
+      const body = new ReadableStream({
+        start(stream) {
+          stream.enqueue(new TextEncoder().encode("{"));
+          controller.abort();
+          stream.error(new DOMException("aborted", "AbortError"));
+        },
+      });
+      return new Response(body, { status: 200 });
+    });
+    const error = await api.get("/api/v1/overview", { signal: controller.signal }).catch((caught: unknown) => caught);
+    expect(error).not.toBeInstanceOf(ApiError);
+  });
+
   it("主动取消时原样抛出取消，不改写成 network", async () => {
     const controller = new AbortController();
     const api = createApiClient(async (_input, init) => {
@@ -60,6 +76,32 @@ describe("createApiClient", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
     await expect(api.get("/api/release")).rejects.toBeDefined();
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("isApiPath", () => {
+  it("接受后台 API 路径与查询串", () => {
+    for (const path of ["/api/v1/me", "/api/release", "/api/v1/tasks?state=queued&limit=50", "/api/v1/stream?topics=overview,task%3At1"]) {
+      expect(isApiPath(path), path).toBe(true);
+    }
+  });
+
+  it("拒绝点段（含百分号编码）、完整 URL、协议相对地址与别的前缀", () => {
+    for (const path of [
+      "/api/v1/../healthz",
+      "/api/v1/%2e%2e/%2e%2e/healthz",
+      "/api/v1/.%2e/node/v1/tasks",
+      "/api/v1/%2E%2E/release",
+      "/api/v1/./me",
+      "/api/v1/tasks/..%2f",
+      "/api/v1/tasks/%2E",
+      "https://geek-bot.example.com/api/v1/me",
+      "//evil.example.com/api/v1/me",
+      "/api/node/v1/tasks",
+      "/api/releases",
+    ]) {
+      expect(isApiPath(path), path).toBe(false);
+    }
   });
 });
 

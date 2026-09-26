@@ -27,3 +27,33 @@
 - 做了什么：git commit：feat(console): Tuffex 后台外壳、样板数据模式与浏览器回归；提交前 pnpm verify、pnpm test:e2e、actionlint
 - 结果：pnpm verify 退出码 0（Tests 309 passed）；pnpm test:e2e 41 passed；actionlint 无输出
 - 下一步：推送、开 PR、独立审查
+
+## 10:02:52 +08:00 · 推送 · #4 · 推送 task/4/console_shell
+
+- 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
+- 做了什么：git push -u origin task/4/console_shell（HEAD 99f18b0）
+- 结果：推送成功，pre-push 钩子通过
+
+## 10:02:52 +08:00 · PR · #4 · 开 PR #28 指向 stage
+
+- 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
+- 做了什么：gh pr create --base stage；正文先经 node scripts/pr-contract.mjs check 本地核对
+- 结果：PR #28；本地 pr-contract：PR 正文契约通过（9 个段落齐全，有验收证据）；审查结论段先写阻塞，等独立审查
+
+## 11:13:02 +08:00 · 审查 · #4 · 独立审查员审 99f18b0：无阻塞，5 条应修、7 条建议
+
+- 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
+- 做了什么：独立审查代理按 CODE-REVIEW 逐项核对 99f18b0，只读，跑了 pnpm verify、vitest、pnpm test:e2e 与临时探测脚本
+- 结果：应修：路径白名单拦不住 %2e 编码的点段；EventSource 进入 CLOSED 后不再重连；被禁符号正则漏 ⏵ ⟶ ▾ ❯ 等；抽屉测试没断言焦点进入与圈定；ADR-0009 两处与现状矛盾。建议 7 条。门禁全过，正式包无样板代码
+
+## 11:13:02 +08:00 · 返工 · #4 · 5 条应修全部改完，采纳 7 条建议
+
+- 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
+- 做了什么：isApiPath：拒绝任何写法的点段并按 WHATWG 规范化后比对；sse：CLOSED 后 5 秒起翻倍最长 60 秒退避重建、重建后 onReset、忽略旧连接回调；被禁符号正则按 Unicode 区块补全并加逐类自测；抽屉加焦点进入与圈定断言和纯键盘用例；ADR-0009、API.md 更正；读响应体时取消原样抛出；溢出改比 clientWidth 并加整个外壳的截断检查（探测用例证明能报出 .shell__body 截断）；webServer 先构建再预览；角色显示中文；请求记录改为上下文级并记录 WebSocket
+- 结果：pnpm verify 退出码 0（Test Files 23 passed，Tests 318 passed）；pnpm test:e2e 42 passed；actionlint 退出码 0；正式构建 dist 仍无样板代码
+
+## 11:13:02 +08:00 · 提交 · #4 · 返工一起提交
+
+- 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
+- 做了什么：git commit：fix(console): 按审查意见收紧 API 路径、SSE 重连与浏览器回归；提交前 pnpm verify、pnpm test:e2e、actionlint
+- 结果：pnpm verify 退出码 0（Tests 318 passed）；pnpm test:e2e 42 passed

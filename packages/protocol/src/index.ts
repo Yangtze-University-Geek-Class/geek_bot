@@ -94,6 +94,7 @@ export interface MeResponse {
 /**
  * A-55 `GET /api/release`：发布身份。display 是界面上显示的版本
  * （正式 `X.Y.Z`，预发布 `X.Y.Z-rc.N@<sha12>`，本机「本地开发 · 未发布」），由部署脚本写入运行时环境。
+ * 这里只列 console 读取的字段；A-55 另有支持的节点协议版本范围，由 #3 实现端点时补进来。
  */
 export interface ReleaseInfo {
   readonly display: string;

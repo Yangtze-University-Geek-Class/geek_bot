@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { MAX_TOPICS, POLL_INTERVAL_MS, openStream, streamUrl, type EventSourceLike, type StreamMessage, type StreamStatus } from "../../app/console/src/lib/sse.js";
+import { MAX_TOPICS, POLL_INTERVAL_MS, RECONNECT_BASE_MS, RECONNECT_MAX_MS, openStream, streamUrl, type EventSourceLike, type StreamMessage, type StreamStatus } from "../../app/console/src/lib/sse.js";
 
 class FakeEventSource implements EventSourceLike {
+  readyState = 0;
   onopen: ((event: Event) => void) | null = null;
   onerror: ((event: Event) => void) | null = null;
   closed = false;
@@ -12,6 +13,12 @@ class FakeEventSource implements EventSourceLike {
   }
   close() {
     this.closed = true;
+    this.readyState = 2;
+  }
+  /** 浏览器放弃重连：响应不是 200 时 EventSource 进入 CLOSED 再触发 error。 */
+  failHard() {
+    this.readyState = 2;
+    this.onerror?.(new Event("error"));
   }
   emit(type: string, data: string, lastEventId = "1") {
     for (const listener of this.listeners.get(type) ?? []) listener({ data, lastEventId });
@@ -23,6 +30,7 @@ function setup() {
   const statuses: StreamStatus[] = [];
   const events: unknown[] = [];
   const timers = new Map<number, () => void>();
+  const timeouts = new Map<number, { handler: () => void; ms: number }>();
   let nextTimer = 0;
   const options = {
     topics: ["overview", "queue"] as const,
@@ -41,9 +49,21 @@ function setup() {
       return nextTimer;
     }),
     clearInterval: vi.fn((handle: unknown) => timers.delete(handle as number)),
+    setTimeout: vi.fn((handler: () => void, ms: number) => {
+      timeouts.set(++nextTimer, { handler, ms });
+      return nextTimer;
+    }),
+    clearTimeout: vi.fn((handle: unknown) => timeouts.delete(handle as number)),
   };
   const handle = openStream(options);
-  return { handle, options, source: sources[0], statuses, events, timers };
+  /** 触发下一个待执行的重连定时器，返回它的延迟。 */
+  const fireReconnect = () => {
+    const [id, timeout] = [...timeouts.entries()][0];
+    timeouts.delete(id);
+    timeout.handler();
+    return timeout.ms;
+  };
+  return { handle, options, sources, source: sources[0], statuses, events, timers, timeouts, fireReconnect };
 }
 
 describe("streamUrl", () => {
@@ -79,6 +99,62 @@ describe("openStream", () => {
     source.onopen?.(new Event("open"));
     expect(statuses.at(-1)).toBe("live");
     expect(timers.size).toBe(0);
+  });
+
+  it("浏览器自己重连（readyState 不是 CLOSED）时不重建连接", () => {
+    const { source, sources, timeouts } = setup();
+    source.onerror?.(new Event("error"));
+    expect(sources).toHaveLength(1);
+    expect(timeouts.size).toBe(0);
+  });
+
+  it("EventSource 进入 CLOSED 后按 5 秒起、翻倍、最长 60 秒退避重建；重建后连上会让页面重新拉取", () => {
+    const { source, sources, statuses, timers, options, fireReconnect } = setup();
+    source.onopen?.(new Event("open"));
+    source.failHard();
+    expect(source.closed).toBe(true);
+    expect(statuses.at(-1)).toBe("polling");
+    expect(timers.size).toBe(1);
+
+    const delays: number[] = [];
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      delays.push(fireReconnect());
+      sources.at(-1)?.failHard();
+    }
+    expect(delays).toEqual([RECONNECT_BASE_MS, 10_000, 20_000, 40_000, RECONNECT_MAX_MS, RECONNECT_MAX_MS]);
+    expect(sources).toHaveLength(7);
+    expect(options.onReset).not.toHaveBeenCalled();
+
+    fireReconnect();
+    const rebuilt = sources.at(-1)!;
+    rebuilt.onopen?.(new Event("open"));
+    expect(statuses.at(-1)).toBe("live");
+    expect(timers.size).toBe(0);
+    expect(options.onReset).toHaveBeenCalledTimes(1);
+
+    rebuilt.failHard();
+    expect(fireReconnect()).toBe(RECONNECT_BASE_MS);
+  });
+
+  it("旧连接上迟到的事件与回调被忽略", () => {
+    const { source, sources, events, statuses, fireReconnect } = setup();
+    source.failHard();
+    fireReconnect();
+    const current = sources.at(-1)!;
+    current.onopen?.(new Event("open"));
+    source.emit("task.created", "{}");
+    source.onerror?.(new Event("error"));
+    expect(events).toEqual([]);
+    expect(statuses.at(-1)).toBe("live");
+  });
+
+  it("close 取消待执行的重连", () => {
+    const { handle, source, timeouts, sources } = setup();
+    source.failHard();
+    expect(timeouts.size).toBe(1);
+    handle.close();
+    expect(timeouts.size).toBe(0);
+    expect(sources).toHaveLength(1);
   });
 
   it("收到 reset 时让调用方重新拉取", () => {
