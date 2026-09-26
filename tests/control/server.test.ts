@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { copyFileSync, existsSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildApp } from "../../app/control/src/app.js";
@@ -269,6 +269,21 @@ describe("启动检查", () => {
       { key: "review.own_prs", note: "new column" },
     ]);
     expect(again.db.prepare("SELECT body FROM notes_next").all()).toEqual([{ body: "written by new code" }]);
+  });
+
+  it("反例：启动时清空 <dataDir>/tmp 并收紧到 0700，上次崩溃留下的明文临时文件不会留下", async () => {
+    const fx = fixture();
+    await (await start(fx)).shutdown("crash_simulated");
+    const tmp = join(fx.dir, "data", "tmp");
+    mkdirSync(join(tmp, "restore-abc"), { recursive: true });
+    writeFileSync(join(tmp, ".tmp-0123456789ab.sqlite"), "plaintext left by a crash");
+    writeFileSync(join(tmp, "restore-abc", "x.sqlite"), "plaintext");
+    chmodSync(tmp, 0o755);
+    const sink = memorySink();
+    await start(fx, { sink });
+    expect(readdirSync(tmp)).toEqual([]);
+    expect(statSync(tmp).mode & 0o777).toBe(0o700);
+    expect(sink.lines().find(line => line.msg === "清掉了上次崩溃留在临时目录里的明文文件")).toMatchObject({ level: "warn", removed: 2 });
   });
 
   it("单写者：control 运行时同一个库的第二个 control 拒绝启动", async () => {

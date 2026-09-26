@@ -52,7 +52,7 @@ control 从不运行 omp，也不执行目标仓库里的任何代码。
 
 - **实例角色** `GEEK_BOT_INSTANCE_ROLE`（`preview`、`production`）必须显式配置，没配或值不对就拒绝启动（B-64）。
 - **监听** `GEEK_BOT_HOST` 默认 `127.0.0.1`，`GEEK_BOT_PORT` 默认 `8080`。绑定非回环地址时必须配置 `GEEK_BOT_PUBLIC_ORIGIN`；origin 不是 https 时还要显式设置 `GEEK_BOT_ALLOW_PLAINTEXT_MESH=true`，否则拒绝启动（S-20）。origin 只能是 `http(s)://主机[:端口]`。
-- **库** `GEEK_BOT_DB_PATH` 默认 `/data/geek-bot.db`。加密备份在同目录的 `backups/`，运维本地通道在 `run/`。
+- **库** `GEEK_BOT_DB_PATH` 默认 `/data/geek-bot.db`。加密备份在同目录的 `backups/`，运维本地通道在 `run/`，备份与恢复校验的明文临时文件在 `tmp/`（0700，文件 0600，启动时清空）。
 - **密钥只从 `*_FILE` 读**：`GEEK_BOT_MASTER_KEY_FILE`（默认 `/run/secrets/master_key`）与 `GEEK_BOT_BACKUP_KEY_FILE`（默认 `/run/secrets/backup_key`）。这两个变量只接受路径的写法：绝对路径，或以 `./`、`../` 开头（与 `check-secrets` 的密钥文件引用同一口径）；以 `/` 开头的 base64 密钥原文另按密钥的样子拦下。不合规就拒绝启动，报错只写变量名、不回显值，因为误填进来的往往就是密钥原文。文件内容是 32 个随机字节的 base64（`openssl rand -base64 32`）或 64 位十六进制；读不到、格式不对、两个变量指向同一个文件、两把密钥相同都拒绝启动，报错只写变量名和路径。直接写值的 `GEEK_BOT_MASTER_KEY`、`GEEK_BOT_BACKUP_KEY` 一旦有值就拒绝启动。文件对组或其他用户可读时记一条 warn（不阻止启动；权限由部署脚本核对，#7）。#3 只读取并校验 master key，用它加密令牌随 #5。
 - **日志级别** `GEEK_BOT_LOG_LEVEL`：`debug`、`info`（默认）、`warn`、`error`。
 - **镜像版本** `GEEK_BOT_APP_VERSION`（默认 `local`）：只作来源记录，写进 `schema_migrations.app_version` 与 `backups.app_version`；由部署脚本写入（#7）。它不是 A-55 的展示值。
@@ -64,7 +64,7 @@ control 从不运行 omp，也不执行目标仓库里的任何代码。
 
 1. 读配置，不合法就拒绝启动，一次列出全部问题；
 2. 读两把密钥；
-3. 以独占方式打开库：`locking_mode=EXCLUSIVE` 下连接一直持有文件锁，同一个库的第二个 control（或任何别的连接）等满 `busy_timeout` 后打不开，报「库正被另一个进程占用」（ADR-0003）；
+3. 以独占方式打开库：`locking_mode=EXCLUSIVE` 下连接一直持有文件锁，同一个库的第二个 control（或任何别的连接）等满 `busy_timeout` 后打不开，报「库正被另一个进程占用」（ADR-0003）；拿到锁之后清空 `tmp/` 并把它收紧到 0700，上次崩溃留下的明文临时文件不会留下；
 4. 迁移检查（[数据模型](data-model.md)「迁移规则」）：兼容版本高于代码、已应用的迁移文件被改过、`schema_migrations` 编号不连续、库不是 geek_bot 的库，都拒绝启动；声明 `shrink=false` 的迁移执行后已有的表、列、索引、触发器、视图少了或变了，回滚并拒绝启动；有待执行的迁移而库不是空库时，先做一次 `pre_migration` 备份，备份失败就不迁移、拒绝启动；库比代码新而兼容版本不高（回滚到上一版镜像）时记一条 warn，正常启动；
 5. 清掉备份目录里崩溃留下的临时文件，给没登记的备份文件补登记；
 6. 监听端口，然后开运维本地通道和每日备份任务。
@@ -85,7 +85,7 @@ control 从不运行 omp，也不执行目标仓库里的任何代码。
 | `verify-backup [<文件名>]` | 恢复校验一份备份（默认最新一份没被清理的），结果写进 `backups`，失败写 `critical` 告警，并以 1 退出 |
 | `restore --dry-run <文件>` | 只做恢复校验，报告会恢复到哪个时间点、哪个库版本，以及这版代码能否直接打开；不碰库、不改任何文件。文件可以是 `backups/` 里的文件名或任意路径（例如异地副本）。正式恢复（覆盖库文件）没有实现，不带 `--dry-run` 以 2 退出，随 #20 的恢复演练写入 |
 
-单写者（ADR-0003）的定稿做法：`backup`、`verify-backup` 会写库，control 在运行时经本地通道（`<库所在目录>/run/control.sock`，unix socket 上的 HTTP；`run/` 权限 0700、socket 0600，只有运行 control 的账号能连，不占 TCP 端口）交给 control 执行，CLI 不开写连接。连不上通道时（control 没在运行），CLI 以同样的独占方式打开库自己执行，做完 checkpoint 并关库；拿不到锁就失败。离线执行在写库之前按迁移规则核对库版本：库执行到的迁移必须正好是这版 CLI 认识的最高编号，兼容版本也不能高于它；对不上（库比 CLI 旧、比 CLI 新、兼容版本更高、库被手工改过）就拒绝执行、不写库，CLI 自己不执行迁移。`restore --dry-run` 只读备份文件和备份加密密钥。以后的 `bootstrap-code`（#5）走同一个通道；`rotate-master-key`（#5）与正式 `restore`（#20）只在 control 停止时以独占方式运行。
+单写者（ADR-0003）的定稿做法：`backup`、`verify-backup` 会写库，control 在运行时经本地通道（`<库所在目录>/run/control.sock`，unix socket 上的 HTTP；`run/` 权限 0700、socket 0600，只有运行 control 的账号能连，不占 TCP 端口）交给 control 执行，CLI 不开写连接。连不上通道时（control 没在运行），CLI 以同样的独占方式打开库自己执行，做完 checkpoint 并关库；拿不到锁就失败。离线执行在写库之前按迁移规则核对库版本：库执行到的迁移必须正好是这版 CLI 认识的最高编号，兼容版本也不能高于它；对不上（库比 CLI 旧、比 CLI 新、兼容版本更高、库被手工改过）就拒绝执行、不写库，CLI 自己不执行迁移。`restore --dry-run` 只读备份文件和备份加密密钥，解密出的明文放在 `tmp/` 下的临时目录里，做完删除。以后的 `bootstrap-code`（#5）走同一个通道；`rotate-master-key`（#5）与正式 `restore`（#20）只在 control 停止时以独占方式运行。
 
 ## 日志与打码
 

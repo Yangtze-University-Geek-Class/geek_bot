@@ -162,6 +162,8 @@ export interface DeploymentConfig {
   readonly backupDir: string;
   /** 运维本地通道（unix socket）所在目录：`<dataDir>/run`。 */
   readonly runDir: string;
+  /** 备份与恢复校验的明文临时文件所在目录：`<dataDir>/tmp`（0700，启动时清空）。 */
+  readonly tmpDir: string;
   /** 令牌加密主密钥（master key）文件的绝对路径。 */
   readonly masterKeyFile: string;
   /** 备份加密密钥文件的绝对路径。 */
@@ -353,6 +355,7 @@ function collectDeploymentConfig(env: Env, cwd: string, problems: string[]): Dep
     dataDir,
     backupDir: join(dataDir, "backups"),
     runDir: join(dataDir, "run"),
+    tmpDir: join(dataDir, "tmp"),
     masterKeyFile: masterKeyFile ?? DEPLOYMENT_DEFAULTS.masterKeyFile,
     backupKeyFile: backupKeyFile ?? DEPLOYMENT_DEFAULTS.backupKeyFile,
     logLevel,

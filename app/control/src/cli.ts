@@ -11,8 +11,7 @@
  * restore --dry-run 不碰库，只读备份文件和备份加密密钥。正式恢复（覆盖库文件）不在 #3，没有实现。
  * 退出码：0 成功；1 失败；2 用法错误。
  */
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -133,6 +132,7 @@ async function offline<T>(io: CliIo, config: LoadedConfig, redactor: Redactor, r
     const service = createBackupService({
       db,
       backupDir: config.deployment.backupDir,
+      tmpDir: config.deployment.tmpDir,
       backupKey: key.key,
       backupKeyId: keyFingerprint(key.key, "backup-key"),
       clock,
@@ -212,7 +212,9 @@ async function commandRestore(args: string[], io: CliIo, redactor: Redactor): Pr
   const given = positionals[0] as string;
   const path = given.includes("/") ? (isAbsolute(given) ? given : resolve(cwd, given)) : join(config.deployment.backupDir, given);
   const codeVersion = loadMigrations(io.migrationsDir).length;
-  const work = mkdtempSync(join(tmpdir(), "geek-bot-restore-"));
+  // 解密出的明文放在 <dataDir>/tmp 下（0700），不放系统 /tmp；control 启动时会清空这个目录。
+  mkdirSync(config.deployment.tmpDir, { recursive: true, mode: 0o700 });
+  const work = mkdtempSync(join(config.deployment.tmpDir, "restore-"));
   let check: FileCheck;
   try {
     check = await checkBackupFile(path, key.key, keyFingerprint(key.key, "backup-key"), work);

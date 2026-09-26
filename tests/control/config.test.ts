@@ -126,6 +126,7 @@ describe("control 部署配置", () => {
       dataDir: "/data",
       backupDir: "/data/backups",
       runDir: "/data/run",
+      tmpDir: "/data/tmp",
       masterKeyFile: "/run/secrets/master_key",
       backupKeyFile: "/run/secrets/backup_key",
       logLevel: "info",

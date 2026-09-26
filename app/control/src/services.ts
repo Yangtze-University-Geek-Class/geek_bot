@@ -3,7 +3,7 @@
  *
  * 1. 读配置（产品默认值 + 部署配置），不合法就拒绝启动；
  * 2. 读 master key 与备份加密密钥（只从 *_FILE），读不到或格式不对就拒绝启动，报错不含密钥内容；
- * 3. 以独占方式打开库（ADR-0003）；
+ * 3. 以独占方式打开库（ADR-0003），然后清空明文临时目录 <dataDir>/tmp（0700）；
  * 4. 迁移检查（ADR-0008）：兼容版本高于代码拒绝启动；有待执行的迁移先做一次 pre_migration 备份再逐个执行；
  * 5. 清理备份目录里崩溃留下的临时文件，补登记没登记的备份文件；
  * 6. 组装 Fastify（/healthz、/readyz），listen 之后再开运维本地通道和每日备份任务。
@@ -19,7 +19,7 @@ import { checkpointAndClose, DatabaseOpenError, openDatabase, type Db } from "./
 import { applyMigrations, loadMigrations, MigrationError, planMigrations, readSchemaState, type SchemaState } from "./db/migrator.js";
 import { createLogger, stdoutSink, type LogSink, type Logger } from "./log/logger.js";
 import { createRedactor, type Redactor } from "./log/redact.js";
-import { createBackupService, OTHER_BACKUPS_KEPT, type BackupRecord, type BackupService, type RetentionPolicy } from "./ops/backup.js";
+import { createBackupService, OTHER_BACKUPS_KEPT, resetTempDir, type BackupRecord, type BackupService, type RetentionPolicy } from "./ops/backup.js";
 import { ChannelError, createOpsChannel, type OpsChannel } from "./ops/channel.js";
 import { createDailyJobs, type DailyJobs } from "./ops/scheduler.js";
 import type { ReadinessCheck } from "./routes/health/contracts.js";
@@ -147,12 +147,21 @@ export async function startControl(options: StartOptions): Promise<ControlHandle
     if (error instanceof DatabaseOpenError) return fail([error.message]);
     throw error;
   }
+  // 拿到独占锁之后再清：离线 CLI 此时不可能在用这个目录。
+  try {
+    const removed = resetTempDir(deployment.tmpDir);
+    if (removed > 0) logger.warn({ removed }, "清掉了上次崩溃留在临时目录里的明文文件");
+  } catch (error) {
+    db.close();
+    return fail([`临时目录 ${deployment.tmpDir} 准备失败：${(error as Error).message}`]);
+  }
 
   const backupKeyId = keyFingerprint(keys.backup.key, "backup-key");
   const serviceFor = () =>
     createBackupService({
       db,
       backupDir: deployment.backupDir,
+      tmpDir: deployment.tmpDir,
       backupKey: keys.backup.key,
       backupKeyId,
       clock,

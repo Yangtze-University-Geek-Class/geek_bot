@@ -23,7 +23,7 @@
 - **密文列**（列名以 `_ct` 结尾）：AES-256-GCM，每个值用独立的随机 nonce，列里依次存 nonce、密文和认证标签，同一行存 `key_version`。master key 以文件挂载，不进库、不进备份（[SECURITY](../../architecture/SECURITY.md) S-01）。`rotate-master-key` 在一个事务里重新加密全部密文并提升 `key_version`。
 - **哈希列**（列名以 `_hash` 结尾）：对高熵随机令牌存 SHA-256，比较用常量时间；明文只在生成时显示一次，或只在内存里。
 - **库里不存**：master key、会话签名密钥、备份加密密钥、OAuth client secret、模型网关密钥（都是 `*_FILE` 文件）；会话 id、认领码、登录流程 cookie、节点令牌、每任务模型令牌的明文。
-- **库外文件**：同一个卷下的 `mirrors/`（镜像克隆）、`bundles/`（任务包）、`tasks/<任务 id>/`（事件原文 `events.jsonl.gz`、补丁等产物）、`backups/`（加密备份，#3）、`run/`（运维本地通道的 socket，#3）。它们的保留期写在对应的表下面。库、备份和事件文件里有仓库内容和任务输出，按实例数据对待：不进仓库、不进镜像、不进日志（ADR-0008）。
+- **库外文件**：同一个卷下的 `mirrors/`（镜像克隆）、`bundles/`（任务包）、`tasks/<任务 id>/`（事件原文 `events.jsonl.gz`、补丁等产物）、`backups/`（加密备份，#3）、`run/`（运维本地通道的 socket，#3）、`tmp/`（备份与恢复校验的明文临时文件，权限 0700，control 启动时清空，#3）。它们的保留期写在对应的表下面。库、备份和事件文件里有仓库内容和任务输出，按实例数据对待：不进仓库、不进镜像、不进日志（ADR-0008）。
 
 ## 表清单
 
@@ -603,10 +603,10 @@ outbox 行在对象 id 和标记写进这张表后才算 `confirmed`。索引：
 
 **做法**
 
-1. 用 better-sqlite3 的在线 backup 把库复制到 `backups/` 里的临时文件，不停服务；
+1. 用 better-sqlite3 的在线 backup 把库复制到 `tmp/` 里的临时文件（先以 0600 建出空文件再写入），不停服务；明文不放 `backups/`（#20 会给它做异地副本），也不放系统临时目录；
 2. 打开临时文件（转成 DELETE 日志模式，成为一个自足的文件），统计各表行数，写进 `row_counts_json`；
 3. 用备份加密密钥（`GEEK_BOT_BACKUP_KEY_FILE`，部署时是 `<栈根>/secrets/backup_key`，只挂给 control，不进备份）按下面的格式流式加密，算加密后文件的 sha256；
-4. 改名进 `backups/`（`geek-bot-<种类>-<UTC 时间>-<随机>.gbbk`，权限 0600），写一行 `backups`，删除临时的明文文件，按保留策略清理。
+4. 加密结果先写成 `backups/` 里以 `.tmp-` 开头的文件，再改名为 `geek-bot-<种类>-<UTC 时间>-<随机>.gbbk`（权限 0600），写一行 `backups`，删除 `tmp/` 里的明文，按保留策略清理。崩溃留下的 `.tmp-` 密文在下次启动时删除。
 
 **文件格式**（`app/control/src/ops/backup-file.ts`）：8 字节魔数 `GBBK0001`，4 字节头部长度，头部 JSON（加密参数与随机 IV、种类、时间、库版本 D、兼容版本 K、镜像版本、备份密钥指纹、各表行数），然后是 AES-256-GCM 密文和 16 字节认证标签。魔数、长度和头部整体作为附加认证数据：内容或头部被改动、密钥不对，都解不开。
 
@@ -617,11 +617,11 @@ master key 和备份加密密钥都不进备份，所有者各另存一份离线
 **每日恢复校验**（自动，每天一次）
 
 1. 取最新一份备份，核对文件的 sha256 与 `backups` 行一致；
-2. 解密到临时文件；
+2. 解密到 `tmp/` 里的临时文件（0600）；
 3. `PRAGMA integrity_check` 返回 `ok`，`PRAGMA foreign_key_check` 没有结果；
 4. `user_version` 等于 `schema_migrations` 里的最大编号；
 5. 各表行数等于 `row_counts_json`；
-6. 删除临时文件，写 `verified_at` 和 `verify_result`。
+6. 删除 `tmp/` 里的临时文件，写 `verified_at` 和 `verify_result`。
 
 #3 在每天的备份做完后立即校验这一份；`geek-bot verify-backup` 可以随时手动校验。任何一步失败：`verify_result` 记 `failed`，写一条 `critical` 告警（`backup_verify_failed`，对象 `backup/<id>`），后台概览显示「最近一次恢复校验失败」（概览随 A-35）；之后有一次校验通过，就把未解决的 `backup_verify_failed` 标为已解决。备份本身失败写 `critical` 告警 `backup_failed`（对象 `backup/<种类>`），下一次检查时重试。
 

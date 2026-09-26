@@ -109,3 +109,15 @@
 - 执行者：agent-claude-geek-bot-821e-control3（Claude Code，claude-opus-5-5）
 - 做了什么：fix(control): 离线 CLI 写库前核对库版本，备份服务只读写 0001 的 backups 列；提交前跑 pnpm check 与 tests/control
 - 结果：pnpm check 退出码 0；tests/control 84 passed
+
+## 13:11:50 +08:00 · 返工 · #3 · 明文临时文件改放 <dataDir>/tmp，0600，启动时清空
+
+- 执行者：agent-claude-geek-bot-821e-control3（Claude Code，claude-opus-5-5）
+- 做了什么：审查建议 6：部署配置加 tmpDir（<dataDir>/tmp）；备份的明文副本先以 0600 建空文件再交给 db.backup（直接新建时按 umask 是 0644），恢复校验解密到 tmp，不再放进 backups/；restore --dry-run 的临时目录从系统 /tmp 改到 <dataDir>/tmp；control 拿到库的独占锁之后清空 tmp 并 chmod 0700，有残留时记 warn。backups/ 里仍只有以 .tmp- 开头的密文临时文件（同目录改名保证原子）。反例四条：backup.test 两条（db.backup 的目标在 tmp 且为 0600；backups/ 只读时恢复校验照样通过），server.test 一条（启动清掉残留并收紧到 0700），cli.test 一条（系统临时目录不可用时演练照样通过）；control README、data-model、TESTING 同步
+- 结果：四条反例换回修之前的 config、backup、services、cli 时全部失败，修复后通过；tests/control 88 passed；pnpm check 退出码 0
+
+## 13:11:50 +08:00 · 提交 · #3 · 明文临时目录的修复一起提交
+
+- 执行者：agent-claude-geek-bot-821e-control3（Claude Code，claude-opus-5-5）
+- 做了什么：fix(control): 明文临时文件改放 <dataDir>/tmp，建出即 0600，启动时清空；提交前跑 pnpm check 与 tests/control
+- 结果：pnpm check 退出码 0；tests/control 88 passed

@@ -5,10 +5,12 @@
  * → 改名进 backups/ → 写一行 backups → 删临时明文 → 按保留策略清理。
  * 恢复校验：核对 sha256 → 解密到临时文件（认证标签不对即失败）→ integrity_check、foreign_key_check → user_version 等于
  * schema_migrations 的最大编号 → 各表行数与登记一致 → 删临时文件。失败写 critical 告警。
+ * 明文临时文件只放在 <dataDir>/tmp（0700，启动时清空，文件 0600）：不放 backups/（#20 会给它做异地副本），也不放系统 /tmp。
+ * backups/ 里只有加密后的文件，写到一半的密文以 .tmp- 开头，改名后才算数。
  * 同一时刻只做一件事：备份、校验、清理排队执行。
  */
 import { randomBytes } from "node:crypto";
-import { mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
+import { chmodSync, closeSync, mkdirSync, openSync, readdirSync, rmSync, statSync } from "node:fs";
 import { rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { Alerts } from "../db/alerts.js";
@@ -106,6 +108,22 @@ async function removeCopy(path: string): Promise<void> {
   await Promise.all(["", "-journal", "-wal", "-shm"].map(suffix => rm(`${path}${suffix}`, { force: true })));
 }
 
+/** 建好明文临时目录（0700）。 */
+function ensurePrivateDir(dir: string): void {
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+}
+
+/**
+ * 启动时（已拿到库的独占锁）：建好 <dataDir>/tmp 并收紧到 0700，清掉上次崩溃留下的明文临时文件；返回清掉的条目数。
+ */
+export function resetTempDir(dir: string): number {
+  ensurePrivateDir(dir);
+  chmodSync(dir, 0o700);
+  const names = readdirSync(dir);
+  for (const name of names) rmSync(join(dir, name), { recursive: true, force: true });
+  return names.length;
+}
+
 /**
  * 校验一个备份文件，不依赖运行中的库：认证解密、integrity_check、foreign_key_check、user_version、各表行数。
  * expected 给了就另外核对登记的 sha256 与行数。tmpDir 放解密出的临时文件（用完删除）。
@@ -138,7 +156,7 @@ export async function checkBackupFile(
     problems.push(`这份备份是用另一把备份密钥加密的（密钥指纹 ${header.backup_key_id}，当前密钥是 ${keyId}）`);
     return { ok: false, problems, sha256, header, restored };
   }
-  mkdirSync(tmpDir, { recursive: true, mode: 0o700 });
+  ensurePrivateDir(tmpDir);
   const plain = tempName(tmpDir, ".sqlite");
   try {
     await decryptBackup(path, key, plain);
@@ -172,6 +190,8 @@ export async function checkBackupFile(
 export interface BackupServiceOptions {
   readonly db: Db;
   readonly backupDir: string;
+  /** 明文临时文件的目录（<dataDir>/tmp）。 */
+  readonly tmpDir: string;
   readonly backupKey: Buffer;
   readonly backupKeyId: string;
   readonly clock: () => number;
@@ -202,7 +222,7 @@ function stamp(ms: number): string {
 }
 
 export function createBackupService(options: BackupServiceOptions): BackupService {
-  const { db, backupDir, backupKey, backupKeyId, clock, appVersion, retention, auditor, alerts, logger } = options;
+  const { db, backupDir, tmpDir, backupKey, backupKeyId, clock, appVersion, retention, auditor, alerts, logger } = options;
   let chain: Promise<unknown> = Promise.resolve();
   const serial = <T>(task: () => Promise<T>): Promise<T> => {
     const run = chain.then(task, task);
@@ -237,10 +257,13 @@ export function createBackupService(options: BackupServiceOptions): BackupServic
   async function createNow(kind: BackupKind, actor: Actor): Promise<BackupRecord> {
     const now = clock();
     const file = `geek-bot-${kind}-${stamp(now)}-${randomBytes(3).toString("hex")}${BACKUP_EXTENSION}`;
-    const plain = tempName(backupDir, ".sqlite");
+    const plain = tempName(tmpDir, ".sqlite");
     const sealed = tempName(backupDir, BACKUP_EXTENSION);
     try {
       ensureDir();
+      ensurePrivateDir(tmpDir);
+      // 先以 0600 建出空文件再让 SQLite 往里写：直接交给 backup 新建时按 umask 是 0644。SQLite 的日志文件沿用它的权限。
+      closeSync(openSync(plain, "wx", 0o600));
       await db.backup(plain);
       const copy = openCopy(plain);
       let rowCounts: Record<string, number>;
@@ -295,7 +318,7 @@ export function createBackupService(options: BackupServiceOptions): BackupServic
     if (row.pruned_at !== null) {
       return { ok: false, problems: ["这份备份已经按保留策略删除"], sha256: null, header: null, restored: null, file: row.file, backupId: row.id };
     }
-    const check = await checkBackupFile(join(backupDir, row.file), backupKey, backupKeyId, backupDir, {
+    const check = await checkBackupFile(join(backupDir, row.file), backupKey, backupKeyId, tmpDir, {
       sha256: row.sha256,
       rowCounts: JSON.parse(row.row_counts_json) as Record<string, number>,
     });

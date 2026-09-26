@@ -1,5 +1,5 @@
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createAlerts } from "../../app/control/src/db/alerts.js";
 import { createAuditor } from "../../app/control/src/db/audit.js";
@@ -30,6 +30,7 @@ interface Env {
   readonly db: Db;
   readonly dir: string;
   readonly backupDir: string;
+  readonly tmpDir: string;
   readonly key: Buffer;
   readonly keyId: string;
   readonly clock: ReturnType<typeof fakeClock>;
@@ -55,6 +56,7 @@ function setup(options: { daily?: number; weekly?: number; others?: number; star
   const service = createBackupService({
     db,
     backupDir: join(dir, "data", "backups"),
+    tmpDir: join(dir, "data", "tmp"),
     backupKey: key,
     backupKeyId: keyId,
     clock,
@@ -64,7 +66,7 @@ function setup(options: { daily?: number; weekly?: number; others?: number; star
     alerts,
     logger: createLogger({ level: "debug", redactor, sink, clock }),
   });
-  return { db, dir, backupDir: join(dir, "data", "backups"), key, keyId, clock, service, alerts, sink };
+  return { db, dir, backupDir: join(dir, "data", "backups"), tmpDir: join(dir, "data", "tmp"), key, keyId, clock, service, alerts, sink };
 }
 
 const system = { type: "system" as const };
@@ -156,6 +158,39 @@ describe("备份 → 恢复 → integrity_check 往返（S-17）", () => {
     writeFileSync(path, original);
     expect((await env.service.verify(record.file, system)).ok).toBe(true);
     expect(env.alerts.open("backup_verify_failed")).toEqual([]);
+  });
+
+  it("反例：明文临时文件只放在 <dataDir>/tmp，建出来就是 0600，做完不留；backups/ 里只有加密文件", async () => {
+    const env = setup();
+    const seen: Array<{ dir: string; mode: number }> = [];
+    const original = env.db.backup.bind(env.db);
+    (env.db as { backup: Db["backup"] }).backup = async (destination, options) => {
+      const result = await original(destination, options);
+      seen.push({ dir: dirname(destination), mode: statSync(destination).mode & 0o777 });
+      return result;
+    };
+    const record = await env.service.create("manual", system);
+    // 修之前明文副本建在 backups/ 里，由 SQLite 按 umask 新建（通常是 0644）。
+    expect(seen).toEqual([{ dir: env.tmpDir, mode: 0o600 }]);
+    expect(statSync(env.tmpDir).mode & 0o777).toBe(0o700);
+    expect(readdirSync(env.tmpDir)).toEqual([]);
+    expect(readdirSync(env.backupDir)).toEqual([record.file]);
+    expect((await env.service.verify(record.file, system)).ok).toBe(true);
+    expect(readdirSync(env.tmpDir)).toEqual([]);
+  });
+
+  it("反例：backups/ 只读时恢复校验照样能做，解密出的明文不写进 backups/", async () => {
+    const env = setup();
+    const record = await env.service.create("manual", system);
+    chmodSync(env.backupDir, 0o500);
+    try {
+      const report = await env.service.verify(record.file, system);
+      expect(report.problems).toEqual([]);
+      expect(report.ok).toBe(true);
+    } finally {
+      chmodSync(env.backupDir, 0o700);
+    }
+    expect(readdirSync(env.tmpDir)).toEqual([]);
   });
 
   it("行数与登记不一致（登记被改或者备份不完整）同样判失败", async () => {

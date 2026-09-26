@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { runCli } from "../../app/control/src/cli.js";
@@ -171,6 +171,28 @@ describe("CLI：restore --dry-run", () => {
     const copy = join(fx.dir, "offsite.gbbk");
     writeFileSync(copy, readFileSync(join(fx.backupDir, record?.file ?? "")));
     expect((await cli(fx, "restore", "--dry-run", copy)).code).toBe(0);
+  });
+
+  it("反例：演练解密出的明文放在 <dataDir>/tmp，不用系统临时目录；做完不留", async () => {
+    const fx = fixture();
+    const handle = await running(fx);
+    expect((await cli(fx, "backup")).code).toBe(0);
+    const [record] = handle.backups.list();
+    const saved = process.env.TMPDIR;
+    // 系统临时目录不可用：修之前演练在这里建临时目录，会失败。
+    process.env.TMPDIR = join(fx.dir, "no-such-system-tmp");
+    let result;
+    try {
+      result = await cli(fx, "restore", "--dry-run", record?.file ?? "");
+    } finally {
+      if (saved === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = saved;
+    }
+    expect(result.stderr).toBe("");
+    expect(result.code).toBe(0);
+    const tmp = join(fx.dir, "data", "tmp");
+    expect(statSync(tmp).mode & 0o777).toBe(0o700);
+    expect(readdirSync(tmp)).toEqual([]);
   });
 
   it("反例：备份被改动时演练失败；没写 --dry-run 的正式恢复没有实现，以 2 退出", async () => {
