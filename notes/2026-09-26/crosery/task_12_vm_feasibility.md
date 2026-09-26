@@ -140,3 +140,21 @@
 - 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
 - 做了什么：git commit：fix(node): 探测后恢复来宾路由，所有者待决事项转记 #22；提交前 pnpm docs:index、pnpm verify、shellcheck
 - 结果：pnpm verify 退出码 0（Tests 434 passed）；shellcheck 无输出
+
+## 15:12:55 +08:00 · 推送 · #12 · 推送第三轮返工 3589a8b
+
+- 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
+- 做了什么：经 gh 凭据走 HTTPS 推送 HEAD:refs/heads/task/12/vm_feasibility；pre-push 钩子运行
+- 结果：推送成功，远端 HEAD 3589a8b；pre-push 分支与发布 tag 规则通过
+
+## 15:12:55 +08:00 · PR · #12 · 改 #33 正文（三轮审查摘要、指向 #22），请审查员确认 3589a8b
+
+- 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
+- 做了什么：gh pr edit 33：关联加 Refs #22，解决链路加第三轮返工，未验证项补 3589a8b 的 guest.sh 没在节点上跑过，审查结论段按三轮改写；本地 pr-contract check 通过；SendMessage 请审查员确认 7908d4f..3589a8b
+- 结果：PR 正文契约通过；结论行仍为阻塞，等确认
+
+## 15:15:18 +08:00 · 审查 · #12 · 审查员确认 3589a8b：通过
+
+- 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
+- 做了什么：审查员只读复核 7908d4f..3589a8b：pnpm verify、shellcheck、note check、pr-contract、gh pr checks 33、gh issue view 22、后缀正则样例
+- 结果：结论：通过；第三轮应修已解决（两件所有者决定转记在 #22，#22 开着）；另 2 条建议不改：IPv6 失败类型要改用 /dev/tcp 探测并重跑才能验证，留给 #32；删掉手工 IPv6 默认路由后要等下一次路由通告才恢复，安装走 IPv4 代理不受影响；CI 在 3589a8b 全部 pass
