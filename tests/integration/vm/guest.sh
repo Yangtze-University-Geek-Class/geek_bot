@@ -61,7 +61,7 @@ probe_v6() { # 名称前缀 地址：curl 退出码 28 是超时，7 是连不�
     28:*|124:*) say "probe $1:$2 blocked (timeout)" ;;
     *refused*) say "probe $1:$2 blocked (refused)" ;;
     *nreachable*) say "probe $1:$2 blocked (unreachable)" ;;
-    *) say "probe $1:$2 blocked (other: $(printf '%s' "$err" | tail -1 | cut -c1-60))" ;;
+    *) say "probe $1:$2 blocked (other: $(printf '%s' "$err" | tail -1 | sed 's/.*: //' | cut -c1-60))" ;;
   esac
 }
 for target in "$(v6 fec0 "" 2)" "$(v6 fd00 "" 1)" "$(v6 fe80 "" 2)%eth0" "$(v6 "" "" ffff "$(addr 10 0 0 1)")" "$(v6 64 ff9b "" 101 101)"; do
@@ -91,6 +91,10 @@ for target in "$(v6 fd00 "" 1)" "$(v6 64 ff9b "" 101 101)" "$(v6 2606 4700 4700 
   probe_v6 defroute:ipv6 "$target"
 done
 probe_tcp "defroute:guestfwd-proxy(expected-reachable)" "${PROXY_HOSTPORT%:*}" "${PROXY_HOSTPORT##*:}"
+# 探完删掉自己加的 IPv4 默认路由，恢复 IPv6 原来的路由通告；后面的安装与校验在和原来一样的路由表下跑。
+ip -4 route del default via "$HOST_ALIAS" 2>/dev/null || true
+ip -6 route del default via "$(v6 fec0 "" 2)" 2>/dev/null || true
+say "route_v4_after: $(ip -4 route show default | head -1)"
 
 if [ "${PROBE_ONLY:-0}" = "1" ]; then
   say "probe_only=1，跳过安装与校验"

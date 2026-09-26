@@ -40,8 +40,8 @@ done
 # 同一后缀没有别的运行在用。
 if [ -z "$SUFFIX" ]; then
   SUFFIX="$(date +%s)-$$"
-elif ! printf '%s' "$SUFFIX" | grep -Eq '^[0-9a-z-]{1,40}$'; then
-  echo "--suffix 只能是 1 到 40 个小写字母、数字或 -" >&2; exit 2
+elif ! printf '%s' "$SUFFIX" | grep -Eq '^[0-9a-z][0-9a-z-]{0,39}$'; then
+  echo "--suffix 只能是 1 到 40 个小写字母、数字或 -，并以字母或数字开头" >&2; exit 2
 fi
 CONTAINER="geekbot-vmlab-$SUFFIX"
 IMAGE="geekbot-vmlab:$SUFFIX"

@@ -110,3 +110,33 @@
 - 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
 - 做了什么：git commit：fix(node): 补来宾自加默认路由的探测，run.sh 可复用缓存，同步文档；提交前 pnpm docs:index、pnpm verify、shellcheck
 - 结果：pnpm verify 退出码 0（Tests 434 passed）；shellcheck 无输出
+
+## 15:05:49 +08:00 · 推送 · #12 · 推送第二轮返工 7908d4f
+
+- 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
+- 做了什么：经 gh 凭据走 HTTPS 推送 HEAD:refs/heads/task/12/vm_feasibility；pre-push 钩子运行
+- 结果：推送成功，远端 HEAD 7908d4f；pre-push 分支与发布 tag 规则通过
+
+## 15:05:49 +08:00 · PR · #12 · 改 #33 正文，发第二轮返工记录，请审查员复核 7908d4f
+
+- 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
+- 做了什么：gh pr edit 33：补第 8 次运行、验收条件 5 待所有者判定、所有者确认 ADR-0011 两个人工步骤、第二轮审查摘要、REFERENCES 出处与建议条数更正；本地 pr-contract check 通过；gh pr comment 33 发 kind=rework；SendMessage 请审查员复核 c8372eb..7908d4f
+- 结果：PR 正文契约通过；返工记录已发；审查结论仍为阻塞，等复核
+
+## 15:11:24 +08:00 · 审查 · #12 · 审查员复核 7908d4f：有条件通过，1 条应修、4 条建议
+
+- 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
+- 做了什么：审查员只读复核 c8372eb..7908d4f：pnpm verify、vitest、shellcheck、note check、pr-contract、模拟 nft 与后缀正则
+- 结果：结论：有条件通过；第二轮 5 条应修都改对了；应修：两件所有者决定（确认 ADR-0011、判定验收条件 5）会随 #12 关闭而没人跟进，要所有者答复或转进开着的 issue；建议：探测后路由没删、IPv6 措辞与失败类型、后缀可以 - 开头、代理头注缺一条已知不做
+
+## 15:11:24 +08:00 · 返工 · #12 · 两件所有者决定转记到 #22，4 条建议改完
+
+- 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
+- 做了什么：gh issue comment 22 发 kind=blocked 记录（确认 ADR-0011、判定验收条件 5 与 raw 表规则）；ADR-0011、实测报告、PR 正文指向 #22；guest.sh 探测后删掉自加的默认路由、IPv6 报错记最后一段；run.sh 后缀须以字母或数字开头；报告改正 replace 的措辞并说明 IPv6 失败类型分不出；代理头注补上客户端解析期间断开不关上游
+- 结果：#22 评论已发；shellcheck 无输出；后缀正则：-abc 被拒，abc、abc-1 放行
+
+## 15:12:02 +08:00 · 提交 · #12 · 第三轮复核的应修与建议一起提交
+
+- 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
+- 做了什么：git commit：fix(node): 探测后恢复来宾路由，所有者待决事项转记 #22；提交前 pnpm docs:index、pnpm verify、shellcheck
+- 结果：pnpm verify 退出码 0（Tests 434 passed）；shellcheck 无输出

@@ -12,7 +12,8 @@
  *
  * 这是可行性实验用的代理，生产实现随 #17 写进 app/node，照这里的规则与单测重新实现。
  * 私网与保留地址段在运行时由数字拼出，仓库里不留地址字面量（DOCUMENTATION「事实来源」）。
- * 已知不做的：CONNECT 的主机名没有与 TLS 的 SNI 绑定（共享 CDN 上可换 SNI 绕过白名单），留给 #17。
+ * 已知不做的，留给 #17：CONNECT 的主机名没有与 TLS 的 SNI 绑定（共享 CDN 上可换 SNI 绕过白名单）；客户端在 DNS 解析
+ * 期间断开时，不主动关闭随后建立的上游连接（要等远端自己关）。
  *
  *   node egress-proxy.mjs --listen 127.0.0.1:3128 --allow registry.npmjs.org,deb.debian.org [--log proxy.jsonl]
  *                         [--max-connections 2000] [--max-bytes 4294967296]
