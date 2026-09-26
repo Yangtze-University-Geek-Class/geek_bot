@@ -540,7 +540,7 @@ outbox 行在对象 id 和标记写进这张表后才算 `confirmed`。索引：
 
 | 列 | 类型与约束 | 说明 |
 |---|---|---|
-| `kind` | `TEXT NOT NULL CHECK (kind IN ('daily','weekly','pre_deploy','pre_migration','manual'))` | 每周第一次每日备份记为 `weekly` |
+| `kind` | `TEXT NOT NULL CHECK (kind IN ('daily','weekly','pre_deploy','pre_migration','manual'))` | 每周第一次每日备份记为 `weekly`；`GEEK_BOT_BACKUP_KEEP_WEEKLY` 为 0 时一律记为 `daily` |
 | `file` | `TEXT NOT NULL UNIQUE` | `backups/` 下的文件名 |
 | `sha256`、`bytes` | `TEXT NOT NULL`、`INTEGER NOT NULL` | 加密后文件的哈希和大小 |
 | `schema_version`、`compat_version`、`app_version` | `INTEGER NOT NULL`、`INTEGER NOT NULL`、`TEXT NOT NULL` | 备份时的 `user_version`、兼容版本和镜像版本 |
@@ -612,7 +612,7 @@ outbox 行在对象 id 和标记写进这张表后才算 `confirmed`。索引：
 
 master key 和备份加密密钥都不进备份，所有者各另存一份离线副本（密钥表见 [SECURITY](../../architecture/SECURITY.md)）。没有备份加密密钥，备份打不开；有备份没有原来的 master key，库里的机器人令牌解不开，要重新绑定机器人。
 
-**保留**：每日备份保留 `GEEK_BOT_BACKUP_KEEP_DAILY` 份（默认 7），每周保留 `GEEK_BOT_BACKUP_KEEP_WEEKLY` 份（默认 4）；`pre_deploy`、`pre_migration`、`manual` 各保留最近 3 份（#3 定稿，代码常量）。每次备份后按种类删掉最旧的多余文件，写 `pruned_at` 和审计；登记行保留。
+**保留**：每日备份保留 `GEEK_BOT_BACKUP_KEEP_DAILY` 份（默认 7），每周保留 `GEEK_BOT_BACKUP_KEEP_WEEKLY` 份（默认 4；为 0 时不做每周备份，每周第一次也记为 `daily`，免得刚做完就被清理）；`pre_deploy`、`pre_migration`、`manual` 各保留最近 3 份（#3 定稿，代码常量）。每次备份后按种类删掉最旧的多余文件，写 `pruned_at` 和审计；登记行保留。
 
 **每日恢复校验**（自动，每天一次）
 

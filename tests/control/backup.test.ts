@@ -8,7 +8,7 @@ import { applyMigrations, loadMigrations, planMigrations } from "../../app/contr
 import { createLogger } from "../../app/control/src/log/logger.js";
 import { createRedactor } from "../../app/control/src/log/redact.js";
 import { BACKUP_MAGIC, decryptBackup, readBackupHeader, sha256File } from "../../app/control/src/ops/backup-file.js";
-import { checkBackupFile, createBackupService, type BackupService } from "../../app/control/src/ops/backup.js";
+import { checkBackupFile, createBackupService, type BackupRecord, type BackupService } from "../../app/control/src/ops/backup.js";
 import { createDailyJobs, isoWeekStart, lastSlotAt } from "../../app/control/src/ops/scheduler.js";
 import { keyFingerprint } from "../../app/control/src/secrets/key-files.js";
 import { cleanupTempDirs, fakeClock, memorySink, tempDir } from "./helpers.js";
@@ -210,13 +210,12 @@ describe("保留策略：7 份每日加 4 份每周；pre_deploy、pre_migration
     expect(await env.service.verify(pruned[0]?.file, system)).toMatchObject({ ok: false, problems: ["这份备份已经按保留策略删除"] });
   });
 
-  it("保留份数可配置：每周保留 0 份时每周备份做完即删", async () => {
-    const env = setup({ daily: 1, weekly: 0 });
-    await env.service.create("weekly", system);
+  it("保留份数可配置：每日保留 1 份时只留最新一份每日备份", async () => {
+    const env = setup({ daily: 1, weekly: 4 });
     await env.service.create("daily", system);
     env.clock.advance(1000);
-    await env.service.create("daily", system);
-    expect(env.service.list().filter(row => row.pruned_at === null).map(row => row.kind)).toEqual(["daily"]);
+    const latest = await env.service.create("daily", system);
+    expect(env.service.list().filter(row => row.pruned_at === null).map(row => row.file)).toEqual([latest.file]);
   });
 });
 
@@ -253,7 +252,7 @@ describe("每日任务", () => {
 
   it("每天到点后做一次备份并恢复校验；每周第一次记为 weekly；没到点或当天做过就跳过", async () => {
     const env = setup({ start: MONDAY + 2 * 3_600_000 });
-    const jobs = createDailyJobs({ backups: env.service, clock: env.clock, hourUtc: 3, logger: createLogger({ level: "error", redactor: createRedactor(), sink: env.sink }) });
+    const jobs = createDailyJobs({ backups: env.service, clock: env.clock, hourUtc: 3, keepWeekly: 4, logger: createLogger({ level: "error", redactor: createRedactor(), sink: env.sink }) });
     // 周一 02:00：上一个到点是周日 03:00，还没有任何备份，所以补做一次（这是本周第一次，记为 weekly）。
     expect(await jobs.tick()).toBe("done");
     expect(env.service.list().map(row => [row.kind, row.verify_result])).toEqual([["weekly", "ok"]]);
@@ -271,9 +270,39 @@ describe("每日任务", () => {
     expect(await jobs.tick()).toBe("skipped");
   });
 
+  it("反例：每周保留 0 份时，周一的第一次备份记为 daily 并通过恢复校验（修之前记成 weekly，当场被清理，当天没有备份）", async () => {
+    const env = setup({ daily: 7, weekly: 0, start: MONDAY + 4 * 3_600_000 });
+    const jobs = createDailyJobs({ backups: env.service, clock: env.clock, hourUtc: 3, keepWeekly: 0, logger: createLogger({ level: "debug", redactor: createRedactor(), sink: env.sink }) });
+    expect(await jobs.tick()).toBe("done");
+    expect(env.service.list().map(row => ({ kind: row.kind, pruned: row.pruned_at !== null, verify: row.verify_result }))).toEqual([{ kind: "daily", pruned: false, verify: "ok" }]);
+    expect(readdirSync(env.backupDir)).toHaveLength(1);
+    // 下一周的周一同样记为 daily。
+    env.clock.set(MONDAY + 7 * DAY + 4 * 3_600_000);
+    expect(await jobs.tick()).toBe("done");
+    expect(env.service.list().map(row => row.kind)).toEqual(["daily", "daily"]);
+  });
+
+  it("反例：刚做完的备份已被保留策略删掉时不做恢复校验，返回 failed 并记一条错误", async () => {
+    const sink = memorySink();
+    const verified: string[] = [];
+    const record = { id: 9, kind: "daily", file: "geek-bot-daily-x.gbbk", created_at: MONDAY, pruned_at: MONDAY } as BackupRecord;
+    const stub = {
+      list: () => [],
+      create: async () => record,
+      verify: async (file: string | undefined) => {
+        verified.push(file ?? "");
+        return { ok: false, problems: ["这份备份已经按保留策略删除"], sha256: null, header: null, restored: null, file: file ?? "", backupId: 9 };
+      },
+    } as unknown as BackupService;
+    const jobs = createDailyJobs({ backups: stub, clock: () => MONDAY + 4 * 3_600_000, hourUtc: 3, keepWeekly: 4, logger: createLogger({ level: "debug", redactor: createRedactor(), sink }) });
+    expect(await jobs.tick()).toBe("failed");
+    expect(verified).toEqual([]);
+    expect(sink.lines().find(line => line.level === "error")).toMatchObject({ msg: "刚做完的备份已按保留策略删除，没有做恢复校验：核对备份保留份数的配置", backup_id: 9, file: record.file });
+  });
+
   it("备份失败时写 critical 告警，下一次检查重试", async () => {
     const env = setup();
-    const jobs = createDailyJobs({ backups: env.service, clock: env.clock, hourUtc: 3, logger: createLogger({ level: "fatal", redactor: createRedactor(), sink: env.sink }) });
+    const jobs = createDailyJobs({ backups: env.service, clock: env.clock, hourUtc: 3, keepWeekly: 4, logger: createLogger({ level: "fatal", redactor: createRedactor(), sink: env.sink }) });
     // 备份目录被一个普通文件占住，建不了目录也写不进去。
     writeFileSync(env.backupDir, "blocked");
     expect(await jobs.tick()).toBe("failed");

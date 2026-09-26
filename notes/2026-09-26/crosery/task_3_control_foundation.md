@@ -85,3 +85,15 @@
 - 执行者：agent-claude-geek-bot-821e-control3（Claude Code，claude-opus-5-5）
 - 做了什么：fix(control): shrink=false 的迁移按执行前后的结构核对，schema_migrations 编号必须连续；提交前跑 pnpm check 与 tests/control
 - 结果：pnpm check 退出码 0；tests/control 79 passed
+
+## 13:06:22 +08:00 · 返工 · #3 · 每周保留 0 份时每周首次备份记为 daily，校验前先看是否已被清理
+
+- 执行者：agent-claude-geek-bot-821e-control3（Claude Code，claude-opus-5-5）
+- 做了什么：审查应修项：scheduler 新增 keepWeekly 选项（services 传 GEEK_BOT_BACKUP_KEEP_WEEKLY），为 0 时每周第一次也记为 daily；create 返回的登记已带 pruned_at 时不做恢复校验，记一条 error 并返回 failed。backup.test 里把「每周备份做完即删」当成预期的那条改写成每日保留 1 份的保留策略测试，另补两条反例；config 注释、control README、behavior、data-model、TESTING 同步
+- 结果：两条反例换回修之前的 scheduler.ts 时失败（expected 'failed' to be 'done'；verify 被调用了一次），修复后通过；tests/control 81 passed；pnpm check 退出码 0
+
+## 13:06:22 +08:00 · 提交 · #3 · 每周保留 0 份的修复一起提交
+
+- 执行者：agent-claude-geek-bot-821e-control3（Claude Code，claude-opus-5-5）
+- 做了什么：fix(control): 每周保留 0 份时每周首次备份记为 daily，校验前核对是否已被清理；提交前跑 pnpm check 与 tests/control
+- 结果：pnpm check 退出码 0；tests/control 81 passed

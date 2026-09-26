@@ -248,7 +248,7 @@ export async function startControl(options: StartOptions): Promise<ControlHandle
     };
 
     const app = buildApp({ logger, readiness, shuttingDown: () => shuttingDown });
-    const jobs = createDailyJobs({ backups, clock, hourUtc: config.behavior.backupHourUtc, logger });
+    const jobs = createDailyJobs({ backups, clock, hourUtc: config.behavior.backupHourUtc, keepWeekly: config.behavior.backupKeepWeekly, logger });
 
     const handle: ControlHandle = {
       app,

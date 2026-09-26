@@ -290,7 +290,7 @@ issue #n 满足下面任一条，就算有开着的关联 PR：
 | `GEEK_BOT_TASK_DATA_RETENTION_DAYS` | 整数，≥ 1 | `30` | — | 是 | [数据模型](data-model.md) | 新增（#14） |
 | `GEEK_BOT_HEALTH_SAMPLE_RETENTION_DAYS` | 整数，≥ 1 | `7` | — | 是 | [数据模型](data-model.md) | 新增（#11） |
 | `GEEK_BOT_BACKUP_KEEP_DAILY` | 整数，≥ 1 | `7` | — | 是 | [数据模型](data-model.md) | 已有（#3） |
-| `GEEK_BOT_BACKUP_KEEP_WEEKLY` | 整数，≥ 0 | `4` | — | 是 | [数据模型](data-model.md) | 已有（#3） |
+| `GEEK_BOT_BACKUP_KEEP_WEEKLY` | 整数，≥ 0；0 表示不做每周备份 | `4` | — | 是 | [数据模型](data-model.md) | 已有（#3） |
 | `GEEK_BOT_BACKUP_HOUR_UTC` | 整数，0–23 | `3` | — | 是 | 每天 UTC 这一点之后做当天的备份与恢复校验，见 [数据模型](data-model.md) | 已有（#3） |
 | `GEEK_BOT_PUBLIC_ORIGIN` | 实例的 origin，如 `https://geek-bot.example.com` | 空 | — | 只读 | 不是行为规则，见 [API](../../architecture/API.md)「会话与 CSRF」 | 已有（#3 用于 S-20 的启动检查；会话与 CSRF 随 #5） |
 | `GEEK_BOT_ALLOW_PLAINTEXT_MESH` | `true`、`false` | `false` | — | 只读 | 不是行为规则，见 [SECURITY](../../architecture/SECURITY.md) | 已有（#3 用于 S-20 的启动检查；cookie 与后台提示随 #5、#7） |

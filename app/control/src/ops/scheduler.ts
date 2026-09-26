@@ -1,6 +1,6 @@
 /**
- * 每日运维任务：每天 UTC 的 GEEK_BOT_BACKUP_HOUR_UTC 点之后做一次备份（每周第一次记为 weekly），
- * 做完按保留策略清理，再对最新一份做恢复校验（data-model「备份与每日恢复校验」）。
+ * 每日运维任务：每天 UTC 的 GEEK_BOT_BACKUP_HOUR_UTC 点之后做一次备份（每周第一次记为 weekly；每周备份保留 0 份时
+ * 一律记为 daily），做完按保留策略清理，再对这一份做恢复校验（data-model「备份与每日恢复校验」）。
  *
  * 判定只看库里的登记：上一次 daily/weekly 备份早于最近一个到点时刻就补做，所以 control 停机错过的那次在启动后补上。
  * 时间来自注入的时钟；定时器每 10 分钟检查一次，不阻止进程退出。
@@ -30,6 +30,8 @@ export interface DailyJobsOptions {
   readonly backups: BackupService;
   readonly clock: () => number;
   readonly hourUtc: number;
+  /** 每周备份保留几份（GEEK_BOT_BACKUP_KEEP_WEEKLY）；为 0 时不做每周备份。 */
+  readonly keepWeekly: number;
   readonly logger: Logger;
   readonly intervalMs?: number;
 }
@@ -44,7 +46,7 @@ export interface DailyJobs {
 }
 
 export function createDailyJobs(options: DailyJobsOptions): DailyJobs {
-  const { backups, clock, hourUtc, logger, intervalMs = CHECK_INTERVAL_MS } = options;
+  const { backups, clock, hourUtc, keepWeekly, logger, intervalMs = CHECK_INTERVAL_MS } = options;
   let timer: NodeJS.Timeout | null = null;
   let running: Promise<"skipped" | "done" | "failed"> | null = null;
   let stopped = false;
@@ -56,9 +58,16 @@ export function createDailyJobs(options: DailyJobsOptions): DailyJobs {
     if (last && last.created_at >= slot) return "skipped";
     const weekStart = isoWeekStart(now);
     const hasWeekly = backups.list().some(row => row.kind === "weekly" && row.created_at >= weekStart);
+    // 每周保留 0 份时记成 weekly 会在 create 里当场被清理，当天就没有可用的备份。
+    const kind = hasWeekly || keepWeekly === 0 ? "daily" : "weekly";
     const actor = { type: "system" as const };
     try {
-      const record = await backups.create(hasWeekly ? "daily" : "weekly", actor);
+      const record = await backups.create(kind, actor);
+      // create 返回的是清理之后的登记：刚做的这份已被保留策略删掉时不做校验，记一条错误（按上面的判定当天不再重做）。
+      if (record.pruned_at !== null) {
+        logger.error({ backup_id: record.id, file: record.file, kind }, "刚做完的备份已按保留策略删除，没有做恢复校验：核对备份保留份数的配置");
+        return "failed";
+      }
       const report = await backups.verify(record.file, actor);
       return report.ok ? "done" : "failed";
     } catch (error) {

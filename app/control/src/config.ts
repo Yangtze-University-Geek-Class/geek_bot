@@ -25,7 +25,7 @@ export interface ControlConfig {
   readonly vmMemoryMiB: number;
   /** 保留几份每日备份。 */
   readonly backupKeepDaily: number;
-  /** 保留几份每周备份（每周第一次每日备份记为每周）。 */
+  /** 保留几份每周备份（每周第一次每日备份记为每周；为 0 时不做每周备份，每周第一次也记为每日）。 */
   readonly backupKeepWeekly: number;
   /** 每天在 UTC 的第几点之后做当天的备份与恢复校验（0–23）。 */
   readonly backupHourUtc: number;
