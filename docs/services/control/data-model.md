@@ -559,7 +559,7 @@ outbox 行在对象 id 和标记写进这张表后才算 `confirmed`。索引：
 - 放在 `app/control/src/db/migrations/`，文件名 `NNNN_<slug>.sql`：编号四位，从 `0001` 起连续，不跳号、不复用；slug 只用小写字母、数字和下划线。
 - 第一行必须是 `-- geek-bot-migration shrink=false` 或 `shrink=true`，写进 `schema_migrations.shrink`。
 - 迁移文件进入 `stage` 后不再修改；写错了就再写一个新的迁移。启动时的 sha256 核对保证这一点。
-- 文件里不写 `BEGIN`、`COMMIT`：迁移器给每个文件开事务。构建时 `app/control/scripts/copy-migrations.mjs` 把它们复制进 `dist/db/migrations/`。
+- 文件里不写 `BEGIN`、`COMMIT`、`END`、`ROLLBACK`、`SAVEPOINT`、`RELEASE`：迁移器给每个文件开事务。顶层写了这些语句的文件加载时就被拒绝（触发器语句体里的 `BEGIN … END`、`RAISE(ROLLBACK, …)` 不算）；执行时迁移器另在文件外面套一个随机名字的保存点，执行完先核对它还在，不在就说明文件自己结束了事务，这时改动可能已部分生效，迁移器拒绝启动并如实报告，要从迁移前备份恢复。构建时 `app/control/scripts/copy-migrations.mjs` 把它们复制进 `dist/db/migrations/`。
 
 **只扩不缩**
 

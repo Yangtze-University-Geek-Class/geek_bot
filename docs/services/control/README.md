@@ -29,7 +29,7 @@ control 从不运行 omp，也不执行目标仓库里的任何代码。
 | `src/config.ts` | 产品默认值 `CONTROL_DEFAULTS` 与环境变量表 `CONTROL_ENV`（轮询、静默窗口、提醒与关闭天数、追问轮数、VM 规格，以及 #3 加的备份保留份数与每日备份时刻）；部署配置 `createDeploymentConfig`（实例角色、监听地址与端口、origin、明文模式、库路径、两个密钥文件路径、日志级别、镜像版本）；`loadControlConfig` 一次读出两部分，问题合在一个 `ControlConfigError` 里一起报。都是纯函数，不读 `process.env`、不读文件 |
 | `src/secrets/key-files.ts` | 读 `*_FILE` 指向的 32 字节密钥（base64 或 64 位十六进制）；报错只有变量名和路径；读到的原文登记进打码器；备份密钥的指纹 |
 | `src/db/database.ts` | 打开库（WAL、`synchronous=FULL`、`foreign_keys=ON`、`busy_timeout=5000`、`locking_mode=EXCLUSIVE`）、打开独立副本、`wal_checkpoint(TRUNCATE)` 后关库、各表行数 |
-| `src/db/migrator.ts`、`src/db/migrations/0001_foundation.sql` | 迁移器与第一个迁移（7 张表：`schema_migrations`、`settings`、`revisions`、`idempotency_keys`、`alerts`、`audit_logs`、`backups`）。规则见 [数据模型](data-model.md)「迁移规则」 |
+| `src/db/migrator.ts`、`src/db/sql-statements.ts`、`src/db/migrations/0001_foundation.sql` | 迁移器（`sql-statements.ts` 在加载时找出顶层的事务控制语句）与第一个迁移（7 张表：`schema_migrations`、`settings`、`revisions`、`idempotency_keys`、`alerts`、`audit_logs`、`backups`）。规则见 [数据模型](data-model.md)「迁移规则」 |
 | `src/db/audit.ts`、`src/db/alerts.ts` | 唯一的审计函数（写入前打码，表只追加）；告警（同一件事只有一条未解决的，重复只加计数） |
 | `src/log/logger.ts`、`src/log/redact.ts` | 结构化日志（每条一行 JSON）；按 S-16 的密钥形态与已知密钥原值打码 |
 | `src/ops/backup-file.ts`、`src/ops/backup.ts` | 加密备份的文件格式；备份、恢复校验、保留策略、启动时补登记 |
@@ -65,7 +65,7 @@ control 从不运行 omp，也不执行目标仓库里的任何代码。
 1. 读配置，不合法就拒绝启动，一次列出全部问题；
 2. 读两把密钥；
 3. 以独占方式打开库：`locking_mode=EXCLUSIVE` 下连接一直持有文件锁，同一个库的第二个 control（或任何别的连接）等满 `busy_timeout` 后打不开，报「库正被另一个进程占用」（ADR-0003）；拿到锁之后清空 `tmp/` 并把它收紧到 0700，上次崩溃留下的明文临时文件不会留下；
-4. 迁移检查（[数据模型](data-model.md)「迁移规则」）：兼容版本高于代码、已应用的迁移文件被改过、`schema_migrations` 编号不连续、库不是 geek_bot 的库，都拒绝启动；声明 `shrink=false` 的迁移执行后已有的表、列、索引、触发器、视图少了或变了，回滚并拒绝启动；有待执行的迁移而库不是空库时，先做一次 `pre_migration` 备份，备份失败就不迁移、拒绝启动；库比代码新而兼容版本不高（回滚到上一版镜像）时记一条 warn，正常启动；
+4. 迁移检查（[数据模型](data-model.md)「迁移规则」）：兼容版本高于代码、已应用的迁移文件被改过、`schema_migrations` 编号不连续、库不是 geek_bot 的库，都拒绝启动；声明 `shrink=false` 的迁移执行后已有的表、列、索引、触发器、视图少了或变了，回滚并拒绝启动；迁移文件顶层写了 `BEGIN`、`COMMIT` 之类的事务控制语句，加载时就拒绝，执行时保存点不见了（文件自己结束了事务）也拒绝启动，报告可能已部分生效；有待执行的迁移而库不是空库时，先做一次 `pre_migration` 备份，备份失败就不迁移、拒绝启动；库比代码新而兼容版本不高（回滚到上一版镜像）时记一条 warn，正常启动；
 5. 清掉备份目录里崩溃留下的临时文件，给没登记的备份文件补登记；
 6. 监听端口，然后开运维本地通道和每日备份任务。
 

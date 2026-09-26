@@ -4,7 +4,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createAlerts } from "../../app/control/src/db/alerts.js";
 import { createAuditor } from "../../app/control/src/db/audit.js";
 import { DatabaseOpenError, listTables, openDatabase, type Db } from "../../app/control/src/db/database.js";
-import { applyMigrations, loadMigrations, MigrationError, planMigrations, readSchemaState } from "../../app/control/src/db/migrator.js";
+import { applyMigrations, loadMigrations, MigrationError, planMigrations, readSchemaState, type Migration } from "../../app/control/src/db/migrator.js";
+import { transactionControlStatements } from "../../app/control/src/db/sql-statements.js";
 import { createRedactor, REDACTED } from "../../app/control/src/log/redact.js";
 import { cleanupTempDirs, EXPAND_NEXT, migrationSet, realMigrations, SHRINK_NEXT, tempDir } from "./helpers.js";
 
@@ -269,6 +270,79 @@ describe("迁移器：声明 shrink=false 的迁移不能收缩（按执行前�
     const current = realMigrations().length;
     expect(readSchemaState(db, current + 1)).toMatchObject({ userVersion: current + 1, compatVersion: current + 1 });
     expect(listTables(db)).not.toContain("revisions");
+  });
+});
+
+describe("迁移器：迁移文件不能自己结束事务", () => {
+  const HEADER = "-- geek-bot-migration shrink=false";
+
+  it("反例：顶层写了 BEGIN、COMMIT、END、ROLLBACK、SAVEPOINT、RELEASE 的迁移文件加载时就拒绝（大小写、注释、多语句）", () => {
+    const cases: Array<[string, string]> = [
+      ["COMMIT; DROP TABLE revisions; BEGIN;", "第 2 行的 COMMIT、第 2 行的 BEGIN"],
+      ["ROLLBACK;\nCREATE TABLE after_rollback (id INTEGER);", "第 2 行的 ROLLBACK"],
+      ["create table a (id integer); /* 注释 */ end transaction;", "第 2 行的 END"],
+      ["-- 注释里的 COMMIT 不算\nsavepoint s1;\nCREATE TABLE b (id INTEGER);\nRelease s1;", "第 3 行的 SAVEPOINT、第 5 行的 RELEASE"],
+      ["Begin Immediate;\nCREATE TABLE c (id INTEGER);\nCommit;", "第 2 行的 BEGIN、第 4 行的 COMMIT"],
+    ];
+    for (const [body, where] of cases) {
+      const dir = migrationSet([{ slug: "ends_transaction", sql: `${HEADER}\n${body}\n` }]);
+      expect(() => loadMigrations(dir), body).toThrow(`里有顶层的事务控制语句（${where}）`);
+    }
+  });
+
+  it("触发器语句体里的 BEGIN … END、RAISE(ROLLBACK, …)、CASE … END，以及字符串、注释、带引号的标识符里的关键字都不算，照常执行", () => {
+    const sql = [
+      HEADER,
+      "-- COMMIT 写在注释里；/* ROLLBACK */ 也一样",
+      'CREATE TABLE "commit" (id INTEGER PRIMARY KEY, "end" TEXT, note TEXT DEFAULT \'BEGIN; COMMIT;\');',
+      'CREATE TRIGGER commit_guard BEFORE DELETE ON "commit"',
+      "BEGIN",
+      "  SELECT CASE WHEN old.id = 1 THEN RAISE(ROLLBACK, 'end of the line') END;",
+      "  SELECT RAISE(ABORT, 'COMMIT; 不能删');",
+      "END;",
+      'CREATE TRIGGER IF NOT EXISTS commit_touch AFTER UPDATE ON "commit" BEGIN UPDATE "commit" SET note = \'END\' WHERE id = new.id AND note <> \'END\'; END;',
+      'INSERT INTO "commit" (id, "end") VALUES (1, \'ROLLBACK\');',
+      "",
+    ].join("\n");
+    expect(transactionControlStatements(sql)).toEqual([]);
+    const db = open(join(tempDir(), "geek-bot.db"));
+    migrateWith(db, migrationSet([{ slug: "keywords_inside", sql }]));
+    expect(readSchemaState(db, realMigrations().length + 1).userVersion).toBe(realMigrations().length + 1);
+    expect(db.prepare('SELECT id, "end", note FROM "commit"').all()).toEqual([{ id: 1, end: "ROLLBACK", note: "BEGIN; COMMIT;" }]);
+    expect(() => db.prepare('DELETE FROM "commit"').run()).toThrow("end of the line");
+  });
+
+  it("反例：绕过加载检查、文件自己提交或回滚了事务时，报错如实写明可能已部分生效、要从迁移前备份恢复，不说「已回滚」", () => {
+    const current = realMigrations().length;
+    const raw = (sql: string): Migration => ({
+      version: current + 1,
+      name: `${String(current + 1).padStart(4, "0")}_ends_transaction.sql`,
+      sha256: "0".repeat(64),
+      shrink: false,
+      sql: `${HEADER}\n${sql}\n`,
+    });
+    const cases: Array<{ sql: string; after: (db: Db) => void }> = [
+      // 文件先提交了迁移器的事务，删表在自动提交模式下直接生效，最后又开了一个新事务。
+      { sql: "COMMIT; DROP TABLE revisions; BEGIN;", after: db => expect(listTables(db)).not.toContain("revisions") },
+      { sql: "ROLLBACK; CREATE TABLE after_rollback (id INTEGER);", after: db => expect(listTables(db)).toContain("after_rollback") },
+    ];
+    for (const { sql, after } of cases) {
+      const db = open(join(tempDir(), "geek-bot.db"));
+      migrateWith(db, migrationSet());
+      let message = "";
+      try {
+        applyMigrations(db, [raw(sql)], { clock, appVersion: "next" });
+      } catch (error) {
+        expect(error).toBeInstanceOf(MigrationError);
+        message = (error as Error).message;
+      }
+      expect(message, sql).toContain("自己结束了事务（迁移器设的保存点不在了），可能已部分生效，库的状态不确定：拒绝启动，请从迁移前备份恢复");
+      expect(message).not.toContain("已回滚");
+      // 报错说的是实情：文件做的改动确实已经落盘；迁移器不留下悬着的事务。
+      after(db);
+      expect(db.inTransaction).toBe(false);
+      expect(readSchemaState(db, current + 1).userVersion).toBe(current);
+    }
   });
 });
 

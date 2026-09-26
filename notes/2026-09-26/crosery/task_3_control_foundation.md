@@ -139,3 +139,15 @@
 - 执行者：agent-claude-geek-bot-821e-control3（Claude Code，claude-opus-5-5）
 - 做了什么：在 f5a0777 上跑 pnpm verify、pnpm test:e2e（4174 空闲）、actionlint；按钉死的 index digest 经本机代理取 arm64 各层、逐个核对 sha256 后载入，用 --build-arg NODE_IMAGE 构建镜像，起容器核对 /readyz、用户、HEALTHCHECK、backup 与 restore --dry-run 后 /data/tmp 为空、docker stop 的退出码与 checkpoint 日志，再跑缺 master key、把密钥原文填进 *_KEY_FILE（control 与 CLI 各一次）；用完删掉自己建的容器、卷、镜像和临时文件
 - 结果：pnpm verify 退出码 0（Test Files 29 passed，Tests 409 passed）；actionlint 1.7.12 退出码 0；pnpm test:e2e 三次：前两次 41 passed 1 failed（都是 shell.spec.ts 窄屏抽屉导航的「被 overflow 截掉的内容」断言），第三次 42 passed，这个用例单独 --repeat-each 10 全部通过，console 与 e2e 的输入自 22f4653 起没有改动；镜像：/readyz 200 {"status":"ready"}，User=node、uid=1000、HEALTHCHECK 为 CMD、状态 healthy，/data/tmp 为 drwx------ 且为空，docker stop 后 ExitCode=0，日志有 busy 为 0 的 WAL 已 checkpoint，库已关闭，CI 的 checkpoint 断言按同样写法通过；缺 master key 退出码 1，密钥原文出现 0 次；密钥原文填进 GEEK_BOT_MASTER_KEY_FILE 时 control 退出码 1、填进 GEEK_BOT_BACKUP_KEY_FILE 时 CLI 退出码 1，原文与前 16 个字符都出现 0 次
+
+## 13:37:27 +08:00 · 返工 · #3 · 迁移文件不能自己结束事务：加载时词法拒绝，执行时保存点核对
+
+- 执行者：agent-claude-geek-bot-821e-control3（Claude Code，claude-opus-5-5）
+- 做了什么：复审第 1 条：新增 src/db/sql-statements.ts，按词法找顶层的 BEGIN、COMMIT、END、ROLLBACK、SAVEPOINT、RELEASE（跳过注释、字符串、带引号的标识符，CREATE TRIGGER 的 BEGIN … END 语句体整体跳过，语句体里的 RAISE(ROLLBACK, …)、CASE … END 不算），loadMigrations 发现就拒绝；applyMigrations 改成手动 BEGIN IMMEDIATE，文件外面套随机名字的保存点，执行完先 RELEASE 核对它还在，不在就报「自己结束了事务…可能已部分生效…请从迁移前备份恢复」，不再说「已回滚」。database.test 加三条：加载时拒绝的 5 种写法、关键字出现在触发器体与字符串注释里的正例、绕过加载检查后 COMMIT; DROP…; BEGIN; 与 ROLLBACK; … 两种写法的如实报错；data-model、control README、TESTING 同步
+- 结果：两条反例换回修之前的 migrator.ts 时失败（加载没报错；报错写的是「已回滚」而 revisions 已被删），修复后通过；tests/control 91 passed；pnpm check 退出码 0
+
+## 13:37:27 +08:00 · 提交 · #3 · 迁移文件结束事务的检查一起提交
+
+- 执行者：agent-claude-geek-bot-821e-control3（Claude Code，claude-opus-5-5）
+- 做了什么：fix(control): 迁移文件不能自己结束事务，执行后用保存点核对；提交前跑 pnpm check 与 tests/control
+- 结果：pnpm check 退出码 0；tests/control 91 passed
