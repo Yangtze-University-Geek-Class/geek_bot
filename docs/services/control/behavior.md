@@ -297,8 +297,8 @@ issue #n 满足下面任一条，就算有开着的关联 PR：
 | `GEEK_BOT_HOST` | 监听地址 | `127.0.0.1` | — | 只读 | 不是行为规则；非回环地址要配 origin（S-20） | 已有（#3） |
 | `GEEK_BOT_PORT` | 整数，1–65535 | `8080` | — | 只读 | 不是行为规则；后台、节点 API 与健康检查共用 | 已有（#3） |
 | `GEEK_BOT_DB_PATH` | 容器内库文件路径 | `/data/geek-bot.db` | — | 只读 | 不是行为规则；备份与本地通道放在同目录，见 [数据模型](data-model.md) | 已有（#3） |
-| `GEEK_BOT_MASTER_KEY_FILE` | 容器内密钥文件路径 | `/run/secrets/master_key` | — | 只读 | 不是行为规则；密钥表见 [SECURITY](../../architecture/SECURITY.md) | 已有（#3 读取并校验；加密令牌随 #5） |
-| `GEEK_BOT_BACKUP_KEY_FILE` | 容器内密钥文件路径 | `/run/secrets/backup_key` | — | 只读 | 不是行为规则；备份加密密钥 | 已有（#3） |
+| `GEEK_BOT_MASTER_KEY_FILE` | 容器内密钥文件路径：绝对路径，或以 `./`、`../` 开头 | `/run/secrets/master_key` | — | 只读 | 不是行为规则；密钥表见 [SECURITY](../../architecture/SECURITY.md) | 已有（#3 读取并校验；加密令牌随 #5） |
+| `GEEK_BOT_BACKUP_KEY_FILE` | 容器内密钥文件路径：绝对路径，或以 `./`、`../` 开头 | `/run/secrets/backup_key` | — | 只读 | 不是行为规则；备份加密密钥 | 已有（#3） |
 | `GEEK_BOT_LOG_LEVEL` | `debug`、`info`、`warn`、`error` | `info` | — | 只读 | 不是行为规则 | 已有（#3） |
 | `GEEK_BOT_APP_VERSION` | 字母、数字与 `._@+-`，最长 64 | `local` | — | 只读 | 不是行为规则；只作来源记录，由部署脚本写入（#7） | 已有（#3） |
 

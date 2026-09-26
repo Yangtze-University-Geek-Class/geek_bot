@@ -1,7 +1,8 @@
 /**
  * control 的配置：产品默认值（可以用环境变量覆盖的行为数值）与部署配置（实例角色、监听地址、库路径、密钥文件路径等）。
  * 这里只做纯计算：调用方传入环境变量表，本文件不读 process.env，也不读文件。
- * 密钥只从 `*_FILE` 指向的文件读取，由 src/secrets/key-files.ts 负责；这里只解析路径，并拒绝直接写值的密钥变量。
+ * 密钥只从 `*_FILE` 指向的文件读取，由 src/secrets/key-files.ts 负责；这里只解析路径（`*_KEY_FILE` 只接受路径的写法，
+ * 不合规时不回显值），并拒绝直接写值的密钥变量。
  */
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
@@ -265,6 +266,25 @@ function readPath(env: Env, name: string, fallback: string, cwd: string, problem
   return isAbsolute(value) ? value : resolve(cwd, value);
 }
 
+/** 密钥文件路径的写法：绝对路径，或以 ./、../ 开头的相对路径（与 scripts/check-secrets.mjs 的 FILE_REFERENCE_RE 同一口径）。 */
+const KEY_FILE_PATH_RE = /^(?:\/|\.{1,2}\/)[^\s\0]*$/;
+/** 以 / 开头的标准 base64 密钥（openssl rand -base64 32 的输出）也满足上面的写法，按 32 字节密钥的样子单独拦下。 */
+const KEY_TEXT_RE = /^[A-Za-z0-9+/]{43}=$/;
+
+/**
+ * 读 `*_KEY_FILE`：只接受路径的写法。运维把密钥原文误填进这个变量时，值会被当成相对路径拼进报错与日志，
+ * 所以不合规时报错只写变量名，不回显值。返回 null 表示没通过（问题已记下）。
+ */
+function readKeyFilePath(env: Env, name: string, fallback: string, cwd: string, problems: string[]): string | null {
+  const value = text(env, name);
+  if (value === undefined) return fallback;
+  if (!KEY_FILE_PATH_RE.test(value) || KEY_TEXT_RE.test(value)) {
+    problems.push(`${name} 只接受密钥文件的路径（绝对路径，或以 ./、../ 开头）：当前值不是这样的路径，报错里不回显它；如果误填的是密钥原文，这把密钥要换掉`);
+    return null;
+  }
+  return isAbsolute(value) ? value : resolve(cwd, value);
+}
+
 function collectDeploymentConfig(env: Env, cwd: string, problems: string[]): DeploymentConfig {
   for (const name of FORBIDDEN_SECRET_ENV) {
     if (text(env, name) !== undefined) problems.push(`${name} 不接受直接写值：密钥只能以文件提供，改用 ${name}_FILE 指向密钥文件`);
@@ -304,9 +324,9 @@ function collectDeploymentConfig(env: Env, cwd: string, problems: string[]): Dep
   }
 
   const dbPath = readPath(env, DEPLOYMENT_ENV.dbPath, DEPLOYMENT_DEFAULTS.dbPath, cwd, problems);
-  const masterKeyFile = readPath(env, DEPLOYMENT_ENV.masterKeyFile, DEPLOYMENT_DEFAULTS.masterKeyFile, cwd, problems);
-  const backupKeyFile = readPath(env, DEPLOYMENT_ENV.backupKeyFile, DEPLOYMENT_DEFAULTS.backupKeyFile, cwd, problems);
-  if (masterKeyFile === backupKeyFile) {
+  const masterKeyFile = readKeyFilePath(env, DEPLOYMENT_ENV.masterKeyFile, DEPLOYMENT_DEFAULTS.masterKeyFile, cwd, problems);
+  const backupKeyFile = readKeyFilePath(env, DEPLOYMENT_ENV.backupKeyFile, DEPLOYMENT_DEFAULTS.backupKeyFile, cwd, problems);
+  if (masterKeyFile !== null && masterKeyFile === backupKeyFile) {
     problems.push(`${DEPLOYMENT_ENV.masterKeyFile} 与 ${DEPLOYMENT_ENV.backupKeyFile} 指向同一个文件：master key 和备份加密密钥必须是两把不同的密钥`);
   }
 
@@ -333,8 +353,8 @@ function collectDeploymentConfig(env: Env, cwd: string, problems: string[]): Dep
     dataDir,
     backupDir: join(dataDir, "backups"),
     runDir: join(dataDir, "run"),
-    masterKeyFile,
-    backupKeyFile,
+    masterKeyFile: masterKeyFile ?? DEPLOYMENT_DEFAULTS.masterKeyFile,
+    backupKeyFile: backupKeyFile ?? DEPLOYMENT_DEFAULTS.backupKeyFile,
     logLevel,
     appVersion,
   });

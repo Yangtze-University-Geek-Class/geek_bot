@@ -141,6 +141,22 @@ describe("启动检查", () => {
     expect(existsSync(fx.dbPath)).toBe(false);
   });
 
+  it("反例：把密钥原文误填进 *_KEY_FILE 时拒绝启动，fatal 日志和报错里都搜不到这串值", async () => {
+    const fx = fixture();
+    for (const name of ["GEEK_BOT_MASTER_KEY_FILE", "GEEK_BOT_BACKUP_KEY_FILE"] as const) {
+      const pasted = (name === "GEEK_BOT_MASTER_KEY_FILE" ? fx.masterKey : fx.backupKey).text.trim();
+      const sink = memorySink();
+      const error = await startupError({ env: { ...fx.env, [name]: pasted }, cwd: fx.dir, sink, dailyJobs: false, opsChannel: false });
+      for (const text of [error.message, JSON.stringify(error.problems), sink.text()]) {
+        expect(text).not.toContain(pasted);
+        expect(text).not.toContain(pasted.slice(0, 16));
+      }
+      expect(error.problems).toEqual([expect.stringContaining(`${name} 只接受密钥文件的路径`)]);
+      expect(sink.lines().find(line => line.level === "fatal")?.msg).toBe(error.message);
+    }
+    expect(existsSync(fx.dbPath)).toBe(false);
+  });
+
   it("密钥文件格式不对、两把密钥相同都拒绝启动；报错不回显文件内容", async () => {
     const fx = fixture();
     const junk = "this-is-not-a-valid-key-but-looks-secret-9f8e7d6c5b4a";

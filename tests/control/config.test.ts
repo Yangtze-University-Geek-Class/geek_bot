@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
   CONTROL_DEFAULTS,
@@ -178,6 +179,25 @@ describe("control 部署配置", () => {
     expect(FORBIDDEN_SECRET_ENV).toEqual(["GEEK_BOT_MASTER_KEY", "GEEK_BOT_BACKUP_KEY"]);
   });
 
+  it("反例：*_KEY_FILE 误填了密钥原文或不像路径的值时拒绝，报错只写变量名，不回显值", () => {
+    const base64 = randomBytes(32).toString("base64");
+    // 以 / 开头的标准 base64 密钥满足「绝对路径」的写法，要按密钥的样子单独拦下。
+    const slashBase64 = `/${base64.slice(1)}`;
+    const values = [base64, slashBase64, randomBytes(32).toString("hex"), "keys/master", "master_key", "/run/secrets/master key"];
+    for (const name of ["GEEK_BOT_MASTER_KEY_FILE", "GEEK_BOT_BACKUP_KEY_FILE"]) {
+      for (const value of values) {
+        const error = deploymentErrorOf({ ...base, [name]: value });
+        expect(error.problems, `${name}=${value}`).toEqual([
+          `${name} 只接受密钥文件的路径（绝对路径，或以 ./、../ 开头）：当前值不是这样的路径，报错里不回显它；如果误填的是密钥原文，这把密钥要换掉`,
+        ]);
+        expect(error.message).not.toContain(value);
+        expect(error.message).not.toContain(value.slice(1, 20));
+      }
+    }
+    const accepted = createDeploymentConfig({ ...base, GEEK_BOT_MASTER_KEY_FILE: "../keys/master", GEEK_BOT_BACKUP_KEY_FILE: "/run/secrets/backup_key" }, "/srv/geek-bot/app");
+    expect(accepted).toMatchObject({ masterKeyFile: "/srv/geek-bot/keys/master", backupKeyFile: "/run/secrets/backup_key" });
+  });
+
   it("master key 与备份加密密钥不能指向同一个文件", () => {
     expect(deploymentErrorOf({ ...base, GEEK_BOT_MASTER_KEY_FILE: "/run/secrets/key", GEEK_BOT_BACKUP_KEY_FILE: "/run/secrets/key" }).message).toContain(
       "必须是两把不同的密钥",
@@ -185,7 +205,7 @@ describe("control 部署配置", () => {
   });
 
   it("相对路径按传入的目录解析；端口、日志级别、镜像版本、开关值不合法时一次列出", () => {
-    const config = createDeploymentConfig({ ...base, GEEK_BOT_DB_PATH: "./data/geek-bot.db", GEEK_BOT_MASTER_KEY_FILE: "keys/master" }, "/srv/geek-bot");
+    const config = createDeploymentConfig({ ...base, GEEK_BOT_DB_PATH: "./data/geek-bot.db", GEEK_BOT_MASTER_KEY_FILE: "./keys/master" }, "/srv/geek-bot");
     expect(config).toMatchObject({ dbPath: "/srv/geek-bot/data/geek-bot.db", backupDir: "/srv/geek-bot/data/backups", masterKeyFile: "/srv/geek-bot/keys/master" });
     const error = deploymentErrorOf({
       ...base,

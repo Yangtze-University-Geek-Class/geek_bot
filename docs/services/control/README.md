@@ -53,7 +53,7 @@ control 从不运行 omp，也不执行目标仓库里的任何代码。
 - **实例角色** `GEEK_BOT_INSTANCE_ROLE`（`preview`、`production`）必须显式配置，没配或值不对就拒绝启动（B-64）。
 - **监听** `GEEK_BOT_HOST` 默认 `127.0.0.1`，`GEEK_BOT_PORT` 默认 `8080`。绑定非回环地址时必须配置 `GEEK_BOT_PUBLIC_ORIGIN`；origin 不是 https 时还要显式设置 `GEEK_BOT_ALLOW_PLAINTEXT_MESH=true`，否则拒绝启动（S-20）。origin 只能是 `http(s)://主机[:端口]`。
 - **库** `GEEK_BOT_DB_PATH` 默认 `/data/geek-bot.db`。加密备份在同目录的 `backups/`，运维本地通道在 `run/`。
-- **密钥只从 `*_FILE` 读**：`GEEK_BOT_MASTER_KEY_FILE`（默认 `/run/secrets/master_key`）与 `GEEK_BOT_BACKUP_KEY_FILE`（默认 `/run/secrets/backup_key`）。文件内容是 32 个随机字节的 base64（`openssl rand -base64 32`）或 64 位十六进制；读不到、格式不对、两个变量指向同一个文件、两把密钥相同都拒绝启动，报错只写变量名和路径。直接写值的 `GEEK_BOT_MASTER_KEY`、`GEEK_BOT_BACKUP_KEY` 一旦有值就拒绝启动。文件对组或其他用户可读时记一条 warn（不阻止启动；权限由部署脚本核对，#7）。#3 只读取并校验 master key，用它加密令牌随 #5。
+- **密钥只从 `*_FILE` 读**：`GEEK_BOT_MASTER_KEY_FILE`（默认 `/run/secrets/master_key`）与 `GEEK_BOT_BACKUP_KEY_FILE`（默认 `/run/secrets/backup_key`）。这两个变量只接受路径的写法：绝对路径，或以 `./`、`../` 开头（与 `check-secrets` 的密钥文件引用同一口径）；以 `/` 开头的 base64 密钥原文另按密钥的样子拦下。不合规就拒绝启动，报错只写变量名、不回显值，因为误填进来的往往就是密钥原文。文件内容是 32 个随机字节的 base64（`openssl rand -base64 32`）或 64 位十六进制；读不到、格式不对、两个变量指向同一个文件、两把密钥相同都拒绝启动，报错只写变量名和路径。直接写值的 `GEEK_BOT_MASTER_KEY`、`GEEK_BOT_BACKUP_KEY` 一旦有值就拒绝启动。文件对组或其他用户可读时记一条 warn（不阻止启动；权限由部署脚本核对，#7）。#3 只读取并校验 master key，用它加密令牌随 #5。
 - **日志级别** `GEEK_BOT_LOG_LEVEL`：`debug`、`info`（默认）、`warn`、`error`。
 - **镜像版本** `GEEK_BOT_APP_VERSION`（默认 `local`）：只作来源记录，写进 `schema_migrations.app_version` 与 `backups.app_version`；由部署脚本写入（#7）。它不是 A-55 的展示值。
 - **备份** `GEEK_BOT_BACKUP_KEEP_DAILY`（默认 7）、`GEEK_BOT_BACKUP_KEEP_WEEKLY`（默认 4）、`GEEK_BOT_BACKUP_HOUR_UTC`（默认 3，即每天 UTC 03:00 之后做当天的备份）。

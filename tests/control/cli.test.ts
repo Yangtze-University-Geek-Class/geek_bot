@@ -153,6 +153,23 @@ describe("CLI：restore --dry-run", () => {
     expect((await cli(fx, "restore", "--dry-run")).code).toBe(2);
   });
 
+  it("反例：把备份密钥原文误填进 GEEK_BOT_BACKUP_KEY_FILE 时各命令以 1 退出，stderr 里搜不到这串值", async () => {
+    const fx = fixture();
+    const pasted = fx.backupKey.text.trim();
+    const env = { ...fx.env, GEEK_BOT_BACKUP_KEY_FILE: pasted };
+    for (const argv of [["backup"], ["verify-backup"], ["restore", "--dry-run", "x.gbbk"]]) {
+      let stdout = "";
+      let stderr = "";
+      const code = await runCli(argv, { env, cwd: fx.dir, stdout: text => void (stdout += text), stderr: text => void (stderr += text) });
+      for (const text of [stdout, stderr]) {
+        expect(text).not.toContain(pasted);
+        expect(text).not.toContain(pasted.slice(0, 16));
+      }
+      expect(code, argv.join(" ")).toBe(1);
+      expect(stderr).toContain("GEEK_BOT_BACKUP_KEY_FILE 只接受密钥文件的路径");
+    }
+  });
+
   it("备份密钥文件读不到时以 1 退出，报错只有变量名和路径", async () => {
     const fx = fixture();
     const env = { ...fx.env, GEEK_BOT_BACKUP_KEY_FILE: join(fx.dir, "missing_backup_key") };
