@@ -37,3 +37,15 @@
 - 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
 - 做了什么：逐项核对第 1–15 项；只改 tests/e2e，截断检查只放过 v-wave 波纹容器且有自测
 - 结果：结论：通过，写在 #31 正文「审查结论」段
+
+## 13:37:50 +08:00 · 合并 · #30 · #31 合进 stage
+
+- 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
+- 做了什么：gh pr merge 31 --merge（7339f59 上 CI 全绿）
+- 结果：合并提交 a862c2c602d648e0d232484ac813210188a516bb
+
+## 13:38:18 +08:00 · 收尾 · #30 · PR #31 已合并，清理 worktree
+
+- 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
+- 做了什么：node scripts/task.mjs finish 30：删 worktree .claude/worktrees/task-30 与本地分支 task/30/drawer_e2e_flake
+- 结果：PR 已合并

@@ -181,3 +181,9 @@
 - 执行者：agent-claude-geek-bot-821e-control3（Claude Code，claude-opus-5-5）
 - 做了什么：在 a670402 上跑 pnpm verify、actionlint、pnpm test:e2e（4174 空闲）；这一轮没有重新构建镜像做容器实测
 - 结果：pnpm verify 退出码 0（Test Files 29 passed，Tests 414 passed）；actionlint 1.7.12 退出码 0；pnpm test:e2e 42 passed；镜像这一轮未实测，改动（迁移器的事务与保存点、密钥文件报错文字）由 tests/control 覆盖
+
+## 14:04:15 +08:00 · 提交 · #3 · 合入最新 stage（含 #30 的 e2e 修复），并入 #30 暂存的合并与收尾记录
+
+- 执行者：agent-claude-geek-bot-821e（Claude Code，claude-opus-5-5）
+- 做了什么：git merge origin/stage（a862c2c，无冲突，合并提交 abdd117）；node scripts/note.mjs flush 并入 task_30 链路的「合并」「收尾」；pnpm verify
+- 结果：pnpm verify 退出码 0（414 passed (414)）
