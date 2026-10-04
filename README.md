@@ -1,39 +1,38 @@
 # geek_bot
 
-> 可自部署的 GitHub 维护机器人：用一个 GitHub 账号当机器人，审查 PR、受理和跟进 issue、在临时 VM 里修小改动并开 PR；批准与合并始终由人来做。
+> 可自部署的跨平台项目维护与需求执行系统：接入 GitHub、GitLab 和消息渠道，共用项目、需求、任务与机器池；批准与合并始终由人来做。
 
-状态：`current` · 更新：2026-09-26 · 适用：第一次打开本仓库的人
+状态：`current` · 更新：2026-10-03 · 适用：第一次打开本仓库的人
 
 中文 | [English](README.en.md)
 
 ## 是什么
 
-geek_bot 是一个可以自己部署的通用产品。部署者在 Web 后台用一个 GitHub 账号（一般是小号）登录，这个账号就成为机器人。它自动发现该账号能访问的所有仓库，按它在每个仓库的实际权限做事：
+geek_bot 在一个实例里集中管理项目、需求和机器。管理员配置渠道账号、项目权限与执行资源，控制面按权限、标签、信任等级、槽位和 CPU / 内存预算分配任务。不划分租户、团队空间或用户专属机器池。
 
-- 审查 PR，只发 `COMMENT`，不批准；
-- 受理和跟进 issue；
-- 在一次性 VM 里修小改动并开 PR，收到审查意见后返工。
+- GitHub 和 GitLab 适配器发现已授权账号参与的项目，读取 issue、PR 和 MR。项目的逐类开关决定是否审查、受理、修复或返工。
+- 飞书事件回调和签名 Webhook 接收日常需求。需求必须关联项目才能派发，进展与结果通过受控出口回传。
+- 无网、只读 sandbox 执行只读任务；一次性 QEMU/KVM VM 执行需要修改文件或运行仓库代码的任务。机器只向控制面发起连接，不开放外部入站端口。
 
-批准与合并始终由人来做。每个仓库按自己的规范工作，没有规范时用可以在后台修改的默认规范。控制面可以带多台工作节点，节点只向外连接控制面，不开入站端口。
+后台管理员身份与渠道账号分离。管理员登录沿用 GitHub device flow，只取数字身份并撤销临时令牌；连接账号独立绑定，凭据只在控制面加密保存。安全限制不会被仓库文本或模型输出放宽。机器人不批准、不合并，不推主干或 tag。
 
 ## 组成
 
 | 目录 | 包名 | 做什么 | 契约 |
 |---|---|---|---|
-| `app/control` | `@geek-bot/control` | 控制面（Fastify 5 + better-sqlite3，计划中）：登录、令牌加密存放、仓库发现、轮询、调度、模型中继；唯一的 SQLite 写入者和唯一的 GitHub 写入者（写入白名单 + outbox）；同源托管后台的静态产物 | [control](docs/services/control/README.md) |
-| `app/console` | `@geek-bot/console` | 管理后台（Vue 3.5 + vue-router 4 + Tuffex 0.6.0 + Vite，#4 引入）；不用原生下拉框和复选框，不用 emoji | [console](docs/services/console/README.md) |
-| `app/node` | `@geek-bot/node` | 工作节点代理：只向外连 control；管理 issue 通道的无网只读 sandbox 容器和 PR 通道的一次性 QEMU/KVM VM | [node](docs/services/node/README.md) |
-| `app/runner` | `@geek-bot/runner` | 在 sandbox 或 VM 里驱动 omp 的单文件程序，只用 Node 标准库 | [runner](docs/services/runner/README.md) |
-| `packages/protocol` | `@geek-bot/protocol` | 纯类型加 JSON Schema：节点协议、任务、结果、仓库画像、模型目录、后台 API；任何包都可以导入它，它不导入任何包 | [protocol](docs/services/protocol/README.md) |
+| `app/control` | `@geek-bot/control` | Fastify 5 + SQLite 单写者；认证、渠道读取、需求、任务与资源调度、租约、模型中继、publisher 持久 outbox；同源托管真实后台 | [control](docs/services/control/README.md) |
+| `app/console` | `@geek-bot/console` | Vue 3.5 + Tuffex 0.6.0；项目、需求、机器、任务、渠道、模型池和管理员页面 | [console](docs/services/console/README.md) |
+| `app/node` | `@geek-bot/node` | 出站工作节点；自检、资源上限、sandbox / VM 执行、模型代理、磁盘 spool 与取消回收 | [node](docs/services/node/README.md) |
+| `app/runner` | `@geek-bot/runner` | Node 标准库单文件程序；隔离配置、显式工具白名单、omp、结果和补丁 | [runner](docs/services/runner/README.md) |
+| `packages/protocol` | `@geek-bot/protocol` | 共享 DTO 与 JSON Schema；不导入 app，不做 I/O | [protocol](docs/services/protocol/README.md) |
 
 ## 现状
 
-- **骨架阶段（#1）**：pnpm 工作区、规范文档、门禁脚本、CI 与 issue / PR 模板。
-- **后台外壳（#4）**：`app/console` 有了 Tuffex 外壳（侧栏、窄屏抽屉、各种状态）和样板数据模式，`pnpm dev:console` 可以在本机打开；各页面的内容还没做，也还不连控制面。
-- **控制面骨架（#3）**：`app/control` 能以非 root 容器启动，有 `/healthz`、`/readyz`、版本化迁移（只扩不缩，迁移前自动备份）、审计表、结构化日志与打码、每天的加密备份与恢复校验、运维命令 `backup` / `verify-backup` / `restore --dry-run` 和优雅停机；`pnpm dev:control` 可以在本机运行。登录、GitHub 调用和后台页面还没有。node、runner、protocol 只有最小源码和测试，没有业务功能。
-- 架构、安全模型、后台 API、节点协议、写入白名单和默认行为已写成设计文档（[ARCHITECTURE](docs/architecture/ARCHITECTURE.md)、[SECURITY](docs/architecture/SECURITY.md)、[API](docs/architecture/API.md)），决策记为 ADR-0002 到 ADR-0009（所有者 2026-09-26 全部接受，`accepted`）；设计文档还没有对应代码，状态是 `proposed`。
-- 功能按 #22 的路线图逐个 issue 推进：控制面（#3）、后台外壳（#4）、机器人账号登录（#5）、仓库发现（#6）、预发布栈与部署（#7）、节点（#11）；第一个能看到效果的里程碑是 PR 收到机器人的只评论审查（#15）；正式上线是 #20，达到可公开状态是 #21。
-- **部署**：部署文件与部署文档随 #7 加入，现在仓库里没有可部署的东西。
+- #34 实现了共享平台的持久化 API、真实后台、渠道适配、节点与 runner 源码。业务事实来源是各服务契约和源码，不以设计文档代替实现证据。
+- 本机真实 HTTP / SQLite 已验证：项目发现与同步、需求关联派发、租约与迟到结果拒绝、一次性令牌重放拒绝、角色授权和重启后的结果保存。外部 API 使用隔离协议服务，不是在线账号验收。
+- 生产模式后台已在 Ego 浏览器验证桌面与 390px 视口下的项目列表、需求录入关联、派发和取消。登录态来自隔离授权流程，不算真实 GitHub OAuth 验收。样板数据模式只用于开发与浏览器回归，写请求明确返回 405。
+- 真实 GitHub OAuth、GitLab、飞书账号的外部写入、node / sandbox 镜像与 Linux/KVM 任务环境仍需具备授权和硬件条件后验收，不标为通过。
+- 控制面与 node / sandbox 有 Dockerfile；发布 tag、部署栈和目标机部署仍受 [RELEASES](docs/conventions/RELEASES.md) 约束。本次不自动提交、推送、打 tag 或部署。
 
 ## 参与开发
 
@@ -47,7 +46,8 @@ geek_bot 是一个可以自己部署的通用产品。部署者在 Web 后台用
    pnpm hooks:enable    # pre-push 核对分支不变量与发布 tag 规则
    pnpm dev:console     # 本机打开后台（样板数据模式，数据全部虚构）
    pnpm dev:control     # 本机运行控制面（本机用的一次性密钥，库在 ./data/）
-   pnpm test:e2e        # 后台的浏览器回归；第一次先 pnpm exec playwright install chromium
+   pnpm dev:node        # 启动出站节点；先在后台登记机器并配置 node_token 文件与执行器资产
+   PLAYWRIGHT_BROWSERS_PATH=/tmp/geek-bot-playwright pnpm test:e2e # 首次用同一路径运行 playwright install chromium
    ```
 
 4. 一件事一个 issue、一个 `task/<issue>/<slug>` 分支、一个 worktree、一个 PR 回 `stage`：见 [CONTRIBUTING](docs/conventions/CONTRIBUTING.md) 与 [BRANCHING](docs/conventions/BRANCHING.md)。

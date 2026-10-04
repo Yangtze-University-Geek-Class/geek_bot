@@ -94,7 +94,7 @@
 | 文档 | 说明 | EN |
 |---|---|---|
 | [`API.md`](./architecture/API.md) | control 的单实例共享平台 HTTP 接口：后台身份、连接、项目、需求、机器、任务、模型池和事件流。 | — |
-| [`ARCHITECTURE.md`](./architecture/ARCHITECTURE.md) | 控制面加工作节点：control 单进程单写者、唯一 GitHub 写入方；节点只出站领任务，在无网 sandbox 或一次性 VM 里运行 omp。 | — |
+| [`ARCHITECTURE.md`](./architecture/ARCHITECTURE.md) | 一个控制面管理共享项目、需求、任务和机器；渠道通过适配器读取，任务在隔离执行环境运行，外部写入只经 publisher。 | — |
 | [`SECURITY.md`](./architecture/SECURITY.md) | 信任边界、安全不变量（S-01…S-20）、每个密钥放在哪、谁能读、泄露后果、如何轮换，以及剩下的风险和验证办法。 | — |
 
 ## ops/

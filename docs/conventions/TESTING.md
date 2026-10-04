@@ -2,7 +2,7 @@
 
 > 现在就有的测试与计划中的测试分开记录；类型检查、单元与路由测试、构建、浏览器验证、VM 冒烟和实例验收是不同证据，不相互替代。
 
-状态：`current` · 更新：2026-09-26 · 适用：`tests/**`、各包的 `typecheck` / `build`、根 `pnpm check` / `pnpm test` / `pnpm build` / `pnpm verify`
+状态：`current` · 更新：2026-10-03 · 适用：tests、各包 typecheck/build、根 verify 与独立浏览器/执行环境验收
 
 ## 根入口和分工
 
@@ -11,7 +11,7 @@
 - `pnpm build`：先 `check:runtime`，再逐包构建，产物进各包 `dist/`（console 是 `vite build`，其余是 `tsc -p tsconfig.json`）。
 - `pnpm verify` = `pnpm check && pnpm test && pnpm build`，任一步失败必须非零退出。CI 与合并前自查都跑它。
 
-浏览器回归 `pnpm test:e2e`（#4 加入）不在 `pnpm verify` 里：它以样板数据模式构建 console，在 127.0.0.1:4174 预览，用 Playwright（Chromium）跑 `tests/e2e/*.spec.ts`；CI 的 `console-e2e` job 每次都跑。本机第一次运行前用 `pnpm exec playwright install chromium` 下载浏览器。
+浏览器回归 pnpm test:e2e 不在 verify 里：样板数据模式构建 console，127.0.0.1:4174 预览，Chromium 执行 tests/e2e。首次下载与运行均带 PLAYWRIGHT_BROWSERS_PATH=/tmp/geek-bot-playwright，浏览器不落工作区或用户缓存。真实模式后台用 Ego 连接实际 control 另行验证，不能被样板数据测试代替。
 
 VM 实验 `pnpm test:vm`（#12 加入）只在有 `/dev/kvm` 和 Docker 的 Linux 主机上以 root 手动跑（前后比对防火墙规则，宿主要有 `iptables-save`、`ip6tables-save` 与 `nft`），不在 `pnpm verify` 和 CI 里；没跑就在报告里写「未验证」。它的出网代理规则另有单测 `tests/integration/vm/egress-proxy.test.ts`，随 `pnpm test` 在任何机器上跑。结论与数据见 [VM 可行性实测](../services/node/vm-feasibility.md)。
 
@@ -48,11 +48,21 @@ VM 实验 `pnpm test:vm`（#12 加入）只在有 `/dev/kvm` 和 Docker 的 Linu
 | control 镜像（`ci.yml` 的 `docker` job，#3） | `tests/tooling/ci-docker.test.ts` | 断言脚本在 `Config.User` 为空、`root`、`0`、`0:0`，容器 uid 为 0，没有 HEALTHCHECK 或是 `NONE` 时以 0 退出；Dockerfile 的 `FROM` 不带 digest、`ARG` 默认值不带 digest、digest 不是 64 位、引用没定义的阶段、没有 `FROM` 时以 0 退出；停机日志里没有 `busy` 为 0 的「WAL 已 checkpoint，库已关闭」、退出码不是 0、`/readyz` 一直不是 200 时以 0 退出（脚本从 `ci.yml` 取出、按 GitHub 的 bash 参数执行，`docker`、`curl`、`sudo`、`sleep` 换成桩）；job 出现 `docker push`、`docker login`；`verify` 的 `needs` 或汇总条件漏了 `docker` |
 | PR 目标分支（`issue-lifecycle.yml` 的 `pr-base`） | `tests/tooling/labels.test.ts` | PR 指向 `stage` 以外的分支（`main`、`dev/alice`、`task/12/review_queue`、`stage2`、空）时不以 1 退出；`pr-base` 不随 edited 触发；`pr-contract`、`close-on-merge` 没限定只处理指向 `stage` 的 PR |
 
-`app/node`、`app/runner`、`packages/protocol` 现在只有最小源码，各有一份最小测试：`tests/node/config.test.ts`（节点配置校验）、`tests/runner/omp-args.test.ts`（omp 参数）、`tests/protocol/protocol.test.ts`（协议常量与通道映射）；另由各包的 `typecheck` 与 `build` 证明各包能编译、能类型导入 `@geek-bot/protocol`。这些测试只证明工作区与工具链可用，不证明任何业务功能。
+#34 已加入 node 出站 worker、sandbox/VM 与 runner 单文件执行源码，并扩展 protocol DTO/schema。现有 tests/node 覆盖配置和磁盘 spool，tests/runner 覆盖工具白名单与任务包拒绝边界，tests/protocol 仍覆盖常量；这些测试不证明真实隔离、KVM 或外部模型任务已经成功。
 
 control（#3）：`tests/control/` 在系统临时目录里起真实的库和 control（不监听或监听随机端口），不读 `.env`、不联网，密钥每次随机生成，时间用假时钟。`config.test.ts`：产品默认值与部署配置（实例角色必填、S-20 的监听与 origin、密钥变量直接写值被拒且不回显、`*_KEY_FILE` 误填密钥原文或不是路径写法时被拒且不回显、两个密钥文件不能相同）；`logging.test.ts`：S-16 列出的每种密钥形态、已知密钥原值、敏感键名在日志与打码里都被替换，另有一条「不打码就会带出令牌」的反例；`database.test.ts`：连接参数与独占锁（第二个连接打不开）、迁移器（空库迁到最新、上一版本的库迁到最新、兼容版本高于代码拒绝、回滚情形、迁移中途失败回滚、迁移文件被改、不是本产品的库、`schema_migrations` 编号不连续；`shrink=false` 的迁移删表、删列、改名、删索引、重写触发器、重建表丢列或改类型或加 `NOT NULL` 都被拒绝，大小写与注释混写也一样，按官方步骤重建表放宽 `CHECK` 通过；顶层写了 `BEGIN`、`COMMIT`、`END`、`ROLLBACK`、`SAVEPOINT`、`RELEASE` 的文件加载时被拒绝，触发器语句体与字符串、注释里的同名词不算；绕过加载检查、文件自己结束了事务时报「可能已部分生效」，不说「已回滚」）、审计只追加、告警去重；`backup.test.ts`：备份→恢复→`integrity_check` 往返、密文里没有明文、明文临时文件只放 `<dataDir>/tmp` 且建出来就是 0600、`backups/` 只读时恢复校验照样能做、改字节或改头部或换密钥或登记不符都判失败并写告警、保留策略、备份服务只读写 0001 就有的 `backups` 列、启动时补登记、每日任务的到点与 weekly 判定（每周保留 0 份时记为 daily、刚做完就被清理的备份不做校验并记错误）；`server.test.ts`：`/healthz`、`/readyz`（含 503 的检查项）、错误格式与多余字段 400、415、413、400，拒绝启动的各种原因（删掉 master key 后、把密钥原文误填进 `*_KEY_FILE` 时，包括以 `/` 开头、不带 `=` 的 43 位 base64，报错与日志都不含路径和任何密钥内容），迁移前备份（下一版给 `backups` 加列时照样能写登记），上一版代码打开新库能启动能读写，启动时清空 `<dataDir>/tmp` 并收紧到 0700，第二个 control 拒绝启动，SIGTERM 后 WAL 已 checkpoint（只拷库文件本身就能读到停机前的行）；`cli.test.ts`：`backup`、`verify-backup` 经本地通道与离线执行、离线拿不到锁时失败、离线执行前核对库版本（兼容版本高于 CLI、库比 CLI 新或旧都拒绝且不写库）、`restore --dry-run` 不改任何东西、演练的明文不用系统临时目录、用法错误以 2 退出、误填密钥原文（含以 `/` 开头、不带 `=` 的 43 位 base64）时 stderr 不回显，读不到密钥文件时的报错与 control 一致、不含路径。镜像的非 root 与 HEALTHCHECK 由 CI 的 `docker` job 断言，本机 `docker run` 的实测结果写在 PR 里，不由 `pnpm test` 覆盖。
 
 console（#4）：`tests/console/` 覆盖 `lib/` 与样板数据（时长格式化；API 客户端的错误格式、网络错误、非 JSON 响应、取消、路径白名单与各种写法的点段；页面状态映射；SSE 的连接、断线轮询、CLOSED 后退避重建、`reset`、`session_expired`；样板数据的各场景与「不调用真实 fetch」；浏览器回归所用被禁符号正则的逐类自测）。`tests/e2e/` 是浏览器回归：每个页面在 1280px 与 390px 下断言没有原生 select 与 checkbox、emoji 与被禁符号扫描为 0、图标都有图形、没有页面级横向溢出；外壳与主内容区没有被 overflow 截掉的内容；另有侧栏与抽屉导航、键盘（跳过链接、Tab 与 Enter、纯键盘打开抽屉、焦点进入并圈在抽屉里、Esc 与焦点归还、关闭的抽屉键盘进不去）、断网提示、样板数据标识、各数据状态；每个用例结束时断言没有请求离开浏览器（上下文级的外部请求、WebSocket 与 `/api/` 请求都为 0）。
+
+## #34 共享平台证据范围
+
+- tests/control/connector-credentials.test.ts：密文、认证标签、凭据更新与必需字段；connector-pagination.test.ts：GitHub/GitLab 翻页边界；connector-im-verification.test.ts：飞书/签名 Webhook 的校验与拒绝；shared-platform-http.test.ts：真实路由、临时 SQLite、角色、节点资源、租约与迟到结果。上游协议隔离打桩，不读真实密钥。
+- tests/control/publisher-safety.test.ts：真实 publisher/SQLite、隔离 GitHub/GitLab；跨 task/epoch/实例不重复写、新 head 独立发布、未知结果不重发、远端数字作者核对，以及关闭引用/批准指令/标记/提及中和。没有真实外部写入或 fix 的 Git→PR/MR 标题端到端证据。
+- tests/node/spool.test.ts：磁盘重开、确认水位、重放、序号、容量和损坏恢复。不是完整 worker 失联或执行器演练。
+- tests/e2e 已迁移到当前导航，覆盖桌面和 390px。裁切例外只给满足绝对定位、最大 1px 几何与完整隐藏样式的屏幕阅读器文本；仅类名不能豁免普通裁切。
+- 本机真实 HTTP/SQLite 烟雾已实跑实际 ControlClient 的领取、续租、取包、事件和结果；可执行 node 无执行器时保持 cordoned，正常退出。真实模式 console 已有 Ego 的需求创建、关联、派发与取消证据。重建后的程序烟雾与 root verify 结果按真实输出记 notes，不由本页预先写 PASS。
+- 真实 OAuth/代码平台/飞书账号、模型、sandbox 镜像与 Linux/KVM、硬件传感器、异地恢复和预发布人工验收未验证。后面的完整目标矩阵不代表 #34 已覆盖每一行。
+
 
 ## 回归矩阵（计划中，随对应 issue 加入）
 

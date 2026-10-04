@@ -2,7 +2,7 @@
 
 > 在本机准备 Node 22 与 pnpm 9.15.9，安装依赖，跑 `pnpm verify`，启用 Git 钩子，用 task worktree 开工和收尾，每一步写执行记录。
 
-状态：`current` · 更新：2026-09-26 · 适用：在本机开发本仓库的维护者与 agent
+状态：`current` · 更新：2026-10-03 · 适用：在本机开发本仓库的维护者与 agent
 
 先读完 [AGENTS](../../AGENTS.md) §0 列出的规范再照本文操作。分支与 worktree 的规则以 [BRANCHING](../conventions/BRANCHING.md) 为准，测试规则以 [TESTING](../conventions/TESTING.md) 为准，本文只写操作步骤。
 
@@ -43,9 +43,9 @@ pnpm install --frozen-lockfile
 | `check:notes` | `node scripts/note.mjs check` | `notes/` 只能是 `<日期>/<GitHub 用户名>/<链路>.md` 加 `INDEX.md`；标题、负责人与目录一致；每条记录的标题是北京时间 `HH:MM:SS +08:00`、阶段在词表里、`执行者`/`做了什么`/`结果` 齐全；时间不倒退；task 链路以「开工」开始、收尾之后不再记；`notes/INDEX.md` 是最新的（[NOTES](../conventions/NOTES.md)） |
 | `check:secrets` | `node scripts/check-secrets.mjs` | 私有 env 文件、数据库文件不入库；env 模板里的密钥项只能留空或写 `*_FILE`；不出现私钥、GitHub 令牌、`sk-` 开头的长密钥。不按扩展名挑文件，每个非二进制文件都扫（`Dockerfile`、`.npmrc`、没有扩展名的文件都在内）；私钥文件名（`*.pem`、`*.key`、`id_ed25519` 等）和数据库附属、备份文件（`.db.bak`、`.sqlite-wal` 等）不看内容，一律不许入库 |
 | `check:public-safety` | `node scripts/check-public-safety.mjs` | 不出现私网、CGNAT、链路本地地址和带 mesh 子域的组网主机名；被禁词按 SHA-256 比对；确需保留的放行项逐条写进 `scripts/public-safety-allow.json` 并写明理由。文件名、目录名、符号链接目标同样扫描；`notes/` 下的路径和内容不做被禁词比对（记录必须写负责人的 GitHub 用户名，见 [NOTES](../conventions/NOTES.md) §7），地址和主机名规则照常；放行清单自己的 `path`、`reason` 照常扫描；`docs/components/tuffex/reference/`、`snapshot/` 下只跳过清单（`manifest.json`）里登记过的文件内容 |
-| `typecheck` | `pnpm -r --if-present run typecheck && tsc -p tsconfig.json` | 每个包 `tsc -p tsconfig.json --noEmit`；再用根 `tsconfig.json` 对 `tests/**` 与 `vitest.config.ts` 做类型检查，不产出文件 |
-| `test` | `vitest run` | 运行 `tests/` 下的全部单测 |
-| `build` | `pnpm check:runtime && pnpm -r --if-present run build` | 每个包 `tsc -p tsconfig.json`，产物进各包的 `dist/`（已被 `.gitignore` 忽略）；control 另把 `src/db/migrations/*.sql` 复制进 `dist/db/migrations/`；console 是 `vite build` |
+| `typecheck` | `pnpm typecheck` | console 用 vue-tsc，其余包用 tsc；根 tsconfig 查单测，tests/e2e/tsconfig 查浏览器回归与 Playwright 配置 |
+| `test` | `vitest run` | 运行 tests 下的单测，包含 #34 渠道、权限租约、runner 和磁盘 spool |
+| `build` | `pnpm build` | 各包产物进 dist；control 复制 SQL 迁移，console 用 Vite；runner 的 tsc 产物再打成 runner.mjs 单文件 |
 
 另外几条命令不在 `verify` 里：
 
@@ -55,9 +55,11 @@ pnpm install --frozen-lockfile
 - `node scripts/note.mjs add|flush|index|check`：写执行记录、把暂存的记录并进当前 task worktree、重新生成 `notes/INDEX.md`（`--summary` 输出全部链路的一览表）、核对记录；`check --pr --base origin/stage --head <task 分支>` 是 CI 对 task PR 的检查，本地开 PR 前可以先跑（审查进行中加 `--for-review`，允许暂缺「审查」）。用法见 [NOTES](../conventions/NOTES.md) §5。
 - `pnpm labels:plan`：只打印创建标签的 `gh label create` 命令，不执行，由所有者决定是否运行（见 [CICD](CICD.md)）。
 - `pnpm dev:console`：console 的样板数据模式开发服务器（`vite --mode sample`），数据全部虚构、不连控制面；地址栏加 `?sample=empty|slow|error|forbidden|unauthenticated|offline` 看各种状态。
-- `pnpm test:e2e`：浏览器回归。以样板数据模式构建 console（`app/console/.sample-dist/`，已忽略），在 127.0.0.1:4174 预览，用 Playwright 跑 `tests/e2e/`；报告在 `playwright-report/`，验收截图在 `test-results/evidence/`（都已忽略）。第一次运行前 `pnpm exec playwright install chromium`，浏览器下载到用户缓存目录（macOS 是 `~/Library/Caches/ms-playwright`），不进仓库。4174 端口被占用时它直接失败，不复用已有的服务。
-- `pnpm dev:control`：本机运行 control（先构建 protocol 与 control，再运行 `app/control/scripts/dev.mjs`）。库、加密备份和运维本地通道放在仓库根的 `data/`（已忽略）；第一次运行时在 `data/dev-secrets/` 生成本机用的一次性 master key 与备份加密密钥（0600），它们不是任何实例的密钥。默认实例角色 `preview`、只绑 `127.0.0.1:8080`、日志级别 `debug`；仓库根有 `.env.local`（从 `.env.example` 复制）时先读它，环境变量里有值的项优先，例如端口被占时 `GEEK_BOT_PORT=18080 pnpm dev:control`。Ctrl-C 触发优雅停机。起来以后 `curl http://127.0.0.1:8080/readyz` 应返回 `{"status":"ready"}`。
-- control 的运维命令（`backup`、`verify-backup`、`restore --dry-run`）在本机用构建产物运行，环境变量要和 `dev:control` 一致，例如 `GEEK_BOT_INSTANCE_ROLE=preview GEEK_BOT_DB_PATH=./data/geek-bot.db GEEK_BOT_MASTER_KEY_FILE=./data/dev-secrets/master_key GEEK_BOT_BACKUP_KEY_FILE=./data/dev-secrets/backup_key node app/control/dist/cli.js backup`；control 在运行时命令经 `data/run/control.sock` 交给它执行，没在运行时独占打开库自己执行（[control 服务契约](../services/control/README.md)「运维命令与单写者」）。
+- `pnpm test:e2e`：样板数据模式构建 console（app/console/.sample-dist），在 127.0.0.1:4174 预览。Playwright 报告与截图在 playwright-report 和 test-results/evidence。首次用 `PLAYWRIGHT_BROWSERS_PATH=/tmp/geek-bot-playwright pnpm exec playwright install chromium` 下载；运行也带同一个变量，超过 100 MB 的浏览器不落工作区或用户缓存。端口被占直接失败，不复用已有服务。
+- `pnpm dev:control`：先构建 protocol 与 control，再运行 dev.mjs。data 目录保存本机库、加密备份和运维 socket；data/dev-secrets 第一次分别生成 master_key、backup_key 和 session_secret（0600，互相独立），不使用实例密钥。默认 preview、127.0.0.1:8080、debug；根 .env.local 存在时读取，非空环境值优先。Ctrl-C 优雅停机，`curl http://127.0.0.1:8080/readyz` 返回 ready。
+- 真实后台先运行 `pnpm --filter @geek-bot/console build`，再 dev:control；control 默认同源托管正式 dist，样板数据开发服务不能代替真实写操作。认领/登录必须配置 OAuth App 的 client id 与 client-secret 文件并开启 Device Flow；未配置返回 oauth_not_configured，不伪造身份。详见 [console](../services/console/README.md)。
+- 运行中的 control 可用 `bootstrap-code` CLI 打印一次性认领码。CLI 的库、master 与 backup 配置须与服务一致；例如 `GEEK_BOT_INSTANCE_ROLE=preview GEEK_BOT_DB_PATH=./data/geek-bot.db GEEK_BOT_MASTER_KEY_FILE=./data/dev-secrets/master_key GEEK_BOT_BACKUP_KEY_FILE=./data/dev-secrets/backup_key node app/control/dist/cli.js bootstrap-code`。backup、verify-backup 和 restore --dry-run 用相同配置，前两者经本地运维 socket，不开第二个写连接。
+- `pnpm dev:node`：构建 protocol、runner 和 node，再启动 dist/main.js。先在后台登记机器，把只显示一次的节点令牌放到 0400 文件；配置 GEEK_BOT_NODE_CONTROL_URL、GEEK_BOT_NODE_NAME、GEEK_BOT_NODE_TOKEN_FILE 和可写 GEEK_BOT_NODE_DATA_DIR。没有 sandbox 容器或 KVM 时保持 cordoned，不会执行任务；这条命令不是部署方式。配置与隔离资产见 [node](../services/node/README.md)。
 - `pnpm test:vm`：一次性 VM 的可行性实验（`tests/integration/vm/run.sh`），只能在有 `/dev/kvm` 和 Docker 的 Linux 主机上以 root 运行（要读防火墙规则做前后比对，宿主要有 `iptables-save`、`ip6tables-save` 与 `nft`），macOS 本机跑不了（脚本会直接以 2 退出）。宿主上只起一个临时实验容器，跑完删除容器、实验镜像和缓存卷；基础镜像只在它是本次拉下来的时候才删，Docker 的构建缓存不清（和宿主上别的构建共用）。`--keep` 保留实验镜像与下载的 cloud 镜像，结束时打印资源名、清理命令和后缀，重跑时加 `--keep --suffix <后缀>` 复用。环境变量：`GEEKBOT_VM_RESULTS=<目录>` 把全部产物复制出来；`GEEKBOT_VM_PROBE_ONLY=1` 只跑网络探测，不装依赖、不跑校验；`GEEKBOT_VM_SANDBOX` 覆盖 qemu 的 `-sandbox` 取值（默认按 ADR-0011）。流程与结论见 [VM 可行性实测](../services/node/vm-feasibility.md)。
 - 还没有的命令：`check:environments` 与 `release:plan`（#7）。
 
@@ -73,10 +75,11 @@ docker build -f app/control/Dockerfile -t geek-bot-control:local .
 - 本机起一次容器做实机检查（密钥是临时生成的一次性值，用完删掉容器、卷和文件）：
 
   ```bash
-  secrets=$(mktemp -d) && (umask 077; openssl rand -base64 32 > "$secrets/master_key"; openssl rand -base64 32 > "$secrets/backup_key")
+  secrets=$(mktemp -d) && (umask 077; openssl rand -base64 32 > "$secrets/master_key"; openssl rand -base64 32 > "$secrets/backup_key"; openssl rand -base64 32 > "$secrets/session_secret")
   docker run -d --name geek-bot-control-local -p 127.0.0.1:18080:8080 \
     -e GEEK_BOT_INSTANCE_ROLE=preview -e GEEK_BOT_HOST=0.0.0.0 -e GEEK_BOT_PUBLIC_ORIGIN=https://geek-bot.example.com \
     -v "$secrets/master_key:/run/secrets/master_key:ro" -v "$secrets/backup_key:/run/secrets/backup_key:ro" \
+    -v "$secrets/session_secret:/run/secrets/session_secret:ro" \
     -v geek-bot-control-local-data:/data geek-bot-control:local
   curl -i http://127.0.0.1:18080/readyz                                   # 200 {"status":"ready"}
   docker inspect --format '{{.Config.User}} {{json .Config.Healthcheck}} {{.State.Health.Status}}' geek-bot-control-local

@@ -2,26 +2,26 @@
 
 > 产品定位、五个包、授权边界、公开就绪约束、统一入口和完成定义。
 
-状态：`current` · 更新：2026-09-26 · 适用：整个仓库；所有维护者、贡献者与 AI/Agent。
+状态：`current` · 更新：2026-10-03 · 适用：整个仓库；所有维护者、贡献者与 AI/Agent。
 
 ## 身份与入口
 
 所有 AI 进入仓库的第一步是确认当前分支（`git branch --show-current`），再读 [AGENT-START](AGENT-START.md) 及 docs 必读规范；读完之前不做业务操作。分支与发布的唯一规则见 [BRANCHING](BRANCHING.md) 与 [RELEASES](RELEASES.md)：只有 `main`（正式）与 `stage`（预发布）两条长期分支；发版只靠打 tag（`vX.Y.Z-rc.N` 发预发布实例，`vX.Y.Z` 发正式实例）；人工验收先于合入 `main` 和打正式 tag；版本号不自动提升。
 
-geek_bot 是一个可自部署的通用产品。部署者在 Web 后台用一个 GitHub 账号（一般是小号）登录，这个账号就成为机器人。它自动发现该账号能访问的所有仓库，按它在每个仓库的实际权限做事：
+geek_bot 是可自部署的跨平台项目维护与需求执行系统。一个实例集中管理项目、需求、任务和机器，管理员配置渠道账号、项目权限与资源，不划分租户或团队空间。产品范围与身份分离的决策见 [ADR-0012](../decisions/0012-shared-cross-platform-workspace.md)。
 
-- 审查 PR，只发 COMMENT 类型的 review；
-- 受理和跟进 issue；
-- 在临时 VM 里修小改动，并开 PR。
+- GitHub 和 GitLab 适配器发现已授权账号参与的项目，读取 issue、PR 和 MR；项目逐类开关决定审查、受理、修复和返工。
+- 飞书与签名 Webhook 接收需求；需求必须关联项目，才能通过共享队列派发。
+- 无网、只读 sandbox 执行只读任务；一次性 QEMU/KVM VM 执行可写任务。凭据与外部写入只归控制面。
 
-**批准与合并始终由人来做。** 截至 2026-09-26，上述功能都还没实现：设计与决策见 [ARCHITECTURE](../architecture/ARCHITECTURE.md) 和 ADR-0002 到 ADR-0009（#2），实现由 #3–#21 逐项交付。
+**批准与合并始终由人来做。** #34 已实现持久化 API、真实后台和执行源码；源码、类型检查、本机协议验证、真实外部账号和 KVM 验收必须分别报告，不用任一项代替其余。
 
 根包名 `geek_bot`（`version` 从 `0.1.0` 起，`private: true`，`packageManager: pnpm@9.15.9`，Node `>=22.13.0 <23`）。所有开发与验收命令都从仓库根目录运行。工作区有五个包，每个包都有一份服务契约，放在 [docs/services](../services/README.md)：
 
 | 目录 | 包名 | 职责 |
 |---|---|---|
-| `app/control` | `@geek-bot/control` | 控制面。Fastify 5 + better-sqlite3（#3 引入）。唯一的 SQLite 写入者、唯一的 GitHub 写入者（publisher 白名单 + outbox）；负责登录、令牌加密存放、仓库发现、轮询、调度、模型中继；同源托管 console 的静态产物。见 [control](../services/control/README.md) |
-| `app/console` | `@geek-bot/console` | 管理后台。Vue 3.5 + vue-router 4 + @talex-touch/tuffex 0.6.0 + Vite 7（#4 引入外壳）。不用原生下拉框和复选框，不用 emoji。见 [console](../services/console/README.md) |
+| `app/control` | `@geek-bot/control` | 控制面。Fastify 5 + SQLite；唯一数据库写者和多渠道 publisher；登录、连接、发现、需求、任务、租约、模型中继与同源静态后台。见 [control](../services/control/README.md) |
+| `app/console` | `@geek-bot/console` | Vue 3.5 + Tuffex 0.6.0；项目、需求、机器、任务、连接、模型池和管理员页面。无原生下拉框、复选框或 emoji。见 [console](../services/console/README.md) |
 | `app/node` | `@geek-bot/node` | 工作节点代理。只向外连 control（HTTP 长轮询 `/api/node/v1`），不开入站端口；管理 issue 通道的无网只读 sandbox 容器和 PR 通道的一次性 QEMU/KVM VM。见 [node](../services/node/README.md) |
 | `app/runner` | `@geek-bot/runner` | 在 sandbox 或 VM 里驱动 omp 的单文件程序，只用 Node 标准库。见 [runner](../services/runner/README.md) |
 | `packages/protocol` | `@geek-bot/protocol` | 纯类型加 JSON Schema（节点协议、TaskSpec、结果、RepoProfile、catalog 文件契约、console API DTO）。任何 app 都可以导入它；它不导入任何 app。见 [protocol](../services/protocol/README.md) |

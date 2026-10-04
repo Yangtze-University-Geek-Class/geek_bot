@@ -1,8 +1,8 @@
 # geek_bot
 
-> A self-hosted GitHub maintenance bot: one GitHub account acts as the bot, reviews pull requests, triages and follows up on issues, and fixes small changes in a disposable VM before opening a pull request. Approving and merging always stay with humans.
+> A self-hosted cross-platform project-maintenance and demand-execution system: GitHub, GitLab and messaging adapters share projects, demands, tasks and a machine pool. Approving and merging stay with humans.
 
-状态：`current` · 更新：2026-09-26 · 适用：anyone opening this repository for the first time
+状态：`current` · 更新：2026-10-03 · 适用：anyone opening this repository for the first time
 
 [中文](README.md) | English
 
@@ -10,32 +10,31 @@ This English page is an overview. The Chinese documents are canonical; when they
 
 ## What it is
 
-geek_bot is a general-purpose product you deploy yourself. The deployer signs in to the web console with a GitHub account (usually a secondary account), and that account becomes the bot. It discovers every repository the account can access and acts within its actual permission on each one:
+One instance owns a shared workspace. Administrators configure channel accounts, project permissions and execution resources. The control plane assigns tasks within capability, label, trust, slot, CPU and memory limits. There are no tenants, team spaces or user-private machine pools.
 
-- reviews pull requests with `COMMENT` reviews only, never approvals;
-- triages and follows up on issues;
-- fixes small changes in a disposable VM, opens a pull request, and reworks it after review.
+- GitHub and GitLab adapters discover participating projects and read issues and PRs/MRs. Explicit per-project switches authorize review, triage, repair and rework.
+- Feishu events and signed webhooks intake demands. A demand must be linked to a project before dispatch; progress and results use the controlled publisher.
+- Read-only tasks use network-less sandboxes; writable tasks use disposable QEMU/KVM VMs. Nodes make outbound connections only.
 
-Approving and merging always stay with humans. Each repository is handled by its own conventions; when it has none, geek_bot uses built-in defaults that can be edited in the console. The control plane can drive several worker nodes; nodes only make outbound connections to the control plane and open no inbound ports.
+Console identity and channel credentials are separate. Administrators use GitHub device flow for numeric identity; temporary login tokens are revoked. Channel accounts are independently bound, and credentials are encrypted only in control. Repository content and model output cannot widen capabilities. The bot never approves, merges or pushes protected branches or tags.
 
 ## Packages
 
 | Directory | Package | Role | Contract |
 |---|---|---|---|
-| `app/control` | `@geek-bot/control` | Control plane (Fastify 5 + better-sqlite3, planned): sign-in, encrypted token storage, repository discovery, polling, scheduling, model relay; the only SQLite writer and the only GitHub writer (write allowlist + outbox); serves the console build from the same origin | [control](docs/services/control/README.md) |
-| `app/console` | `@geek-bot/console` | Admin console (Vue 3.5 + vue-router 4 + Tuffex 0.6.0 + Vite, added in #4); no native selects or checkboxes, no emoji | [console](docs/services/console/README.md) |
-| `app/node` | `@geek-bot/node` | Worker node agent: outbound-only link to control; runs network-less read-only sandbox containers for issues and disposable QEMU/KVM VMs for pull requests | [node](docs/services/node/README.md) |
-| `app/runner` | `@geek-bot/runner` | Single-file program that drives omp inside the sandbox or VM, Node standard library only | [runner](docs/services/runner/README.md) |
-| `packages/protocol` | `@geek-bot/protocol` | Types and JSON Schema only: node protocol, tasks, results, repository profiles, model catalog, console API; any package may import it, it imports none | [protocol](docs/services/protocol/README.md) |
+| `app/control` | `@geek-bot/control` | Fastify 5 and SQLite single writer; identity, connectors, demands, tasks, resource leases, model relay, durable publisher outbox and same-origin console hosting | [control](docs/services/control/README.md) |
+| `app/console` | `@geek-bot/console` | Vue 3.5 and Tuffex 0.6.0 pages for projects, demands, machines, tasks, connections, model pools and administrators | [console](docs/services/console/README.md) |
+| `app/node` | `@geek-bot/node` | Outbound worker, self-checks, resource bounds, sandbox/VM execution, local model relay, disk spool and cancellation | [node](docs/services/node/README.md) |
+| `app/runner` | `@geek-bot/runner` | Standard-library-only single-file omp driver with isolated discovery, explicit tools, structured results and patches | [runner](docs/services/runner/README.md) |
+| `packages/protocol` | `@geek-bot/protocol` | Shared DTOs and JSON Schema; no app imports or I/O | [protocol](docs/services/protocol/README.md) |
 
 ## Status
 
-- **Skeleton stage (#1)**: pnpm workspace, conventions, gate scripts, CI and issue / pull request templates.
-- **Console shell (#4)**: `app/console` has the Tuffex shell (sidebar, narrow-screen drawer, loading / empty / error / permission / offline states) and a sample-data mode you can open locally with `pnpm dev:console`; page contents are not built yet and it does not talk to the control plane yet.
-- **Control plane foundation (#3)**: `app/control` starts as a non-root container with `/healthz`, `/readyz`, versioned expand-only migrations (with an automatic backup before migrating), an audit table, structured and redacted logs, daily encrypted backups with restore verification, the `backup` / `verify-backup` / `restore --dry-run` commands and graceful shutdown; run it locally with `pnpm dev:control`. Sign-in, GitHub calls and console pages are not built yet. node, runner and protocol contain minimal source and tests only, with no product feature.
-- Architecture, security model, console API, node protocol, write whitelist and default behavior are written as design documents ([ARCHITECTURE](docs/architecture/ARCHITECTURE.md), [SECURITY](docs/architecture/SECURITY.md), [API](docs/architecture/API.md), status `proposed` until implemented); the decisions are ADR-0002 to ADR-0009, accepted by the owner on 2026-09-26.
-- Features land issue by issue following the roadmap in #22: control plane (#3), console shell (#4), bot account sign-in (#5), repository discovery (#6), preview stack and deployment (#7), nodes (#11). The first visible milestone is a pull request receiving a comment-only review from the bot (#15); production launch is #20 and public readiness is #21.
-- **Deployment**: deployment files and docs arrive with #7. Nothing in the repository can be deployed yet.
+- #34 implements the persisted shared-platform API, production console, connectors, worker and runner source. Service contracts and code are the implementation source of truth.
+- Real local HTTP/SQLite smoke exercised discovery, sync, demand dispatch, lease fences, secret replay refusal, role enforcement and restart persistence. External APIs were isolated protocol fixtures, not live account acceptance.
+- Ego exercised the production-mode console at desktop and 390px widths: project lists, demand creation/linking/dispatch and cancellation. Its login session came from an isolated authorization fixture, not real GitHub OAuth acceptance. Sample mode remains development-only and refuses writes with HTTP 405.
+- Real GitHub OAuth, GitLab and Feishu account writes, node/sandbox image builds and Linux/KVM execution require separate authorization and hardware acceptance; they are not marked passed.
+- Control and node/sandbox Dockerfiles exist. Release tags and target-host deployment remain governed by [RELEASES](docs/conventions/RELEASES.md); this change does not automatically commit, push, tag or deploy.
 
 ## Contributing
 
@@ -49,7 +48,8 @@ Approving and merging always stay with humans. Each repository is handled by its
    pnpm hooks:enable    # pre-push checks branch invariants and release tag rules
    pnpm dev:console     # open the console locally in sample-data mode (all data is fictional)
    pnpm dev:control     # run the control plane locally (throwaway local keys, database in ./data/)
-   pnpm test:e2e        # browser regression for the console; run pnpm exec playwright install chromium once first
+   pnpm dev:node        # outbound node; first register a machine and configure its token file and executor assets
+   PLAYWRIGHT_BROWSERS_PATH=/tmp/geek-bot-playwright pnpm test:e2e # install Chromium with the same path first
    ```
 
 4. One change = one issue = one `task/<issue>/<slug>` branch = one worktree = one pull request into `stage`; see [CONTRIBUTING](docs/conventions/CONTRIBUTING.en.md) and [BRANCHING](docs/conventions/BRANCHING.md).

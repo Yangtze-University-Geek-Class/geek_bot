@@ -2,19 +2,19 @@
 
 > 与 `app/`、`packages/` 一一对应的服务契约：每个包一份 README（职责、源码地图、接口、数据归属、验证、限制）。
 
-状态：`proposed` · 更新：2026-09-25 · 适用：`app/*`、`packages/protocol`
+状态：`current` · 更新：2026-10-03 · 适用：`app/*`、`packages/protocol`
 
-#1 只建了五个包的最小源码和测试，还没有任何业务功能，所以五份契约都是 `proposed`：写的是职责和计划，「现在有什么」一节写的是仓库里真实存在的文件。每个包的功能落地时，由对应 issue 把契约改成 `current`。
+#3、#4 和 #34 已加入控制面、真实后台与共享执行源码。五份服务 README 为 current，分别记录源码事实、实际验证和未验证边界；current 不等于真实外部账号、隔离镜像、KVM 或线上验收通过。
 
 **新增包 = 新增 `app/<name>` 或 `packages/<name>` + 新增 `docs/services/<name>/README.md`**，两处缺一视为未完成；`pnpm check:docs` 会检查。模块细节放同目录子文档（例如 control 的写入白名单、node 的节点协议），子文档由对应 issue 写入。
 
-| 包 | 源码 | 包名 | 职责 | 契约 | 镜像（计划中） |
+| 包 | 源码 | 包名 | 职责 | 契约 | 镜像定义与边界 |
 |---|---|---|---|---|---|
-| control | `app/control/` | `@geek-bot/control` | 控制面：唯一的 SQLite 写入者、唯一的 GitHub 写入者；登录、令牌、发现、轮询、调度、模型中继；同源托管 console | [control](control/README.md) | `geek-bot-control`（#3 建镜像；打进 console 产物随 #7） |
-| console | `app/console/` | `@geek-bot/console` | 管理后台：Vue 3.5 + Tuffex 0.6.0 | [console](console/README.md) | 随 `geek-bot-control` 发布 |
-| node | `app/node/` | `@geek-bot/node` | 工作节点代理：只向外连 control，管理 sandbox 容器和一次性 VM | [node](node/README.md) | `geek-bot-node`、`geek-bot-vmimage`（#11、#17） |
-| runner | `app/runner/` | `@geek-bot/runner` | 在 sandbox 或 VM 里驱动 omp 的单文件程序，只用 Node 标准库 | [runner](runner/README.md) | 打进 `geek-bot-node` 与 VM 基础镜像 |
-| protocol | `packages/protocol/` | `@geek-bot/protocol` | 纯类型加 JSON Schema，是各包之间唯一的共享契约 | [protocol](protocol/README.md) | 无，构建时被各包引用 |
+| control | `app/control/` | `@geek-bot/control` | 唯一 SQLite 写者、多渠道 publisher、身份、项目、需求、任务、租约、模型中继和同源后台 | [control](control/README.md) | `app/control/Dockerfile`；console 镜像集成与发布随 #7 |
+| console | `app/console/` | `@geek-bot/console` | Vue 3.5 + Tuffex 0.6.0 的共享平台后台 | [console](console/README.md) | 由 control 同源托管产物 |
+| node | `app/node/` | `@geek-bot/node` | 出站节点、资源与自检、磁盘 spool、sandbox 槽位、一次性 VM | [node](node/README.md) | `app/node/Dockerfile` 的 node 与 sandbox 目标；镜像构建及 KVM 未验收 |
+| runner | `app/runner/` | `@geek-bot/runner` | Node 标准库单文件 omp 驱动、隔离工具和结果/补丁 | [runner](runner/README.md) | 放进 sandbox 镜像与 VM 工具盘 |
+| protocol | `packages/protocol/` | `@geek-bot/protocol` | 纯类型、常量和 JSON Schema，唯一跨包契约 | [protocol](protocol/README.md) | 无 |
 
 ## 依赖方向
 
@@ -29,12 +29,12 @@
 - node 调 control 的节点 API（`/api/node/v1/*`）；
 - runner 只经 node 提供的本地通道交互：拿任务包、回传 JSONL 事件和结构化结果，模型请求也经 node 的本地模型代理转发。sandbox 走共享卷里的 unix socket；VM 的任务输入输出走原始盘上的 tar，实时事件走 virtio-serial，模型请求走到本地模型代理的 guestfwd。runner 不直接连 control。
 
-后台 API 的 DTO、节点协议、TaskSpec 和任务结果（review.v1、triage.v1、patch.v1）的形状都定义在 protocol 里。整体设计见 [ARCHITECTURE](../architecture/ARCHITECTURE.md)，安全不变量见 [SECURITY](../architecture/SECURITY.md)。
+后台 DTO、节点协议、ExecutionTask、TaskBundle 和 TaskResult 定义在 protocol。端点 schema 来自 control 的 contracts.ts。整体实现见 [ARCHITECTURE](../architecture/ARCHITECTURE.md)，未放宽的安全要求见 [SECURITY](../architecture/SECURITY.md)。
 
 ## 验证
 
 ```bash
-pnpm typecheck                      # 五个包各自 tsc --noEmit，再检查 tests/** 与 vitest.config.ts
+pnpm typecheck                      # console 用 vue-tsc，其余包和测试用 tsc
 pnpm exec vitest run tests/<包>      # 单个包的测试
 pnpm check:docs                     # 每个包都有契约、相对链接有效
 pnpm check:boundaries               # 包之间的导入方向

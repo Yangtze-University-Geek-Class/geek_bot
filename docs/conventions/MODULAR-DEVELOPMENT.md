@@ -2,21 +2,21 @@
 
 > 五个工作区包职责清楚、依赖单向、只经 `@geek-bot/protocol` 共享契约；`app/`、`packages/` 与 `docs/services/` 严格对齐，不为目录形式制造部署复杂度。
 
-状态：`current` · 更新：2026-09-26 · 适用：`app/control`、`app/console`、`app/node`、`app/runner`、`packages/protocol` 与 `scripts/check-boundaries.mjs`
+状态：`current` · 更新：2026-10-03 · 适用：五个工作区包与 scripts/check-boundaries.mjs
 
 ## 当前边界
 
-工作区由 `pnpm-workspace.yaml` 声明五个包。本仓库骨架（#1）里每个包只有最小源码；下面的职责是各包的契约，业务代码由后续 issue 加入，标「计划中」的内部结构以对应 issue 为准。
+工作区由 pnpm-workspace.yaml 声明五个包。#3、#4、#34 已实现控制面、后台和共享执行源码。各服务契约记录具体模块与未验证边界，不用构建成功证明真实账号或 KVM 已验收。
 
 | 目录 | 包名 | 职责 | 契约 |
 |---|---|---|---|
-| `app/control` | `@geek-bot/control` | 控制面。Fastify 5 + better-sqlite3（#3 引入）。唯一的 SQLite 写入者、唯一的 GitHub 写入者（publisher 白名单 + outbox）；负责登录、令牌加密存放、仓库发现、轮询、调度、模型中继；同源托管 console 的静态产物 | [control](../services/control/README.md) |
+| `app/control` | `@geek-bot/control` | Fastify 5 + SQLite 单写者、多渠道读取与 publisher、身份、项目、需求、任务、租约、模型中继与同源后台 | [control](../services/control/README.md) |
 | `app/console` | `@geek-bot/console` | 管理后台。Vue 3.5 + vue-router 4 + @talex-touch/tuffex 0.6.0 + Vite 7（#4 引入外壳）。不用原生下拉框和复选框，不用 emoji | [console](../services/console/README.md) |
-| `app/node` | `@geek-bot/node` | 工作节点代理。只向外连 control（HTTP 长轮询 `/api/node/v1`），不开入站端口；管理 issue 通道的无网只读 sandbox 容器和 PR 通道的一次性 QEMU/KVM VM（计划中，#11、#14、#17） | [node](../services/node/README.md) |
-| `app/runner` | `@geek-bot/runner` | 在 sandbox 或 VM 里驱动 omp 的单文件程序，只用 Node 标准库（计划中，#14） | [runner](../services/runner/README.md) |
+| `app/node` | `@geek-bot/node` | 只向外连 control；资源、自检、spool、无网 sandbox 槽位与一次性 QEMU/KVM VM | [node](../services/node/README.md) |
+| `app/runner` | `@geek-bot/runner` | sandbox 或 VM 里的标准库单文件 omp 驱动，显式工具与结果/补丁 | [runner](../services/runner/README.md) |
 | `packages/protocol` | `@geek-bot/protocol` | 纯类型加 JSON Schema：节点协议、TaskSpec、结果、RepoProfile、catalog 文件契约、console API DTO | [protocol](../services/protocol/README.md) |
 
-control 内部的计划分层（#3 起，细节写进 control 契约）：`src/index.ts` 只负责监听，`src/app.ts` 负责组装；`src/routes/<module>/index.ts` 是路由模块入口、`contracts.ts` 是输入协议源，路由只做 HTTP 映射、授权与调用；GitHub 读取客户端、调度、publisher（唯一写 GitHub 的出口）、数据库与密钥各自成层。多处写操作共用的规则（幂等、去重、限速、熔断）放在 publisher 与具名服务里，不在每个 handler 复制。
+control 当前由 index/services/app 组装，platform 管具名业务和事务，routes/platform 的 index/contracts 做 HTTP 映射与 schema，connectors 读取平台，publisher 是外部写出口，db/secrets/ops 保存基础数据与运维。源码地图见 control 契约，不在每个 handler 复制共享业务规则。
 
 跨包只通过 `@geek-bot/protocol` 的类型与 JSON Schema，以及显式的 HTTP/JSON 契约连接：console 调 control 的后台接口，node 调 control 的节点接口，runner 只经 node 提供的本地通道通信。禁止共用可变 store，禁止直接读取别的包的数据库或内部文件。
 
@@ -28,11 +28,11 @@ control 内部的计划分层（#3 起，细节写进 control 契约）：`src/i
 
 ```text
 console ─┐
-control ─┼─> @geek-bot/protocol   （protocol 不导入任何 app）
+control ─┼─> @geek-bot/protocol（protocol 不导入任何 app）
 node    ─┤
 runner  ─┘   runner 只许 type 导入 protocol；运行时只用 node: 内置模块
 
-control 内部（计划中）：index -> app -> routes/<module> -> 服务 -> publisher / 调度 / db / GitHub 读取客户端
+control：index/services/app -> routes/platform -> platform 具名服务 -> publisher/connectors/db；密钥不下发 console/node/runner。
 ```
 
 规则（与 `scripts/check-boundaries.mjs` 一致）：
