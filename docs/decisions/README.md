@@ -2,7 +2,7 @@
 
 > 已接受决策及其背景、替代方案、后果和重新评估条件。
 
-状态：`current` · 更新：2026-09-26 · 适用：需要确认某项取舍为什么这样定、能不能改的时候
+状态：`current` · 更新：2026-10-03 · 适用：需要确认某项取舍为什么这样定、能不能改的时候
 
 本目录文档由 [总入口](../README.md) 导航，完整列表见 [生成索引](../INDEX.md)。
 
@@ -28,3 +28,4 @@
 | 0009 | [管理后台用 Vue 3 + Tuffex 0.6.0，由 control 同源托管](0009-tuffex-console.md) | `accepted`（2026-09-26） |
 | 0010 | [本仓库开发流程用的追踪记录头](0010-tracking-record-prefix.md) | `accepted`（2026-09-25） |
 | 0011 | [一次性 VM 的 qemu 沙箱不启用 elevateprivileges=deny，由 node 容器兜底](0011-qemu-sandbox-elevateprivileges.md) | `accepted`（2026-09-26，取代 ADR-0004 里 `-sandbox` 那一句） |
+| 0012 | [多渠道项目与需求共用一个机器池](0012-shared-cross-platform-workspace.md) | `accepted`（2026-10-03，取代 0001 的单 GitHub 范围与 0002 的默认身份耦合） |

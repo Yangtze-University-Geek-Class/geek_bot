@@ -1,174 +1,101 @@
 # control 服务契约（`app/control`）
 
-> 控制面：唯一的 SQLite 写入者和唯一的 GitHub 写入者，负责登录、令牌、仓库发现、轮询、调度和模型中继，并同源托管 console。
+> 控制面是唯一数据库写者和多渠道外部写出口，管理身份、连接、项目、需求、任务、机器、模型中继与同源后台。
 
-状态：`proposed` · 更新：2026-09-26 · 适用：`app/control`（`@geek-bot/control`）、`tests/control`
+状态：`current` · 更新：2026-10-03 · 适用：`app/control`、`tests/control`（#3 的基础与 #34 的共享平台）
 
-## 职责
+## 职责与边界
 
-control 是一个 Fastify 5 + better-sqlite3 的单进程服务（两者由 #3 引入，版本见 [STACK](../../design/STACK.md)）：
+Fastify 5 + better-sqlite3 的单进程服务独占 SQLite。后台、节点、CLI 和 publisher 在这一个写者内共享事务；其它包不能打开业务数据库。
 
-- 唯一的 SQLite 写入者：调度、租约、outbox 都在同一个进程里完成；
-- 唯一的 GitHub 写入者：一切写入只经 publisher（写入白名单 + outbox）；
-- 负责首次认领、登录、机器人令牌的加密存放和校验、仓库发现与权限映射、条件请求轮询、工作项推导、调度与租约、规则画像、模型中继、确定性动作（提醒、到期关闭）、审计、备份与恢复校验；
-- 同源托管 console 的静态产物。
+control 不运行 omp，不执行仓库脚本。读取适配器和 publisher 在请求期间解密渠道密文；浏览器、node、sandbox 和 VM 不拿平台凭据或 gateway key。所有外部写入经具名 publisher 意图，不提供任意方法、路径或模型指定的目标。
 
-control 从不运行 omp，也不执行目标仓库里的任何代码。
+产品边界见 [ADR-0012](../../decisions/0012-shared-cross-platform-workspace.md)，后台身份与连接账号分离。current 表示本文对应源码，不表示真实外部账户、镜像、KVM 或线上验收通过。
 
-## 现在有什么
+## 源码地图
 
-#3 建了控制面的骨架：配置、密钥文件、库与迁移、审计与告警表、结构化日志与打码、加密备份与每日恢复校验、`/healthz` 与 `/readyz`、运维命令、优雅停机和镜像。登录、GitHub 调用、后台页面都还没有（#5 起）。
-
-| 路径 | 内容 |
+| 路径 | 当前责任 |
 |---|---|
-| `app/control/package.json` | 包名 `@geek-bot/control`；生产依赖 `fastify`、`better-sqlite3`，开发依赖 `@types/better-sqlite3`；脚本 `typecheck`（`tsc --noEmit`）、`build`（`tsc` 后把 `src/db/migrations/*.sql` 复制进 `dist/db/migrations/`） |
-| `app/control/tsconfig.json` | 继承根 `tsconfig.base.json`，`src/` 编译到 `dist/` |
-| `src/index.ts` | 进程入口：`startControl` → `listen` → 接 SIGTERM、SIGINT；拒绝启动时以 1 退出。镜像的 CMD 运行它 |
-| `src/services.ts` | 启动与停机的全部步骤（见下文「启动、就绪与停机」）；`startControl` 返回句柄，测试直接调用 |
-| `src/app.ts` | Fastify 组装：日志、服务端生成的 `X-Request-Id`、[API](../../architecture/API.md) 的错误格式、Ajv `removeAdditional: false`、请求体 64 KB 上限、只接受 JSON 请求体；注册路由模块 |
-| `src/config.ts` | 产品默认值 `CONTROL_DEFAULTS` 与环境变量表 `CONTROL_ENV`（轮询、静默窗口、提醒与关闭天数、追问轮数、VM 规格，以及 #3 加的备份保留份数与每日备份时刻）；部署配置 `createDeploymentConfig`（实例角色、监听地址与端口、origin、明文模式、库路径、两个密钥文件路径、日志级别、镜像版本）；`loadControlConfig` 一次读出两部分，问题合在一个 `ControlConfigError` 里一起报。都是纯函数，不读 `process.env`、不读文件 |
-| `src/secrets/key-files.ts` | 读 `*_FILE` 指向的 32 字节密钥（base64 或 64 位十六进制）；报错与提醒只写变量名，不回显路径和内容；读到的原文登记进打码器；备份密钥的指纹 |
-| `src/db/database.ts` | 打开库（WAL、`synchronous=FULL`、`foreign_keys=ON`、`busy_timeout=5000`、`locking_mode=EXCLUSIVE`）、打开独立副本、`wal_checkpoint(TRUNCATE)` 后关库、各表行数 |
-| `src/db/migrator.ts`、`src/db/sql-statements.ts`、`src/db/migrations/0001_foundation.sql` | 迁移器（`sql-statements.ts` 在加载时找出顶层的事务控制语句）与第一个迁移（7 张表：`schema_migrations`、`settings`、`revisions`、`idempotency_keys`、`alerts`、`audit_logs`、`backups`）。规则见 [数据模型](data-model.md)「迁移规则」 |
-| `src/db/audit.ts`、`src/db/alerts.ts` | 唯一的审计函数（写入前打码，表只追加）；告警（同一件事只有一条未解决的，重复只加计数） |
-| `src/log/logger.ts`、`src/log/redact.ts` | 结构化日志（每条一行 JSON）；按 S-16 的密钥形态与已知密钥原值打码 |
-| `src/ops/backup-file.ts`、`src/ops/backup.ts` | 加密备份的文件格式；备份、恢复校验、保留策略、启动时补登记 |
-| `src/ops/scheduler.ts` | 每日备份加恢复校验 |
-| `src/ops/channel.ts` | 运维本地通道：CLI 把会写库的命令交给运行中的 control |
-| `src/routes/health/{index,contracts}.ts` | `/healthz`、`/readyz`（A-53、A-54） |
-| `src/http/errors.ts` | 错误响应的形状与 JSON Schema |
-| `src/cli.ts` | 运维命令 `backup`、`verify-backup`、`restore --dry-run`（见下文「运维命令」） |
-| `src/healthcheck.ts` | 镜像 HEALTHCHECK 的探针：请求本进程的 `/readyz` |
-| `scripts/copy-migrations.mjs` | 构建的最后一步：复制迁移文件 |
-| `scripts/dev.mjs` | `pnpm dev:control` 的启动器（见 [LOCAL-DEV](../../ops/LOCAL-DEV.md)） |
-| `Dockerfile` | control 镜像（见下文「镜像」） |
-| `tests/control/` | `config.test.ts`、`logging.test.ts`、`database.test.ts`、`backup.test.ts`、`server.test.ts`、`cli.test.ts` 与夹具 `helpers.ts`，覆盖面见 [TESTING](../../conventions/TESTING.md) |
-
-新增或删除文件时同步更新本表。
+| `src/index.ts` | 可执行进程入口，监听与信号 |
+| `src/services.ts` | 配置、独立密钥、独占数据库、迁移前备份、服务组装、平台启动与优雅停机；StartOptions 可注入 clock 和 fetchImpl |
+| `src/app.ts` | Fastify、请求 id、JSON 错误、输入限制与 Ajv 拒绝未知字段和类型强制转换 |
+| `src/config.ts` | 基础部署和备份配置；不读取真实环境或文件 |
+| `src/db/` | 数据库、版本 SQL、结构收缩检查、审计与告警；`0001_foundation.sql` 和 `0002_shared_platform.sql` |
+| `src/platform/config.ts` | 平台配置与独立 session / OAuth / gateway 密钥文件；拒绝直接密钥值 |
+| `src/platform/{http,context,security,auth,admins}.ts` | 协议、幂等、限流、cookie HMAC、CSRF/Host、device flow、会话和数字身份角色 |
+| `src/platform/{connections,demands,records,schemas}.ts` | 连接与项目的发现同步、密文写入、需求与入站事务、公共记录和序列化白名单 |
+| `src/platform/{tasks,intake,machines,health}.ts` | 平台条目任务、需求派发、系统审计的自动入队、去重、资源租约、回收、自检与健康门 |
+| `src/platform/{models,relay}.ts` | 只读 catalog、模型池、短期模型令牌和预算、有界模型中继 |
+| `src/platform/{events,static,registry,index}.ts` | SSE 缓存、同源静态后台、组装与生命周期 |
+| `src/routes/platform/*/{index,contracts}.ts` | auth、admins、connections、projects、demands、machines、tasks、models、node 的真实 HTTP 映射与 schema |
+| `src/routes/platform/{stream,console}/index.ts` | SSE 与 SPA 产物托管 |
+| `src/connectors/{types,http,credentials,bundle,index}.ts` | 适配器契约、有界同源读取、AES-256-GCM、base 规范与快照输入、可信代码注册 |
+| `src/connectors/{github,gitlab,im}.ts` | 实际平台端点、权限映射、issue/change、飞书验证解密和签名 Webhook |
+| `src/publisher/{index,git}.ts` | 输出中和、持久 outbox、未知结果核对、COMMENT、受保护分支、OAuth 单枚撤销和 IM 回传 |
+| `src/log/` | JSON 日志、密钥形态与已知凭据打码 |
+| `src/ops/` | 流式加密备份、恢复校验、保留策略、每日任务和 CLI Unix socket |
+| `src/cli.ts` | backup、verify-backup、restore --dry-run 和 bootstrap-code |
+| `scripts/dev.mjs` | 本机生成独立 master / backup / session 临时密钥并启动，不读取任何实例真实配置 |
+| `Dockerfile` | 非 root 控制面镜像定义；镜像构建或部署不等于此源码已验收 |
 
 ## 配置
 
-环境变量的完整清单（名字、取值、默认值）在 [默认行为与配置项](behavior.md)「配置项一览」；这里只写 #3 读取的几项怎样生效。
+变量的直接事实来源为 `src/config.ts`、`src/platform/config.ts` 与根 `.env.example`。真实实例值只放目标机，密钥经 `*_FILE`，不进仓库、镜像或日志。
 
-- **实例角色** `GEEK_BOT_INSTANCE_ROLE`（`preview`、`production`）必须显式配置，没配或值不对就拒绝启动（B-64）。
-- **监听** `GEEK_BOT_HOST` 默认 `127.0.0.1`，`GEEK_BOT_PORT` 默认 `8080`。绑定非回环地址时必须配置 `GEEK_BOT_PUBLIC_ORIGIN`；origin 不是 https 时还要显式设置 `GEEK_BOT_ALLOW_PLAINTEXT_MESH=true`，否则拒绝启动（S-20）。origin 只能是 `http(s)://主机[:端口]`。
-- **库** `GEEK_BOT_DB_PATH` 默认 `/data/geek-bot.db`。加密备份在同目录的 `backups/`，运维本地通道在 `run/`，备份与恢复校验的明文临时文件在 `tmp/`（0700，文件 0600，启动时清空）。
-- **密钥只从 `*_FILE` 读**：`GEEK_BOT_MASTER_KEY_FILE`（默认 `/run/secrets/master_key`）与 `GEEK_BOT_BACKUP_KEY_FILE`（默认 `/run/secrets/backup_key`）。这两个变量只接受路径的写法：绝对路径，或以 `./`、`../` 开头（与 `check-secrets` 的密钥文件引用同一口径）；以 `/` 开头的 base64 密钥原文另按密钥的样子拦下。不合规就拒绝启动，报错只写变量名、不回显值，因为误填进来的往往就是密钥原文。文件内容是 32 个随机字节的 base64（`openssl rand -base64 32`）或 64 位十六进制；读不到、格式不对、两个变量指向同一个文件、两把密钥相同都拒绝启动，报错只写变量名、提示核对挂载，不回显路径：以 `/` 开头、不带 `=` 的 base64 原文也满足路径的写法，拼进报错就等于泄露。control 和 CLI 的报错是同一份文字。直接写值的 `GEEK_BOT_MASTER_KEY`、`GEEK_BOT_BACKUP_KEY` 一旦有值就拒绝启动。文件对组或其他用户可读时记一条 warn（不阻止启动；权限由部署脚本核对，#7）。#3 只读取并校验 master key，用它加密令牌随 #5。
-- **日志级别** `GEEK_BOT_LOG_LEVEL`：`debug`、`info`（默认）、`warn`、`error`。
-- **镜像版本** `GEEK_BOT_APP_VERSION`（默认 `local`）：只作来源记录，写进 `schema_migrations.app_version` 与 `backups.app_version`；由部署脚本写入（#7）。它不是 A-55 的展示值。
-- **备份** `GEEK_BOT_BACKUP_KEEP_DAILY`（默认 7）、`GEEK_BOT_BACKUP_KEEP_WEEKLY`（默认 4；为 0 时不做每周备份，每周第一次也记为每日）、`GEEK_BOT_BACKUP_HOUR_UTC`（默认 3，即每天 UTC 03:00 之后做当天的备份）。
-
-## 启动、就绪与停机
-
-启动（`src/services.ts`，全部做完才开始监听）：
-
-1. 读配置，不合法就拒绝启动，一次列出全部问题；
-2. 读两把密钥；
-3. 以独占方式打开库：`locking_mode=EXCLUSIVE` 下连接一直持有文件锁，同一个库的第二个 control（或任何别的连接）等满 `busy_timeout` 后打不开，报「库正被另一个进程占用」（ADR-0003）；拿到锁之后清空 `tmp/` 并把它收紧到 0700，上次崩溃留下的明文临时文件不会留下；
-4. 迁移检查（[数据模型](data-model.md)「迁移规则」）：兼容版本高于代码、已应用的迁移文件被改过、`schema_migrations` 编号不连续、库不是 geek_bot 的库，都拒绝启动；声明 `shrink=false` 的迁移执行后已有的表、列、索引、触发器、视图少了或变了，回滚并拒绝启动；迁移文件顶层写了 `BEGIN`、`COMMIT` 之类的事务控制语句，加载时就拒绝，执行时保存点不见了（文件自己结束了事务）也拒绝启动，报告可能已部分生效；有待执行的迁移而库不是空库时，先做一次 `pre_migration` 备份，备份失败就不迁移、拒绝启动；库比代码新而兼容版本不高（回滚到上一版镜像）时记一条 warn，正常启动；
-5. 清掉备份目录里崩溃留下的临时文件，给没登记的备份文件补登记；
-6. 监听端口，然后开运维本地通道和每日备份任务。
-
-拒绝启动时记一条 `fatal` 日志（`msg` 是中文原因，`problems` 逐条列出），以 1 退出。
-
-就绪：`GET /readyz` 的检查项与名字见 `src/routes/health/contracts.ts`：`database_writable`（库打开着、能拿到写锁、库文件与目录可写）、`schema_compatible`（K ≤ C）、`migrations_applied`（D ≥ C）、`secrets_readable`（两个密钥文件此刻可读）、`serving`（没在停机）。全部通过返回 200 `{"status":"ready"}`；否则 503 `{"error":{"code":"not_ready","message":"未就绪，没通过的检查项：…"}}`，只列名字，不含路径和值。`GET /healthz` 只要进程活着就返回 200 `{"status":"ok"}`。这两个端点成功时不写访问日志。
-
-停机（SIGTERM、SIGINT）：新请求一律 503 `not_ready` → 等进行中的请求做完 → 关本地通道 → 等正在做的备份或恢复校验做完 → `PRAGMA wal_checkpoint(TRUNCATE)` → 关库，记下 checkpoint 的结果（`busy` 为 0 表示做完），以 0 退出；停机出错以 1 退出。
-
-## 运维命令与单写者
-
-镜像里的 `geek-bot` 等于 `node /app/app/control/dist/cli.js`，在容器里运行（例如 `docker compose exec control geek-bot backup`，compose 随 #7）。退出码：0 成功，1 失败，2 用法错误。
-
-| 命令 | 做什么 |
-|---|---|
-| `backup [--kind manual\|pre_deploy]` | 做一次加密备份（默认 `manual`；部署脚本部署前用 `pre_deploy`，#7），做完按保留策略清理 |
-| `verify-backup [<文件名>]` | 恢复校验一份备份（默认最新一份没被清理的），结果写进 `backups`，失败写 `critical` 告警，并以 1 退出 |
-| `restore --dry-run <文件>` | 只做恢复校验，报告会恢复到哪个时间点、哪个库版本，以及这版代码能否直接打开；不碰库、不改任何文件。文件可以是 `backups/` 里的文件名或任意路径（例如异地副本）。正式恢复（覆盖库文件）没有实现，不带 `--dry-run` 以 2 退出，随 #20 的恢复演练写入 |
-
-单写者（ADR-0003）的定稿做法：`backup`、`verify-backup` 会写库，control 在运行时经本地通道（`<库所在目录>/run/control.sock`，unix socket 上的 HTTP；`run/` 权限 0700、socket 0600，只有运行 control 的账号能连，不占 TCP 端口）交给 control 执行，CLI 不开写连接。连不上通道时（control 没在运行），CLI 以同样的独占方式打开库自己执行，做完 checkpoint 并关库；拿不到锁就失败。离线执行在写库之前按迁移规则核对库版本：库执行到的迁移必须正好是这版 CLI 认识的最高编号，兼容版本也不能高于它；对不上（库比 CLI 旧、比 CLI 新、兼容版本更高、库被手工改过）就拒绝执行、不写库，CLI 自己不执行迁移。`restore --dry-run` 只读备份文件和备份加密密钥，解密出的明文放在 `tmp/` 下的临时目录里，做完删除。以后的 `bootstrap-code`（#5）走同一个通道；`rotate-master-key`（#5）与正式 `restore`（#20）只在 control 停止时以独占方式运行。
-
-## 日志与打码
-
-每条日志一行 JSON：`time`（ISO 8601 UTC）、`level`、`msg`（中文）和上下文字段；Fastify 的请求日志关掉，改由 `onResponse` 记一行 `method`、`path`（去掉查询串）、`status`、`duration_ms` 与 `reqId`。整条写出之前打码（S-16）：`ghp_`、`gho_`、`ghu_`、`ghs_`、`ghr_`、`github_pat_`、`gbn_`、`gbt_`、`sk-`、`Bearer <凭据>`、私钥块，以及已登记的密钥原值（#3 起是两个密钥文件的内容）；对象里 `authorization`、`cookie`、`*_token`、`*_secret`、`*_password`、`*_key` 这类键的值整体替换。审计的 `detail_json`、`target` 和告警的 `message` 写库前同样打码。
-
-## 镜像
-
-`app/control/Dockerfile`，构建上下文是仓库根（`docker build -f app/control/Dockerfile .`）：
-
-- 多阶段：`deps` 只装 control 的生产依赖（`--ignore-scripts`：better-sqlite3 13 自带各平台的预编译二进制）；`build` 编译 protocol 与 control；`runtime` 只拷生产依赖和 `dist/`。
-- 基础镜像 `node:22-bookworm-slim` 按 index digest 钉死（S-18）；`--build-arg NODE_IMAGE=…` 可以换成同一 digest 的本机副本。
-- 以 `node` 用户（uid 1000）运行；`/data` 属 `node`、权限 0700，部署时挂命名卷；代码文件属 root，运行用户只读。
-- `HEALTHCHECK` 每 15 秒运行 `node dist/healthcheck.js` 请求本进程的 `/readyz`（超时 5 秒，启动宽限 60 秒，连续 3 次失败算不健康）。
-- 不设 `GEEK_BOT_HOST`：镜像默认只绑回环地址，部署时由 compose 设成 `0.0.0.0` 并配置 origin（#7）。
-- 镜像里没有环境身份、域名、密钥和 console 产物。CI 的 `docker` job 只构建、不推送，断言基础镜像按 digest 钉死、非 root 与 HEALTHCHECK，并起一次容器核对 `/readyz`、退出码和 checkpoint 日志（[CICD](../../ops/CICD.md)）；推镜像随 #7 的 `release.yml`。
-
-## 计划中的模块与对应 issue
-
-| 模块（计划路径） | 内容 | issue |
+| 分组 | 变量 | 作用 |
 |---|---|---|
-| `src/cli.ts` | 再加 `bootstrap-code`、`rotate-master-key`；正式 `restore` | #5、#20 |
-| `src/routes/alerts`、`audit` | 告警列表与确认、审计查询（A-50、A-51、A-52）：都要会话鉴权，#3 没有会话，放到 #5 之后 | #5 起，#20 |
-| `src/ops/` | 异地副本、恢复演练 | #20 |
-| 静态托管 | 把 console 的 `dist/` 打进镜像并同源托管，定缓存头与安全响应头（ADR-0009） | #7 |
-| `src/routes/release` | A-55 `/api/release` 的展示值与节点协议版本范围 | #7 |
-| `src/routes/auth`、`admins`、`bot-account` | 认领码、device flow 登录、管理员邀请、会话、机器人账号绑定与令牌校验 | #5 |
-| `src/secrets/` | 机器人令牌 AES-256-GCM 加密、master key 轮换 | #5 |
-| `src/github/{client,etag,budget,discovery}.ts`、`src/routes/repos` | 仓库发现、权限到能力的映射、可分配性、逐仓库开关 | #6 |
-| `src/github/poller.ts`、`src/intake/`、`src/scheduler/`、`src/routes/items`、`tasks` | 条件请求轮询、受理规则、静默窗口、两通道优先级队列 | #8 |
-| `src/publisher/{whitelist,neutralize,outbox,rate}.ts`、`src/github/markers.ts` | 写入白名单、输出中和、隐藏标记、outbox 幂等、写入限速 | #9 |
-| `src/github/rules.ts`、`defaults/` | 每仓库规则画像（只读 base 分支）、内置默认规范 | #10 |
-| `src/routes/nodes`、`node-api`、`src/bundle/`、`src/mirror/` | 节点令牌、节点 API、租约与 epoch、任务包、镜像克隆 | #11、#14 |
-| `src/models/`、`src/routes/model-relay`、`models` | catalog 读取、模型池、每任务模型令牌、模型中继 | #13 |
-| `src/routes/stream` | SSE 实时推送 | #14 |
-| PR 审查、issue 受理与跟进、修复与返工的业务逻辑 | 按 [默认行为与配置项](behavior.md) 执行 | #15、#16、#18 |
+| 身份和监听 | `GEEK_BOT_INSTANCE_ROLE`, `GEEK_BOT_HOST`, `GEEK_BOT_PORT`, `GEEK_BOT_PUBLIC_ORIGIN`, `GEEK_BOT_ALLOW_PLAINTEXT_MESH` | role 必须 preview/production；非回环必须显式 origin 和 TLS 或明确私网明文 |
+| 数据与备份 | `GEEK_BOT_DB_PATH`, `GEEK_BOT_BACKUP_KEEP_DAILY`, `GEEK_BOT_BACKUP_KEEP_WEEKLY`, `GEEK_BOT_BACKUP_HOUR_UTC` | 库目录下备份、run 和 tmp；基础保留策略不因平台改动消失 |
+| 三把独立密钥 | `GEEK_BOT_MASTER_KEY_FILE`, `GEEK_BOT_BACKUP_KEY_FILE`, `GEEK_BOT_SESSION_SECRET_FILE` | 32 字节 key，各自随机生成，不能共用或从 master 派生 session |
+| 后台 OAuth | `GEEK_BOT_GITHUB_CLIENT_ID`, `GEEK_BOT_OAUTH_CLIENT_SECRET_FILE`, `GEEK_BOT_GITHUB_WEB_URL`, `GEEK_BOT_GITHUB_API_URL` | device flow 与单枚令牌撤销；未配置 App 时不假造身份 |
+| 模型 | `GEEK_BOT_MODEL_GATEWAY_URL`, `GEEK_BOT_MODEL_GATEWAY_KEY_FILE`, `GEEK_BOT_MODEL_CATALOG_FILE` | catalog 与配置 URL 必须匹配；密钥只在 relay，模型目录不建表 |
+| 上限与租约 | `GEEK_BOT_WRITE_MODE`, `GEEK_BOT_PUBLISHER_REPO_ALLOWLIST`, `GEEK_BOT_PUBLISHER_REPO_DENYLIST`, `GEEK_BOT_LEASE_LOST_AFTER_SECONDS`, `GEEK_BOT_INFRA_RETRY_MAX` | 新项目 off；全局 dry_run 上限，preview 清单空不能写任何项目，包括演练 |
+| 任务预算 | `GEEK_BOT_TASK_TOKEN_BUDGET`, `GEEK_BOT_TASK_REQUEST_BUDGET`, `GEEK_BOT_TASK_TIMEOUT_SECONDS` | 每任务令牌的请求、token 和时间约束 |
+| 后台和身份显示 | `GEEK_BOT_CONSOLE_DIST`, `GEEK_BOT_RELEASE_DISPLAY`, `GEEK_BOT_RELEASE_VERSION`, `GEEK_BOT_RELEASE_COMMIT` | 同源实际产物与发布来源，本机明确未发布；不自行升版本或打 tag |
 
-子文档：[默认行为与配置项](behavior.md)、[写入白名单](write-whitelist.md)、[数据模型](data-model.md)；scheduler、github、models 的说明随 #8、#6、#13 写入。
+直接写 `GEEK_BOT_SESSION_SECRET`、`GEEK_BOT_OAUTH_CLIENT_SECRET` 或 `GEEK_BOT_MODEL_GATEWAY_KEY` 被拒绝。错误只写变量名，不回显误填的值。
 
-## 接口与数据归属
+## 身份、项目和需求
 
-- 已实现：`GET /healthz`、`GET /readyz`（A-53、A-54）；未知路径 404 `not_found`；每个响应带 `X-Request-Id`（服务端生成，不采信请求头）。
-- 计划中：后台 API `/api/v1/*`，加 SSE `/api/v1/stream`；服务端按角色鉴权，入参用 JSON Schema 声明并拒绝未知字段。端点表见 [API](../../architecture/API.md)。
-- 计划中：节点 API `/api/node/v1/*`（heartbeat、lease、bundle、events、result、model），节点用 bearer 节点令牌认证。消息表见 [节点协议](../node/protocol.md)，schema 由 #11 放进 protocol。
-- 数据：SQLite 文件只有 control 写，preview 与 production 各一个库。表清单、迁移与兼容版本、备份与恢复校验、从 GitHub 重建状态见 [数据模型](data-model.md)。
-- GitHub：读取层与 publisher 是仅有的两处能解密机器人令牌的代码；GitHub 写入只经 publisher（#6、#9）。
-- 密钥：master key、会话签名密钥、备份加密密钥、OAuth client secret、模型网关密钥都以 `*_FILE` 文件挂载，只给 control（密钥表见 [SECURITY](../../architecture/SECURITY.md)）。#3 读取前两类中的 master key 与备份加密密钥。
+后台登录只确认数字身份并撤销临时令牌；机器人连接另行授权。owner、operator、viewer 的数据池相同，操作权限不同。owner 在开启高危范围前重新认证，UI 只是提示，服务端最终拒绝。
 
-## 计划中的默认行为
+项目 id 由连接和平台 id 稳定识别，名称和转移不是身份。权限取平台角色、token scope、项目开关、写入模式与任务能力的交集；unknown 不能被猜成可写。新项目四类处理开关全关。lost、archived、禁用连接不能继续派发或写入。
 
-所有者定下的机器人行为规则都是产品的**默认值，可配置**，产品代码里不写死。逐条规则（B-01 至 B-64）、配置项名、默认值、作用范围和配置优先级见 [默认行为与配置项](behavior.md)；改默认行为时同时改那份文档和本节摘要。其中「白名单」一列填了 W、D、C 编号的几条同时由 publisher 强制（[写入白名单](write-whitelist.md)），改它们等于放宽白名单，要按 [SECURITY](../../architecture/SECURITY.md) 的 S-06、S-07 取得所有者批准，并补上对应的拒绝测试。实现分别在 #6、#8、#9、#10、#13、#15、#16、#17、#18。
+消息需求按连接和 event_id 去重。未关联项目不能派发；平台条目生成稳定 item 关联需求，模型自由文本不决定目标。Project ItemDispatch 路由与手工需求共用任务校验，但任务包按实际 item 的固定 head/base 生成。
 
-已经有代码的只有几个数值默认：轮询间隔、静默窗口、提醒与关闭天数、追问轮数、VM 规格写在 `app/control/src/config.ts`，目前可以用 `GEEK_BOT_*` 环境变量覆盖；PR 通道优先级的默认顺序写在 `@geek-bot/protocol` 的 `PR_CHANNEL_PRIORITY`。其余规则还没有实现。
+## 调度、执行和结果
 
-摘要：
+control 在事务里检查槽位、CPU、内存、标签、信任和管理员机器范围，写 lease/epoch。私有项目只派 high；同一条目最多一个活跃任务，同一项目最多一个活跃 fix/rework。新 head 会 supersede 旧结果。
 
-- **仓库开关**：新发现的仓库默认只监控；「审查 PR」「受理 issue」「自动修复」「返工」逐个仓库开启，写入模式默认 `off`，打开写入类开关和调高写入模式只归 owner。非安全设置按仓库文件 > 后台覆盖 > 组织 `.github` 仓库 > 内置默认取值；能力开关和写入模式以后台为基准，仓库文件和组织 `.github` 只能往下调；其它安全限制各层取更严（ADR-0005）。
-- **PR**：开启审查的仓库里别人开的 PR 都审，只发 `COMMENT`，不批准、不合并；不审机器人自己开的 PR；来自 fork 的照审；审查前已合并的补审，control 停机恢复后只补 72 小时以内的；同一个 PR 只审最新提交。机器人开的 PR，「审查结论」段固定写阻塞。
-- **issue 接不接**：打了 `bot:manual` 或分给了人的不接；已有开着的关联 PR 就转去审那个 PR；分给机器人账号的优先接；没分配的受理，由机器人自己决定修不修，只修小改动。
-- **追问与关闭**：描述不清就追问并打 `bot:blocked`；非机器人账号的评论或作者改正文算回复；第 5 天提醒、第 7 天关闭、最多追问 2 轮；价值不高的先发关闭记录再关；说清楚了但不合规范的，改写成新 issue 再关闭原 issue；人重开过的不再关；只关 issue，不关 PR。
-- **公开仓库与实例隔离**：返工默认只认仓库成员（`OWNER`、`MEMBER`、`COLLABORATOR`）的审查意见；「什么算回复」保留原规则，可以按仓库收窄为作者和成员。preview 实例写沙盒以外的仓库一律拒绝并写审计。
-- **执行与调度**：轮询 60 秒；条目最后一次非机器人变动后静默 5 分钟才入队，机器人自己的写入不重新计时；issue 通道在无网只读的 sandbox 里运行，不开 VM；PR 通道每个任务一台新的临时 VM（1 vCPU / 2 GiB），用完即删；PR 通道优先级是审查别人的 PR > 自己 PR 返工 > 修分给机器人的 issue > 自己决定修的。开工前和发出前各复核一次，条件变了就放弃并留一条进展记录。
-- **模型**：按任务类型分池，池内按顺序降级；模型和思考档位只来自部署者挂载的只读 catalog 文件；网关地址由部署配置 `GEEK_BOT_MODEL_GATEWAY_URL` 固定，catalog 里的地址与它不一致就拒绝加载。
-- **记录格式**：按目标仓库自己的规范写；仓库没有时，记录头默认 `<!-- track v1 kind=<类型> stage=<阶段> -->`，可以在后台改（ADR-0010）。每条写入的最后一行另带隐藏标记 `<!-- geek-bot v1 ... -->`，用于幂等和从 GitHub 重建状态（ADR-0005、ADR-0008）。
+节点报告必须有正确名字、协议、令牌及一致的头／体租约。401 使身份失效，409 作废该任务；迟到结果不改任务，也不能产生外部写入。节点自检报告和健康是数据，不是指令。
 
-## 验证
+无条目的只读需求产生真实本地报告并完成；有平台条目的结果经 publisher 受控发布。IM 进展在事务后排 outbox，不等待网络才应答飞书，未知结果不盲重发。自动 review/triage 与管理员按条目派发的来源、去重和限制见 `platform/intake.ts`、[行为契约](behavior.md) 和 [后台 API](../../architecture/API.md)。
+
+## 启动、运维与停机
+
+1. 校验基础配置，读取 master 和 backup。
+2. 独占打开库，清理受权限保护的明文 tmp。
+3. 检查已应用迁移校验和、编号和兼容版本；非空库有待迁移时先加密备份，失败不迁移。
+4. 应用只扩不缩的 SQL，组装共享平台，读取独立 session 和配置所需的其它文件。
+5. `/readyz` 全部条件通过后监听；启动平台循环、运维本地通道和每日备份。
+
+SIGTERM/SIGINT 后拒绝新请求，关闭派发与中继，等待已进行请求、publisher 和备份，做 WAL checkpoint 再关库。停机不能丢掉 sending 的不确定状态或未确认节点数据。
+
+`geek-bot bootstrap-code` 经同一运维 socket 生成 100 位、15 分钟、一次性认领码，只打印到授权终端。backup、verify-backup 也经同一单写者；离线 CLI 必须独占库并核对版本。restore 目前只做 dry-run，不覆盖实例数据。
+
+## 验证和实际边界
 
 ```bash
 pnpm --filter @geek-bot/control typecheck
-pnpm exec vitest run tests/control tests/tooling/ci-docker.test.ts
-pnpm --filter @geek-bot/protocol build && pnpm --filter @geek-bot/control build
-docker build -f app/control/Dockerfile -t geek-bot-control:local .   # 需要能拉到基础镜像
+pnpm exec vitest run tests/control
+pnpm --filter @geek-bot/protocol build
+pnpm --filter @geek-bot/control build
+pnpm --filter @geek-bot/console build
+pnpm dev:control
 ```
 
-镜像的实机检查（`docker run` 后 `/readyz`、`docker inspect` 的用户与健康检查、删掉 master key 后拒绝启动）步骤见 [LOCAL-DEV](../../ops/LOCAL-DEV.md)「control 镜像」。
+本机真实 HTTP/SQLite 已观察：GitLab 条目形成有 item 的任务，真实 ControlClient 续租、下载和回报，GitHub 同步自动形成 review，重复同步不重复任务，COMMENT-only dry_run、role 403、late epoch 409、一次性令牌重放 409和重启结果保存。
 
-## 已知限制
+Ego 用生产 console 连本机真实服务验证桌面与 390px 的需求操作。外部接口为隔离协议服务；没有真实 GitHub/GitLab/飞书账号授权或发布，也没有用真实模型或 KVM 验证。类型、构建、协议 smoke、浏览器和外部上线证据必须分开。
 
-- 登录、会话、GitHub 调用、后台页面都没有；上文「计划中」的模块、接口、默认行为落地前不能当作现状引用。
-- A-55 `/api/release` 没有实现：展示值的组合规则依赖发布 tag 的语法，而 tag 规则只在 `scripts/release-tags.mjs` 实现（[RELEASES](../../conventions/RELEASES.md)），control 不复制第二份；展示值由部署脚本写入，随 #7 一起定。console 请求它会得到 404，页脚不显示版本。
-- console 的静态产物没有打进镜像，control 也不托管静态文件（随 #7）。
-- API.md 要求的「每个请求校验 `Host` 与 origin 一致」「对请求体关闭 Ajv 的类型强制转换」「按会话限速的额度」都要等第一个会话端点（#5）才有意义，#3 没有实现；#3 只做了 `removeAdditional: false`、415、413、400 的全局设置。
-- 告警只写进 `alerts` 表，后台显示与确认（A-50、A-51）和审计查询（A-52）还没有，它们都要会话鉴权；每日恢复校验失败时要看日志或用 `geek-bot verify-backup` 查。
-- 每日备份的时刻按 UTC 整点判定；control 停机错过的那次在下一次启动后补做，补做的时间点不是整点。
-- 备份在 control 进程里流式加密，备份期间库照常可写（better-sqlite3 在线 backup，同一连接的写入会进入备份）；很大的库备份时间长，停机会等它做完，compose 的 `stop_grace_period` 要留够（#7）。
-- 异地副本、正式恢复与恢复演练（记录 RTO、RPO）随 #20。
-- 免费计划的私有仓库没有分支保护和 rulesets，OAuth `repo` scope 也不能按仓库收窄；「不推主干、不打 tag、不合并」完全依赖 publisher 代码，见 [SECURITY](../../architecture/SECURITY.md)。
+告警数据、审计和备份已持久化。异地备份、正式恢复、生产发布和未在当前路由注册的管理页面不由本次源码虚构成已交付。发布和部署仍按原门禁单独授权。

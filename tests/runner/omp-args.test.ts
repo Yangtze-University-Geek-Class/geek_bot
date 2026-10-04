@@ -1,53 +1,81 @@
 import { describe, expect, it } from "vitest";
-import { ISSUE_CHANNEL_TOOLS, buildOmpArgs } from "../../app/runner/src/index.js";
-import type { Channel } from "../../packages/protocol/src/index.js";
+import { buildOmpArgs, type OmpArgsInput } from "../../app/runner/src/omp-args.js";
 
-/** omp 里能改文件、执行命令或联网的工具；issue 通道一个都不能给。 */
-const WRITE_OR_EXEC_TOOLS = ["bash", "edit", "ast_edit", "write", "eval", "task", "github", "browser", "web_search", "fetch"];
+function input(patch: Partial<OmpArgsInput> = {}): OmpArgsInput {
+  return {
+    executor: "sandbox",
+    tools: ["grep"],
+    model: "fixture-model",
+    effort: "high",
+    overlayPath: "/tmp/fixture/overlay.json",
+    appendSystemPromptPath: "/tmp/fixture/instructions.md",
+    maxTimeS: 73,
+    ...patch,
+  };
+}
 
 function valueOf(args: readonly string[], flag: string): string | undefined {
   const index = args.indexOf(flag);
   return index === -1 ? undefined : args[index + 1];
 }
 
-describe("omp 参数", () => {
-  it("两条通道都带 -p <prompt>、--mode json、--no-extensions、--no-lsp、--approval-mode yolo", () => {
-    for (const channel of ["issue", "pr"] as const) {
-      const args = buildOmpArgs({ channel, prompt: "@prompt.md" });
-      expect(args.slice(0, 2)).toEqual(["-p", "@prompt.md"]);
-      expect(valueOf(args, "--mode")).toBe("json");
-      expect(args).toContain("--no-extensions");
-      expect(args).toContain("--no-lsp");
-      expect(valueOf(args, "--approval-mode")).toBe("yolo");
-    }
+const externalTools = ["eval", "browser", "mcp", "mcp__fixture__read", "fetch", "web_search", "github", "task", "ast_edit"];
+
+describe("executor tool confinement", () => {
+  it.each(["write", "edit", "bash", ...externalTools])("sandbox refuses tool expansion through %s", tool => {
+    expect(() => buildOmpArgs(input({ tools: ["read", tool] }))).toThrow(/不允许/);
   });
 
-  it("issue 通道用 --tools 只给 read、grep、glob", () => {
-    const args = buildOmpArgs({ channel: "issue", prompt: "按 prompt.md 受理这个 issue" });
-    expect(args).toEqual(["-p", "按 prompt.md 受理这个 issue", "--mode", "json", "--no-extensions", "--no-lsp", "--approval-mode", "yolo", "--tools", "read,grep,glob"]);
+  it.each(externalTools)("VM refuses tool expansion through %s", tool => {
+    expect(() => buildOmpArgs(input({ executor: "vm", tools: ["bash", tool] }))).toThrow(/不允许/);
+  });
+
+  it.each(["sandbox", "vm"] as const)("%s never falls back to implicit unrestricted tools", executor => {
+    expect(() => buildOmpArgs(input({ executor, tools: [] }))).toThrow(/白名单/);
+    const args = buildOmpArgs(input({ executor, tools: ["glob", "read", "glob"] }));
     expect(args.filter(arg => arg === "--tools")).toHaveLength(1);
-    const tools = valueOf(args, "--tools")?.split(",");
-    expect(tools).toEqual(["read", "grep", "glob"]);
-    expect([...ISSUE_CHANNEL_TOOLS]).toEqual(["read", "grep", "glob"]);
-    for (const tool of WRITE_OR_EXEC_TOOLS) expect(tools).not.toContain(tool);
-    expect(Object.isFrozen(ISSUE_CHANNEL_TOOLS)).toBe(true);
+    expect(valueOf(args, "--tools")?.split(",").sort()).toEqual(["glob", "read"]);
   });
 
-  it("pr 通道目前不带 --tools（工具白名单由 #17 加入）", () => {
-    const args = buildOmpArgs({ channel: "pr", prompt: "@prompt.md" });
-    expect(args).not.toContain("--tools");
-    expect(args).toEqual(["-p", "@prompt.md", "--mode", "json", "--no-extensions", "--no-lsp", "--approval-mode", "yolo"]);
+  it("VM grants only the requested write/exec subset, not every permitted tool", () => {
+    const args = buildOmpArgs(input({ executor: "vm", tools: ["write", "bash"] }));
+    expect(valueOf(args, "--tools")?.split(",").sort()).toEqual(["bash", "write"]);
   });
 
-  it("每次返回新数组，调用方改动不影响下一次", () => {
-    const first = buildOmpArgs({ channel: "issue", prompt: "@prompt.md" });
-    first.push("--tools", "bash");
-    expect(buildOmpArgs({ channel: "issue", prompt: "@prompt.md" })).not.toContain("bash");
+  it.each(["read,bash", "read --tools bash", "--tools=bash", "Read", "read\nwrite"])("refuses compound or disguised tool name %j", tool => {
+    expect(() => buildOmpArgs(input({ tools: [tool] }))).toThrow(/不允许/);
+  });
+});
+
+describe("untrusted CLI operands", () => {
+  it.each(["", " ", "model name", "model\n--tools=bash", "model\u0000", "模型", "x".repeat(201)])("refuses malformed model %j", model => {
+    expect(() => buildOmpArgs(input({ model }))).toThrow(/模型 id/);
   });
 
-  it("提示为空、以 - 开头或通道未知时拒绝", () => {
-    expect(() => buildOmpArgs({ channel: "issue", prompt: "  " })).toThrow("omp 提示不能为空");
-    expect(() => buildOmpArgs({ channel: "pr", prompt: "--tools=bash" })).toThrow("omp 提示不能以 - 开头");
-    expect(() => buildOmpArgs({ channel: "push" as unknown as Channel, prompt: "@prompt.md" })).toThrow("未知通道");
+  it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])("refuses invalid time budget %s", maxTimeS => {
+    expect(() => buildOmpArgs(input({ maxTimeS }))).toThrow(/正整数秒/);
+  });
+
+  it("refuses an unknown executor rather than granting VM capabilities", () => {
+    expect(() => buildOmpArgs(input({ executor: "other" as OmpArgsInput["executor"] }))).toThrow(/未知执行器/);
+  });
+
+  it.each(["--tools=bash", "@instructions.md", "fixture;bash"])("keeps model %j in the provider operand rather than creating an option or file argument", model => {
+    const args = buildOmpArgs(input({ model }));
+    expect(valueOf(args, "--model")).toBe(`geekbot/${model}`);
+    expect(args).not.toContain(model);
+    expect(valueOf(args, "--tools")).toBe("grep");
+  });
+
+  it("keeps file paths containing option text as indivisible operands", () => {
+    const overlayPath = "/tmp/fixture/overlay --tools bash.json";
+    const appendSystemPromptPath = "/tmp/fixture/prompt; --tools write.md";
+    const args = buildOmpArgs(input({ overlayPath, appendSystemPromptPath }));
+    expect(valueOf(args, "--config")).toBe(overlayPath);
+    expect(valueOf(args, "--append-system-prompt")).toBe(appendSystemPromptPath);
+    expect(args.filter(arg => arg === "--tools")).toHaveLength(1);
+    expect(valueOf(args, "--tools")).toBe("grep");
+    expect(args).not.toContain("bash");
+    expect(args).not.toContain("write");
   });
 });

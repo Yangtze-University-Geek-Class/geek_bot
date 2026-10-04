@@ -2,7 +2,7 @@
 
 > 机器人对 GitHub 的每一种写入：允许清单 W-01…W-14、拒绝清单 D-01…D-64，以及输出中和、outbox 状态机与 `dedupe_key`、限速与熔断。
 
-状态：`proposed` · 更新：2026-09-26 · 适用：`app/control` 的 publisher（计划路径 `src/publisher/`）、它的允许与拒绝用例，以及调用它的登录、仓库、审查、issue、修复模块（由 #9 实现；W-13 由 #6、W-14 由 #5 接入，W-10–W-12 由 #18 接入）
+状态：`proposed` · 更新：2026-10-03 · 适用：`app/control/src/publisher`；W/D 编号保留为 #9 等任务的安全基线，#34 当前实现单独列出
 
 ## 这份清单的地位
 
@@ -11,8 +11,33 @@
 - **默认拒绝。** 只放行下面列出的 W-01…W-14，每一条的参数和前置核对都要满足；不在允许清单里的写入一律拒绝并写审计。拒绝清单 D-01…D-64 列的是必须有专门拒绝用例的越权写入，不是穷举：没列在 D 里的写入同样拒绝。
 - **权威位置。** outbox 的状态机和 `dedupe_key` 的组成以本文「幂等与 outbox」一节为准，[数据模型](data-model.md) 照抄；禁改路径、GitHub 域名清单和重新认证清单以 [SECURITY](../../architecture/SECURITY.md) 的 S-19、S-03、S-09 为准，本文只引用。
 - **任何放宽按阻塞级审查。** 新增 W 条目、放宽参数约束、新增 review event、新增 ref 形状、扩大目标仓库或条目范围、删掉 D 条目或它的测试，都按 [CODE-REVIEW](../../conventions/CODE-REVIEW.md) 第 11 项走：要有关联 issue、所有者批准和对应的拒绝用例，否则不能合并。收紧不需要所有者批准，但要同步改测试。
-- 本文是 #9 的实现目标和审查基线，状态 `proposed`，不证明功能已经实现。实现以后，机器人能对 GitHub 做什么，以 publisher 的实现和它的允许、拒绝用例为准（[DOCUMENTATION](../../conventions/DOCUMENTATION.md)「事实来源」）；改白名单时同一次改动里改本文和用例。
+- W/D 表和后续原设计状态机仍是实现目标与审查基线，不证明矩阵已全部交付。#34 当前行为以下节与源码为准；没有实现的动作继续拒绝，不以“默认拒绝”冒充已验证每个编号。
 - 端点写法取自 GitHub 官方 REST 文档，2026-09-26 核对，来源列在文末。行为规则与配置项名见 [默认行为](behavior.md)（B 编号）；隐藏标记、outbox 等表结构见 [数据模型](data-model.md)。
+
+## #34 当前实现
+
+事实来源为 `src/publisher/{index,git}.ts`、`src/connectors/` 与 `0002_shared_platform.sql`。后台管理员身份与平台连接分离；凭据在 connection_credentials 加密保存，写入目标来自冻结的 task/item，不取模型文本。
+
+| 当前动作 | 实现与限制 |
+|---|---|
+| GitHub review | 只创建 COMMENT，commit_id 固定为任务 head；不提供其它 event、合并或 review 修改入口 |
+| GitLab review | 对固定 MR 发 note，不批准、不合并 |
+| issue 受理/跟进 | 对固定 GitHub issue 或 GitLab issue 发评论/note；没有自动关闭、标签维护或改写重开 |
+| fix | VM 补丁经受控 Git 工作目录生成提交，只推新机器人分支，再开等待人工审查的 PR/MR；标题与正文都中和 |
+| rework | 只追加到本实例创建记录、由当前连接账号发起且 head 未变的机器人分支，再发说明；不改 PR/MR 正文 |
+| OAuth 撤销 | 登录模块把临时令牌交给 publisher 单独撤销，不删除 grant |
+| IM 回传 | im_publications 保存受理、进展和结果；飞书消息或签名 Webhook 经适配器发送，不由入站 handler 直接调用外部写接口 |
+
+发送前核对当前任务、项目开关、连接启用与凭据、环境范围、实际平台身份与权限、条目状态和 head。写入模式取项目与全局上限中更严者，preview 清单为空拒绝所有代码平台写入。当前范围清单接受项目 id 或路径，不是后续 C-03 设计的预解析数字 id 表。
+
+实际代码 outbox 为 publications，IM 为 im_publications；没有单独的 outbox 或 bot_writes 表。代码平台 dedupe_key 为连接、项目、任务类型、条目身份与逻辑版本的 JSON 数组：review/rework 用 head，triage/followup 用冻结标题正文的 SHA-256，fix 每条目只创建一次。不含 epoch 或平台条目任务 id；无条目时用 demand_id 或 task id。整表唯一，失败行也不能插新行绕过。
+
+IM 去重键为需求、任务、epoch 与中和后消息的 SHA-256，传给适配器作为幂等键。成功直接 confirmed，代码平台和 IM 都不把未知结果当成未发送。启动把 sending 改 unknown；代码平台再次发布时按原标记核对，并要求作者数字 id 等于当前连接身份。找不到可信结果则保留 unknown，不盲重发。IM unknown 没有远端核对 API，保留等待处理。
+
+当前频率上限为每连接 60 次/分钟、400 次/小时，review 另有 300 秒间隔；同一项目串行。数值目前是源码常量，不声称下面 B-63 的全部配置、二级限额熔断和恢复页面已实现。未完成的 W/D 拒绝矩阵、真实账号沙盒写入、崩溃注入和全库重建仍须单独验收。
+
+`tests/control/publisher-safety.test.ts` 用真实 publisher 与临时 SQLite 覆盖 GitHub/GitLab 的逻辑重放、unknown、不可信远端作者、head 版本边界和输出中和。它不覆盖真实账号写入、fix 的 Git→PR/MR 标题链路或完整 W/D 拒绝矩阵；最终执行结果单独记入 notes。
+
 
 ## 术语
 

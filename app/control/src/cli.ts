@@ -4,6 +4,7 @@
  *   backup [--kind manual|pre_deploy]   做一次加密备份
  *   verify-backup [<文件名>]            恢复校验一份备份（默认最新一份），结果写进 backups，失败写告警
  *   restore --dry-run <文件>            只做恢复校验并报告会恢复到哪个库版本和时间点，不改任何文件
+ *   bootstrap-code                      生成一次性认领码（15 分钟，只打印到终端；再次生成作废旧码）
  *
  * 单写者（ADR-0003）：backup、verify-backup 会写库，control 在运行时经本地通道（src/ops/channel.ts）交给它做，
  * CLI 自己不开写连接；control 没在运行时，CLI 以独占方式打开库自己做（拿不到锁就失败），写库之前先按迁移规则核对库版本，
@@ -24,6 +25,8 @@ import { createLogger, type LogSink } from "./log/logger.js";
 import { createRedactor, type Redactor } from "./log/redact.js";
 import { checkBackupFile, createBackupService, OTHER_BACKUPS_KEPT, type BackupRecord, type FileCheck, type VerifyReport } from "./ops/backup.js";
 import { callOpsChannel, ChannelUnavailableError } from "./ops/channel.js";
+import { issueBootstrapCode } from "./platform/auth.js";
+import { PlatformError } from "./platform/http.js";
 import { KeyFileError, keyFingerprint, loadKeyFile, type LoadedKey } from "./secrets/key-files.js";
 
 export interface CliIo {
@@ -41,6 +44,7 @@ export const USAGE = [
   "  backup [--kind manual|pre_deploy]   做一次加密备份（control 在运行时交给它做；没在运行时独占打开库自己做）",
   "  verify-backup [<文件名>]            恢复校验一份备份（默认最新一份），结果写进 backups，失败写告警",
   "  restore --dry-run <文件>            只做恢复校验，报告会恢复到哪个库版本和时间点，不改任何文件",
+  "  bootstrap-code                      生成一次性认领码（15 分钟有效，只打印到终端，不写日志；再次生成会作废旧码）",
   "  help                                显示本说明",
 ].join("\n");
 
@@ -235,6 +239,44 @@ async function commandRestore(args: string[], io: CliIo, redactor: Redactor): Pr
   return check.ok ? 0 : 1;
 }
 
+/** 认领码（S-10）：交给运行中的 control 生成；没在运行时独占打开库生成。只打印到标准输出，不写日志。 */
+async function commandBootstrapCode(args: string[], io: CliIo, redactor: Redactor): Promise<number> {
+  const { positionals } = parseArgs({ args, options: {}, allowPositionals: true, strict: true });
+  if (positionals.length > 0) throw new UsageError("bootstrap-code 不接受参数");
+  const config = loadConfig(io);
+  let issued: { code: string; expiresAt: string };
+  try {
+    const reply = await callOpsChannel(config.deployment.runDir, "/v1/bootstrap-code", {});
+    const payload = reply.body as { code?: unknown; expiresAt?: unknown; error?: { message?: string } };
+    if (reply.status !== 200 || typeof payload.code !== "string" || typeof payload.expiresAt !== "string") {
+      throw new CliFailure(`control 拒绝生成认领码：${payload.error?.message ?? `HTTP ${reply.status}`}`);
+    }
+    issued = { code: payload.code, expiresAt: payload.expiresAt };
+  } catch (error) {
+    if (!(error instanceof ChannelUnavailableError)) throw error;
+    io.stderr(`control 没有在运行（${error.path} 连不上），改为独占打开库在本进程里生成\n`);
+    const clock = io.clock ?? Date.now;
+    let db;
+    try {
+      db = openDatabase(config.deployment.dbPath, { mustExist: true, busyTimeoutMs: 1000 });
+    } catch (openError) {
+      if (openError instanceof DatabaseOpenError) throw new CliFailure(openError.message);
+      throw openError;
+    }
+    try {
+      assertSchemaMatches(db, io);
+      issued = issueBootstrapCode({ db, clock, auditor: createAuditor(db, redactor, clock) });
+    } catch (issueError) {
+      if (issueError instanceof PlatformError) throw new CliFailure(issueError.message);
+      throw issueError;
+    } finally {
+      checkpointAndClose(db);
+    }
+  }
+  io.stdout(`认领码：${issued.code}\n有效期至 ${issued.expiresAt}（UTC）。在后台登录页输入它，再用 GitHub 授权完成认领；不要转发给别人。\n`);
+  return 0;
+}
+
 /** 运行一条命令，返回退出码。 */
 export async function runCli(argv: readonly string[], io: CliIo): Promise<number> {
   const redactor = createRedactor();
@@ -247,6 +289,8 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
         return await commandVerify(args, io, redactor);
       case "restore":
         return await commandRestore(args, io, redactor);
+      case "bootstrap-code":
+        return await commandBootstrapCode(args, io, redactor);
       case "help":
       case "--help":
       case "-h":

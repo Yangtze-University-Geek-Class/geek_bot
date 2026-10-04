@@ -38,6 +38,7 @@ const env = {
   GEEK_BOT_DB_PATH: join(dataDir, "geek-bot.db"),
   GEEK_BOT_MASTER_KEY_FILE: devKey("master_key"),
   GEEK_BOT_BACKUP_KEY_FILE: devKey("backup_key"),
+  GEEK_BOT_SESSION_SECRET_FILE: devKey("session_secret"),
   GEEK_BOT_LOG_LEVEL: "debug",
 };
 // 环境变量里有值的项优先；留空的项不覆盖上面的本机默认值。

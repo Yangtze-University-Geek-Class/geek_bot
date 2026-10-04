@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createAlerts } from "../../app/control/src/db/alerts.js";
 import { createAuditor } from "../../app/control/src/db/audit.js";
 import { countRows, openCopy, openDatabase, type Db } from "../../app/control/src/db/database.js";
-import { applyMigrations, loadMigrations, planMigrations } from "../../app/control/src/db/migrator.js";
+import { applyMigrations, loadMigrations, planMigrations, readSchemaState } from "../../app/control/src/db/migrator.js";
 import { createLogger } from "../../app/control/src/log/logger.js";
 import { createRedactor } from "../../app/control/src/log/redact.js";
 import { BACKUP_MAGIC, decryptBackup, readBackupHeader, sha256File } from "../../app/control/src/ops/backup-file.js";
@@ -74,9 +74,11 @@ const system = { type: "system" as const };
 describe("备份 → 恢复 → integrity_check 往返（S-17）", () => {
   it("在线备份加密落盘：权限 0600、sha256 与登记一致、头部带库版本和行数；密文里找不到明文", async () => {
     const env = setup();
+    const schemaVersion = env.db.pragma("user_version", { simple: true });
+    const compatVersion = readSchemaState(env.db, 0).compatVersion;
     const record = await env.service.create("manual", system);
     const path = join(env.backupDir, record.file);
-    expect(record).toMatchObject({ kind: "manual", schema_version: 1, compat_version: 0, app_version: "v0.1.0-rc.1", backup_key_id: env.keyId });
+    expect(record).toMatchObject({ kind: "manual", schema_version: schemaVersion, compat_version: compatVersion, app_version: "v0.1.0-rc.1", backup_key_id: env.keyId });
     expect(record.file).toMatch(/^geek-bot-manual-20260928T030000Z-[0-9a-f]{6}\.gbbk$/);
     expect(statSync(path).mode & 0o777).toBe(0o600);
     expect(statSync(env.backupDir).mode & 0o777).toBe(0o700);
@@ -87,6 +89,7 @@ describe("备份 → 恢复 → integrity_check 往返（S-17）", () => {
     expect(bytes.includes(Buffer.from(PLAINTEXT_MARKER))).toBe(false);
     expect(bytes.includes(Buffer.from("SQLite format 3"))).toBe(false);
     const { header } = await readBackupHeader(path);
+    expect(header).toMatchObject({ schema_version: schemaVersion, compat_version: compatVersion });
     expect(header.row_counts).toMatchObject({ settings: 1, revisions: 1, backups: 0 });
     expect(JSON.parse(record.row_counts_json)).toEqual(header.row_counts);
     // 临时明文不留在备份目录里。
@@ -97,14 +100,17 @@ describe("备份 → 恢复 → integrity_check 往返（S-17）", () => {
   it("恢复出的库 integrity_check 为 ok，行数与内容和备份时一致", async () => {
     const env = setup();
     const before = countRows(env.db);
+    const schemaVersion = env.db.pragma("user_version", { simple: true });
     const record = await env.service.create("manual", system);
     const restored = join(env.dir, "restored.sqlite");
     const header = await decryptBackup(join(env.backupDir, record.file), env.key, restored);
+    expect(header.schema_version).toBe(schemaVersion);
     const copy = openCopy(restored);
     try {
       expect(copy.pragma("integrity_check", { simple: true })).toBe("ok");
       expect(copy.pragma("foreign_key_check")).toEqual([]);
       expect(copy.pragma("user_version", { simple: true })).toBe(header.schema_version);
+      expect(copy.prepare("SELECT max(version) AS version FROM schema_migrations").get()).toEqual({ version: schemaVersion });
       expect(countRows(copy)).toEqual(before);
       expect(copy.prepare("SELECT key, value_json FROM settings").all()).toEqual(env.db.prepare("SELECT key, value_json FROM settings").all());
     } finally {
@@ -124,6 +130,7 @@ describe("备份 → 恢复 → integrity_check 往返（S-17）", () => {
     const record = await env.service.create("manual", system);
     const path = join(env.backupDir, record.file);
     const original = readFileSync(path);
+    const metadata = await readBackupHeader(path);
 
     const flipped = Buffer.from(original);
     flipped[flipped.length - 40] = (flipped[flipped.length - 40] as number) ^ 0xff;
@@ -137,9 +144,11 @@ describe("备份 → 恢复 → integrity_check 往返（S-17）", () => {
     // 解密失败时不留半截明文。
     expect(readdirSync(env.backupDir)).toEqual([record.file]);
 
-    const header = Buffer.from(original);
-    const at = header.indexOf(Buffer.from('"schema_version":1'));
-    header.write('"schema_version":9', at);
+    // 只改实际头部的库版本；重编码长度，保持 JSON 合法及密文、认证标签不变。
+    const changedHeader = Buffer.from(JSON.stringify({ ...metadata.header, schema_version: metadata.header.schema_version + 1 }), "utf8");
+    const headerLength = Buffer.alloc(4);
+    headerLength.writeUInt32BE(changedHeader.length);
+    const header = Buffer.concat([BACKUP_MAGIC, headerLength, changedHeader, original.subarray(metadata.prefix.length)]);
     expect(await checkBackupFile(join(env.dir, "missing.gbbk"), env.key, env.keyId, env.dir)).toMatchObject({ ok: false, problems: ["备份文件不存在"] });
     writeFileSync(join(env.dir, "h.gbbk"), header);
     const headerCheck = await checkBackupFile(join(env.dir, "h.gbbk"), env.key, env.keyId, env.dir);
@@ -217,7 +226,7 @@ describe("备份 → 恢复 → integrity_check 往返（S-17）", () => {
 
 describe("保留策略：7 份每日加 4 份每周；pre_deploy、pre_migration、manual 各 3 份", () => {
   it("超出的最旧备份被删除，登记保留并写 pruned_at 与审计", async () => {
-    const env = setup();
+    const env = setup({ daily: 7, weekly: 4, others: 3 });
     for (let day = 0; day < 9; day += 1) {
       env.clock.set(MONDAY + day * DAY + 3_600_000);
       await env.service.create("daily", system);
@@ -279,7 +288,7 @@ describe("启动时补登记", () => {
     expect(added).toEqual([record.file]);
     expect(existsSync(join(target.backupDir, ".tmp-abandoned.sqlite"))).toBe(false);
     const row = target.service.list().find(item => item.file === record.file);
-    expect(row).toMatchObject({ kind: "manual", sha256: record.sha256, bytes: record.bytes, schema_version: 1, backup_key_id: source.keyId, created_at: record.created_at });
+    expect(row).toMatchObject({ kind: "manual", sha256: record.sha256, bytes: record.bytes, schema_version: record.schema_version, backup_key_id: source.keyId, created_at: record.created_at });
     expect(target.sink.lines().some(line => line.msg === "backups 目录里有认不出的备份文件，没有登记" && line.file === "broken.gbbk")).toBe(true);
     expect(await target.service.reconcile()).toEqual([]);
   });

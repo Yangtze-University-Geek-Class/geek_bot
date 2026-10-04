@@ -4,6 +4,8 @@
 
 状态：`accepted` · 更新：2026-09-26 · 适用：`app/control` 的进程与写入模型、节点协议 `/api/node/v1`、`app/node` 与 control 的连接方式（由 #3、#9、#11 实现，多节点见 #19）
 
+[ADR-0012](0012-shared-cross-platform-workspace.md) 将唯一 GitHub 写出口推广为多平台的 publisher；单 SQLite 写者、control 不执行仓库代码和节点只出站的边界保持。
+
 ## 背景
 
 - 一套 geek_bot 有一个控制面和若干工作节点。第一台节点可以和控制面在同一台机器上；以后加入的节点可能在家庭网络或私有组网里，通常没有公网入站端口。

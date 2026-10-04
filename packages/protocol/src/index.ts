@@ -104,3 +104,5 @@ export interface ReleaseInfo {
 
 /** A-56 `GET /api/v1/stream` 的 topic：每个连接最多 20 个。 */
 export type StreamTopic = "overview" | "queue" | "nodes" | "repos" | "alerts" | `task:${string}`;
+
+export * from "./shared.js";

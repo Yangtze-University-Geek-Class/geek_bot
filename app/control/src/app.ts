@@ -6,13 +6,16 @@
  *   路径去掉查询串（API.md A-06：code 这类查询参数不落日志）。
  * - 请求 id 由服务端生成（不信任请求头），每个响应都带 X-Request-Id。
  * - 错误一律是 API.md 的 { error: { code, message } }；未预期的错误只回「内部错误」和请求 id。
- * - Ajv 设 removeAdditional: false：多余字段报 400，不静默删除（API.md「入参校验」）。
+ * - Ajv 设 removeAdditional: false：多余字段报 400，不静默删除；coerceTypes: false：类型不符报 400，不强制转换
+ *   （API.md「入参校验」）。查询参数一律按字符串声明，由路由自己解析。
+ * - 共享平台的业务错误（PlatformError）按它自带的状态码与 code 回复。
  * - 请求体上限 64 KB；只接受 application/json 的请求体（去掉 Fastify 默认的 text/plain 解析器）。
  */
 import { randomUUID } from "node:crypto";
 import Fastify, { LogController, type FastifyBaseLogger, type FastifyError } from "fastify";
 import { errorBody } from "./http/errors.js";
 import type { Logger } from "./log/logger.js";
+import { PlatformError, sendPlatformError } from "./platform/http.js";
 import { registerHealthRoutes, type Readiness } from "./routes/health/index.js";
 
 export const BODY_LIMIT_BYTES = 64 * 1024;
@@ -59,7 +62,7 @@ export function buildApp(options: AppOptions) {
     genReqId: () => randomUUID(),
     bodyLimit: BODY_LIMIT_BYTES,
     return503OnClosing: false,
-    ajv: { customOptions: { removeAdditional: false, allErrors: false } },
+    ajv: { customOptions: { removeAdditional: false, allErrors: false, coerceTypes: false } },
   });
 
   app.removeContentTypeParser("text/plain");
@@ -85,6 +88,7 @@ export function buildApp(options: AppOptions) {
   app.setNotFoundHandler(async (_request, reply) => reply.code(404).send(errorBody("not_found", "没有这个接口")));
 
   app.setErrorHandler(async (error: FastifyError, request, reply) => {
+    if (error instanceof PlatformError) return sendPlatformError(reply, error);
     if (error.validation) {
       return reply.code(400).send(errorBody("validation_failed", describeValidation(error.validationContext, error.validation[0] as ValidationIssue | undefined)));
     }

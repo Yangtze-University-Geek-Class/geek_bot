@@ -1,0 +1,9 @@
+#cloud-config
+# 一次性 VM 的 cloud-init 种子（NoCloud，卷标 cidata）。只做一件事：只读挂上工具盘并执行 guest-init.sh，结束后关机。
+# 不装软件包、不配用户密钥、不开 SSH；每台 VM 都是新 overlay，所以每次都是「首次启动」。
+package_update: false
+package_upgrade: false
+ssh_pwauth: false
+disable_root: true
+runcmd:
+  - [sh, -c, "(mkdir -p /opt/geekbot && mount -t squashfs -o ro /dev/vdc /opt/geekbot && sh /opt/geekbot/guest-init.sh) > /dev/ttyS0 2>&1; sync; poweroff -f"]

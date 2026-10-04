@@ -1,220 +1,313 @@
 # 节点协议
 
-> 工作节点与 control 之间的 HTTP/JSON 协议：原则、消息表 N-01…，以及 sandbox 与 VM 怎样访问节点。
+> 工作节点与 control 之间的 HTTP/JSON 协议 `/api/node/v1`：请求头与租约栅栏、端点 N-01…N-09、失联与回放，以及 sandbox 与 VM 怎样访问节点。
 
-状态：`proposed` · 更新：2026-09-26 · 适用：`app/node`、`app/control` 的 `/api/node/v1/*`、`packages/protocol` 的节点消息类型（由 #11 实现；事件与模型中继随 #13、#14，VM 部分随 #17，多节点随 #19）
+状态：`current` · 更新：2026-10-03 · 适用：`app/node`、`app/control` 的 `/api/node/v1/*`、`packages/protocol` 的节点消息类型（由 #34 实现）
 
-本文是设计，还没有任何消息实现。现在代码里只有协议版本常量 `NODE_PROTOCOL_VERSION = 1`（`packages/protocol/src/index.ts`）。实现以后，消息形状的来源是 `@geek-bot/protocol` 的类型与 JSON Schema（消息表最后一列是计划的类型名，由 #11 放进去），两端用契约测试证明一致；本文与代码不符时在同一次改动里修正。
+`current` 只表示本文与 #34 的源码一致，不表示已经在真实节点、Linux/KVM 主机或线上实例验收过；实际跑过和没跑过的检查见文末「验证状态」。
 
-管理员对节点的操作（登记节点并生成令牌、cordon、排空、重置令牌、移除）是后台 API，见 [API](../../architecture/API.md) 的 A-36 至 A-44。架构背景见 [ARCHITECTURE](../../architecture/ARCHITECTURE.md)「节点协议原则」与「调度」，决策见 [ADR-0003](../../decisions/0003-single-writer-control.md)，安全要求见 [SECURITY](../../architecture/SECURITY.md)，节点包的契约见 [node 服务契约](README.md)。
+事实来源：control 侧是 `app/control/src/routes/platform/node/{index,contracts}.ts` 与 `app/control/src/platform/{machines,tasks,relay,health,records}.ts`；节点侧是 `app/node/src/{control-client,worker,health,self-check,spool,model-relay,sandbox}.ts` 与 `app/node/src/vm/pool.ts`；共享形状是 `packages/protocol/src/shared.ts`。本文与代码不一致时以代码为准，并在同一次改动里修正本文。
+
+后台管理机器的端点（登记、改属性、cordon、uncordon、drain、重置令牌）在 `/api/v1/machines`，见 [control 服务契约](../control/README.md)。节点包的源码地图、配置和运行方式见 [node 服务契约](README.md)，安全要求见 [SECURITY](../../architecture/SECURITY.md)，决策见 [ADR-0003](../../decisions/0003-single-writer-control.md)。
 
 ## 原则
 
 ### 连接方向
 
-- 只有节点主动发起连接；control 从不连节点；节点不开任何入站端口。
-- control 要告诉节点的事（cordon、排空、取消、作废租约）都放在节点请求的响应里带回（N-10、N-11）。
-- 同机部署时节点经 compose 网络访问 control；异机时经私有组网或 https。
+- 只有节点主动发请求；control 从不连节点，节点不开任何入站端口。
+- control 要节点停下某个任务时，放在心跳响应的 `cancel_task_ids` 或续租响应的 `cancel: true` 里带回。协议里没有单独的命令消息：cordon、drain 这类管理状态经心跳响应的 `status` 体现，节点只在 `status` 为 `ready` 时领任务。
 
 ### 传输
 
-- HTTP/JSON，路径前缀 `/api/node/v1`；字段名用 snake_case，时长用整数秒（`_s`），时间用 ISO 8601 UTC 字符串。
-- 公网上必须用 TLS，节点按常规校验证书。明文 http 只允许用于私网地址或同机 compose 网络，并且 control 要显式开启私网明文模式（部署环境变量 `GEEK_BOT_ALLOW_PLAINTEXT_MESH`，随 #7 写进 ENVIRONMENTS）；节点配置的 control 地址是 http 且指向公网地址时，节点拒绝启动（#11 加进 `createNodeConfig` 的校验）。
-- control 对请求体做 JSON Schema 校验，不认识的字段返回 400 `validation_failed`；节点忽略响应里不认识的字段，这样 control 可以在同一个协议版本里给响应加字段。
-- 请求体上限：事件批 256 KB、结果 1 MiB、单个产物 20 MiB；其它请求 64 KB。
+- HTTP/JSON，路径前缀 `/api/node/v1`，字段名用 snake_case。节点的请求不跟随重定向。
+- 节点配置的 control 地址只许 http 或 https，不许带账号密码、查询串和片段。地址是明文 http 时，主机名解析出的每个地址都必须落在禁止出网的地址段里（私网、回环等，与出网代理用同一张表）；只要有一个公网地址，节点就拒绝启动，退出码 78。公网上必须用 https。
+- control 按 JSON Schema 校验请求：对象拒绝未知字段，字符串和数组都有上限，校验失败返回 400 `validation_failed`。节点只读响应里自己认识的字段。
+- 请求体上限：事件批 256 KiB，结果 1 MiB，模型中继 8 MiB，其余端点用 control 的全局上限 64 KiB。心跳的 `health` 打码后超过 64 KiB 返回 413 `payload_too_large`。
 
-### 认证与令牌
+### 认证与请求头
 
-| 令牌 | 形态 | 谁生成 | 放在哪 | 用途 |
+| 令牌 | 形态 | 来源 | 节点怎样持有 | 用途 |
 |---|---|---|---|---|
-| 节点令牌 | `gbn_` 加 256 位随机数的 base64url | control：owner 重新认证后在后台登记节点（A-38）或重置令牌（A-43）时生成，只在后台显示这一次 | 运维写进节点宿主 secrets 目录里的文件（0400，属主是节点 uid），只读挂进 node 容器，路径由 `GEEK_BOT_NODE_TOKEN_FILE` 指定；库里只存 SHA-256 | 节点的全部请求：`Authorization: Bearer <节点令牌>` |
-| 每任务模型令牌 | `gbt_` 加 256 位随机数的 base64url | control，放在 TaskSpec 里（N-02） | sandbox 的内存，或 VM 的 fw_cfg（见最后一节）；库里只存 SHA-256 | 只用于模型中继（N-09）；租约结束即失效 |
+| 节点令牌 | `gbn_` 加 256 位随机数的 base64url | 后台登记机器或重置令牌时生成（owner，要求重新认证），只出现在那一次响应里；幂等重放不会再给一次；库里只存 SHA-256 | `GEEK_BOT_NODE_TOKEN_FILE` 指向的只读文件，启动时读进内存 | 全部 `/api/node/v1/*` 请求 |
+| 每任务模型令牌 | `gbt_` 加 256 位随机数的 base64url | 领任务响应里的 `model_token`；库里只存 SHA-256；交结果、交失败、收回或取消时清除 | 节点内存；sandbox 经槽位 socket 交给 runner，VM 经 fw_cfg | 只用于模型中继 N-09 |
 
-- 节点令牌由后台直接生成，协议里没有换取令牌的接口：节点从第一次心跳起就用它，**第一次心跳就是登记**（见 N-01）。
-- 每个请求带 `X-Geek-Bot-Protocol: <整数>` 和 `X-Geek-Bot-Node: <节点名>`，节点名必须与令牌对应的节点一致，否则 401。
-- 任务相关的请求另带 `X-Geek-Bot-Lease: <lease_id>` 和 `X-Geek-Bot-Epoch: <整数>`（有请求体的也在体里重复一次，两处不一致按 400 处理）。
-- 两种令牌的前缀都加进日志打码和 `check-secrets` 的内容规则（#11、#13）。节点令牌永远不进 sandbox 和 VM。
-- 「重置令牌」（A-43）后旧令牌立即返回 401。**节点收到 401 就立即停止一切任务并停止领任务**：终止全部 sandbox 任务，关掉全部 VM，丢弃未发送的结果和 spool，只等运维换上新的令牌文件后重启节点。这覆盖「后台重置令牌」（control 侧节点回到 `pending`，等新令牌的第一次心跳）和「节点被移除」（control 侧节点变为 `disabled`）两种情况。
+每个请求都带：
+
+- `Authorization: Bearer <节点令牌>`：令牌无效、已重置或机器已移除时返回 401 `unauthenticated`。
+- `X-Geek-Bot-Protocol: <整数>`：缺少或不是整数返回 400。
+- `X-Geek-Bot-Node: <节点名>`：必须等于令牌对应的机器名，否则 401。
+
+`/api/node/v1/tasks/*` 的请求（N-03 至 N-07）还必须同时带头和体两处栅栏：
+
+- 头：`X-Geek-Bot-Lease: <lease_id>`、`X-Geek-Bot-Epoch: <正整数>`；
+- 体（GET 是查询串）：`lease_id`、`epoch`。
+
+两处缺一或不一致，control 返回 400 `validation_failed`，不进入业务处理。模型中继 N-09 的栅栏只在头里，见端点表。
+
+节点令牌永远不进 sandbox 和 VM。两种令牌的前缀都在 control 日志打码和节点事件打码的规则里。
 
 ### 协议版本
 
-- 协议版本是整数，当前是 1（`NODE_PROTOCOL_VERSION`）。control 支持 N 与 N-1，并分别保存两个版本的请求 schema。
-- 节点的版本不在范围内时（太旧，或比 control 新），control 仍接受 N-01 心跳，响应里的节点状态是 `needs_upgrade`；其它请求返回 426 `protocol_unsupported`，不给它派任务。后台把它标为需要升级。
-- 升级顺序先 control 后节点（[RELEASES](../../conventions/RELEASES.md)「节点版本」）。
-- 什么改动要提升版本：删除或改名字段、改变字段含义、给请求加字段（control 拒绝不认识的字段）。给响应加可选字段不提升。
+- 协议版本是整数，当前是 1（`NODE_PROTOCOL_VERSION`）。control 支持的范围是 `max(1, N-1)` 到 N，当前只有 1。
+- 版本不在范围内时，心跳仍然记录（存下节点报告的版本），其它端点返回 426 `protocol_unsupported`。版本不在范围内的机器不能解除隔离。
+- 心跳体里的 `protocol_version` 必须等于 `X-Geek-Bot-Protocol`，否则 400。
+- 删除或改名字段、改变字段含义、给请求加字段（control 拒绝未知字段）都要提升版本；给响应加字段不提升。升级顺序先 control 后节点（[RELEASES](../../conventions/RELEASES.md)「节点版本」）。
 
 ### 时钟与超时
 
-协议里的期限都用相对时长，不用对方的绝对时间：control 用自己的单调时钟计算租约期限，节点用自己的单调时钟计算本地期限。事件里的 `ts` 是节点的墙钟，只用于显示；control 另记收到时间。心跳响应带 `server_time`，节点据此算出时钟偏差放进健康数据，偏差超过 5 秒时 control 告警（不自动 cordon）。
+期限都用相对时长。control 的租约期限按自己的时钟计算，长轮询按进程的单调时钟计算；节点的本地期限按自己的时钟计算。
 
-| 项 | 默认值 | 由谁决定 |
+| 项 | 值 | 由谁决定 |
 |---|---|---|
-| 心跳间隔 `heartbeat_interval_s` | 10 秒 | control，在 N-01 的响应里下发 |
-| 记为 `stale` | 30 秒没有心跳 | control |
-| 记为 `offline`，不再派新任务 | 90 秒没有心跳 | control |
-| 失联 `lost_after_s` | 600 秒 | control 的配置 `GEEK_BOT_LEASE_LOST_AFTER_SECONDS`，在 N-01 的响应里下发；节点缓存最近一次收到的值，不单独配置，保证两侧用同一个值 |
-| 租约有效期 `lease_ttl_s` | 等于 `lost_after_s` | TaskSpec，每次续租重新计时 |
-| 续租间隔 `renew_interval_s` | 30 秒 | TaskSpec |
-| 确认期限 `ack_deadline_s` | 60 秒 | TaskSpec：领到任务后必须在这个时间内完成第一次续租 |
-| 长轮询挂起上限 | 25 秒 | control；节点这一个请求的超时设 35 秒 |
-| 普通请求超时 | 30 秒 | 节点 |
-| 事件批 | 每 1 秒或攒够 64 KB 发一批 | 节点 |
-| 取消宽限 | 30 秒 | 节点 |
-| 未确认事件的本地缓存（spool） | 每个任务 200 MB | 节点 |
+| 心跳间隔 | 默认 10 秒（2～60） | 节点配置 `GEEK_BOT_NODE_HEARTBEAT_SECONDS`；control 不下发 |
+| 联络状态 `offline` | 90 秒没有心跳 | control；对外记录显示 `offline`，不能解除隔离 |
+| 失联期限 `lease_lost_after_s` | 默认 600 秒（60～86,400） | control 配置 `GEEK_BOT_LEASE_LOST_AFTER_SECONDS`，经心跳响应下发；节点只接受不小于 60 的值，收到之前用 600 |
+| 确认期限 | 60 秒，固定 | control：领到后必须在这段时间内第一次续租 |
+| 续租间隔 | `max(5, min(30, floor(lease_ttl_s / 3)))` 秒 | 节点按续租响应的 `lease_ttl_s` 计算 |
+| 长轮询挂起 | `wait_s` 最多 25 秒 | control；节点用 25，请求超时设为 `wait_s + 10` 秒 |
+| 普通请求超时 | 30 秒；取任务包 300 秒 | 节点 |
+| 事件批 | 每秒一批，每批最多 500 条、200 KiB | 节点 |
+| 事件缓存（spool） | 每个租约默认 200 MiB | 节点配置 `GEEK_BOT_NODE_SPOOL_MAX_MIB` |
+| 任务时长 | `timeout_s`，默认 3,600 秒 | control 配置 `GEEK_BOT_TASK_TIMEOUT_SECONDS`；节点在 `timeout_s + 60` 秒时强制停止 |
+| 取消宽限 | sandbox 35 秒；VM 关机 30 秒后 QMP `quit`，再 5 秒 SIGKILL | 节点 |
+| 停机宽限 | 40 秒 | 节点收到 SIGTERM 后 |
+| 过期租约扫描 | 每 5 秒 | control |
 
-配置项：control 侧的 `GEEK_BOT_LEASE_LOST_AFTER_SECONDS`（整数秒，默认 600，全局）登记在 [behavior](../control/behavior.md) 的配置项一览；节点侧的 `GEEK_BOT_NODE_TOKEN_FILE`（节点令牌文件在容器内的路径）随 #11 加进 [node 服务契约](README.md) 的配置说明；基础设施失败的重排上限沿用 behavior 的 `GEEK_BOT_INFRA_RETRY_MAX`（默认 2）。其余数值是协议常量，放进 `@geek-bot/protocol`。
+control 的配置项（含模型预算、任务时长、基础设施重试上限）以 [control 服务契约](../control/README.md) 和 [默认行为与配置项](../control/behavior.md) 为准，本文不复制默认值以外的规则。
 
 ### 租约与 epoch fencing
 
-- 一个租约是 `(task_id, lease_id, epoch, node_id)`。`lease_id` 是至少 128 位的随机数，不能从别的值推出来。control 在一个 SQLite 事务里选任务、写租约；control 单进程单写者，同一个任务不会被两个节点同时领走。
-- **租约归属**：N-03 至 N-09 每个请求都核对两件事：租约的 `node_id` 等于令牌对应的节点；路径里的 `task_id`（或路径里的 `lease_id` 对应的任务）等于租约里的任务。任何一项不符都返回 404 `not_found`，不透露这个租约或任务是否存在。
-- `epoch` 从 1 开始；control 每次收回或重派同一个任务（节点失联、节点释放、租约未确认、管理员重新排队、被新 head 取代、重置节点令牌）时加一。
-- 任务相关的每个请求（N-03 至 N-09）都带 `lease_id` 和 `epoch`。它们与 control 当前记录不符，或租约已经收回、取消，control 返回 409 `lease_fenced`，并在 `message` 里写原因（`reclaimed`、`cancelled`、`superseded`、`expired`）。节点收到后立即停止这个任务，丢弃它的结果、产物和 spool。
-- 结果只进入 control 的「待发布」状态，每个租约最多记一次。节点从不写 GitHub；publisher 发送前还会复核 head、issue 状态和权限。
-- 领到任务后，节点必须在 `ack_deadline_s` 内完成第一次续租（N-03），这就是确认。没有确认的租约被作废、epoch 加一、任务重新排队，并记一次基础设施失败。
+- 租约由 `(task_id, lease_id, epoch, machine_id)` 确定。`lease_id` 是 128 位随机数的十六进制。control 单进程单写者，在一个 SQLite 事务里挑任务、写租约，同一个任务不会同时租给两台机器。
+- `epoch` 从 1 开始。收回重排、取消、被新提交取代、交失败、重新排队都会让 epoch 加一。
+- 归属核对：任务不存在或不属于发请求的机器返回 404 `not_found`；租约 id 或 epoch 不符、任务不在运行中返回 409 `lease_fenced`，`message` 是 `reclaimed`、`cancelled`、`superseded` 或 `expired` 之一。
+- 确认：领到后第一次续租就是确认。确认期限内没有续租，control 收回租约、计一次基础设施失败，并把这台机器加进该任务的排除名单。
+- 确认之后每次续租把期限延到 `now + lease_lost_after_s`。
+- 结果只进入 control 的 `awaiting_publish`，每个租约最多记一次。节点从不写 GitHub；发布由 control 的 publisher 负责。
 
-### 失联判定（两侧对称）
+### 失联判定
 
-- **control 侧**：租约超过 `lease_ttl_s` 没有续租，记为 `lost`：epoch 加一，任务重新排队，并把这个节点加进任务的 `excluded_nodes`。基础设施失败最多重排 2 次，之后判失败。节点状态按心跳间隔推导为 `stale`、`offline`、`lost`。
-- **节点侧**：连续 `lost_after_s` 没有收到 control 的任何响应（5xx 和网络错误不算），就自行终止全部任务、关掉全部 VM、清掉任务包和工作目录。节点在期限前 30 秒就开始终止，保证 control 收回租约时旧任务已经停下。之后节点继续尝试心跳；恢复联络时如实报告没有租约。
-- **control 计划内重启**：启动后给所有活动租约重新计时 `lease_ttl_s`，宽限期内不重排。control 重启通常不到 1 分钟，节点在此期间继续执行、把事件写进 spool，不会被打断。
-- **节点重启**：每次进程启动生成新的 `boot_id`。启动时先清理残留的 qemu 进程、sandbox 工作目录和 overlay，再发心跳报告空租约；control 看到 `boot_id` 变了且缺少的租约，就作废它们并重新排队。每 5 分钟回收一次没有对应活动租约的 VM 文件。
-- **对账**：每次心跳，节点列出它认为自己持有的租约。control 有、节点没报告（且已确认）的租约作废并重排；节点报告了、control 认为已作废的，放进响应的 `voided_leases`，节点立即终止。
+- **control 侧**：租约过期由定时扫描收回：epoch 加一，任务重新排队，计一次基础设施失败，并排除这台机器。基础设施失败超过 `GEEK_BOT_INFRA_RETRY_MAX` 次判失败。
+- **节点侧**：收到 control 的任何非 5xx 响应都算联络上。连续 `lease_lost_after_s - 30` 秒没有联络，节点销毁全部在跑的任务，但保留它们的事件缓存，转成回放（见下文「缓存与回放」）。
+- **control 重启**：启动时给已确认的租约重新计时 `lease_lost_after_s`，未确认的重新计时确认期限，宽限期内不收回。节点在这段时间里照常执行，事件先写进缓存。
+- **节点重启**：每次进程启动生成新的 `boot_id`。启动时先结束残留的 qemu 进程、清空 VM 工作目录，再打开上次留下的缓存开始回放。control 看到 `boot_id` 变化时收回这台机器的全部运行中租约，并计一次基础设施失败。回放和心跳谁先到由时序决定：control 仍认这个租约就接收，已经收回就返回 409，节点删除缓存。
+- **对账**：心跳 `health.leases` 列出节点认为自己持有的租约（含待回放的）。control 有、节点没报告、而且已经确认过的租约，收回重排并计一次失败；节点报告了、control 不认的，以及管理员要求取消的，放进响应的 `cancel_task_ids`。
+
+### 缓存与回放
+
+节点为每个租约建一份磁盘缓存 `<数据目录>/spool/<task_id>@<epoch>/`（目录 0700，文件 0600）：
+
+| 文件 | 内容 |
+|---|---|
+| `lease.json` | `task_id`、`lease_id`、`epoch`、领到它时的 `boot_id` |
+| `events.jsonl` | 已打码、还没被 control 确认的事件，一行一个 |
+| `ack` | control 已确认到的 `seq` |
+| `outcome.json` | 执行器交回、还没被 control 接收的结果或失败 |
+
+- 事件先写进缓存再回传；每次回传前 fsync，进程崩溃不丢事件。
+- 未确认事件超过上限时，先丢最早的 `text` 事件到上限的 90%；`tool`、`error`、`retry`、`model` 事件一律保留。只剩保留类事件仍超限时，任务以 `infra_failure` 结束，不静默丢事件。
+- 结局先写 `outcome.json`，再交给 control。
+- 目录只在这些时候删除：control 接收了结果或失败；任务请求返回 409 或 404；401（删除全部缓存）；内容损坏无法回放。
+- 失联、停机期限到、节点重启留下的缓存，用原来的栅栏回放：先补交事件，再交结局；没有结局文件的按 `infra_failure` 回报。
 
 ### 重试与幂等
 
-- 退避：网络错误、408、429、5xx 重试，指数退避，从 1 秒起每次翻倍，上限 60 秒，加全抖动；有 `Retry-After` 时按它等待。其它 4xx 不重试；409 `lease_fenced` 表示停止这个任务，401 表示立即停止一切任务并停止领任务（见上文）。
+节点的退避：网络错误（状态记为 0）、408、429、5xx 重试；有 `Retry-After` 时按它等待，否则在 0 到 `min(60 秒, 1 秒 × 2^次数)` 之间随机取值再加 250 毫秒。其它状态码不重试。
 
-| 消息 | 怎样保证重试不出错 |
+| 节点收到 | 节点的处理 |
 |---|---|
-| N-01 heartbeat | 带 `boot_id` 与单调递增的 `seq`；control 丢弃比已处理的 `seq` 小的心跳。第一次心跳（登记）重复发送不会产生第二个节点 |
-| N-02 lease | 每次领任务带新的 `Idempotency-Key`，key 按节点隔离（别的节点用同一个 key 拿不到这个结果）；响应丢失时用同一个 key 重试，control 在确认期限内返回同一个 TaskSpec，不会给出第二个租约 |
-| N-03 renew | 本身幂等 |
-| N-04 bundle | GET；支持 `Range` 断点续传 |
-| N-05 events | 按 `(lease_id, seq)` 去重；出现断档时 control 返回 `expect_seq`，节点从那里补发 |
-| N-06 artifact | 按 `(lease_id, name, sha256)` 幂等；同名不同内容返回 409 `artifact_conflict` |
-| N-07 result | 每个租约只记一次：内容相同的重放返回 200；内容不同返回 409 `result_already_recorded` |
-| N-08 release | 按 `lease_id` 幂等 |
-| N-09 model | 节点不自动重试（已经流出的字节无法撤回）；是否换模型由 runner 与 omp 决定。control 记录每次请求 |
-| N-10、N-11 命令 | 每条命令有 `command_id`，节点按它去重，并在下一次心跳的 `acked_command_ids` 里确认 |
+| 401（`task_token_invalid` 除外），来自任何端点 | 整体停机：销毁全部任务，删除全部缓存，停止心跳和领任务；每 10 秒读一次令牌文件，内容变了就用新的 `boot_id`、`seq` 从 0 重新开始 |
+| 任务请求返回 409 或 404 | 只销毁这一个任务，删除它的缓存 |
+| 领任务返回 409 `node_not_schedulable` | 丢掉本地的机器状态，等下一次心跳 |
+| 交结果返回其它 4xx | 改交失败 `schema` |
+
+| 端点 | 重试是否安全 |
+|---|---|
+| N-01 心跳 | `health.boot_id` 与同一 `boot_id` 内递增的 `health.seq`；control 丢弃不大于已处理值的心跳（只更新联络时间）。第一次心跳重复发送不会产生第二台机器 |
+| N-02 领任务 | 节点每次领任务生成一个 `Idempotency-Key`，只在可重试错误后用同一个 key 重发。key 按机器隔离：同一机器同一 key 的租约还没确认时，control 返回同一个任务并换发新的模型令牌（旧令牌作废）；已经确认的返回 `task: null` |
+| N-03 续租 | 本身幂等 |
+| N-04 任务包 | GET，无副作用；不支持 `Range` |
+| N-05 事件 | 按 `(task_id, seq)` 去重，重复的忽略 |
+| N-06 结果 | 同一租约内容相同的重放返回当前状态；内容不同返回 409 `result_already_recorded` |
+| N-07 失败 | 第一次就会改变租约（epoch 加一或结束任务），重放得到 409，节点按作废处理并删除缓存 |
+| N-08 模型自检 | control 缓存结果 60 秒，每台机器每分钟最多一次 |
+| N-09 模型中继 | 节点不自动重试，已经流出的字节撤不回；是否换模型由 runner 决定 |
 
 ### 错误格式
 
-与后台 API 相同：`{ "error": { "code": "…", "message": "…" } }`，`message` 不含令牌、路径和堆栈（[API](../../architecture/API.md)「错误格式」）。节点协议用到的 `code`：
+形状与后台 API 相同：`{ "error": { "code": "…", "message": "…" } }`（[API](../../architecture/API.md)「错误格式」）。节点 API 用到的 `code`：
 
 | HTTP | `code` | 何时返回 |
 |---|---|---|
-| 400 | `validation_failed` | 不符合 JSON Schema，含未知字段；头与体里的 lease、epoch 不一致 |
-| 400 | `relay_field_rejected` | 模型中继的请求体里有白名单以外的字段，或 `tools` 里有 function 以外的类型 |
-| 401 | `unauthenticated` | 节点令牌无效、被重置或节点被移除；`X-Geek-Bot-Node` 与令牌对应的节点名不一致 |
-| 401 | `task_token_invalid` | 模型中继的任务令牌无效或已过期 |
-| 403 | `model_not_in_pool` | 请求的模型不在本任务的池里 |
-| 404 | `not_found` | 任务、产物或路由不存在；租约不属于这个节点，或路径里的任务与租约不符（见「租约归属」） |
-| 409 | `lease_fenced` | epoch 不匹配，或租约已收回、取消、被取代、过期 |
-| 409 | `node_not_schedulable` | 节点处于 cordon、排空或需要升级时仍来领任务 |
-| 409 | `result_already_recorded`、`artifact_conflict` | 见上表 |
+| 400 | `validation_failed` | 不符合 schema、含未知字段；缺协议头；任务请求缺租约头或头体不一致；心跳的 `health` 字段类型不对；N-06 结果与任务类型不符（fix、rework 缺补丁，其它类型带了补丁） |
+| 400 | `relay_field_rejected` | 模型中继请求体有白名单外的字段、`n` 不是 1、`tools` 有 function 以外的类型 |
+| 401 | `unauthenticated` | 节点令牌无效、已重置或机器已移除；`X-Geek-Bot-Node` 或心跳 `name` 与令牌对应的机器不一致 |
+| 401 | `task_token_invalid` | 模型中继的任务令牌缺失、格式不对或已失效 |
+| 403 | `model_not_in_pool` | 模型或思考档位不在本任务的池里 |
+| 404 | `not_found` | 任务不存在或不属于这台机器；任务包已清理 |
+| 409 | `lease_fenced` | 租约 id、epoch 不符，或任务已收回、取消、取代、过期 |
+| 409 | `node_not_schedulable` | 机器不是 `ready`，或健康门打开时领任务 |
+| 409 | `result_already_recorded` | 同一租约交了内容不同的结果 |
 | 413 | `payload_too_large` | 超过请求体上限 |
-| 426 | `protocol_unsupported` | 协议版本不在 N、N-1 范围内 |
-| 429 | `rate_limited` | 节点请求过于频繁；带 `Retry-After` |
-| 429 | `budget_exhausted` | 本任务的模型请求数或 token 预算用完；不带 `Retry-After`，不应降级到同池的下一个模型 |
+| 426 | `protocol_unsupported` | 协议版本不在支持范围（心跳除外） |
+| 429 | `rate_limited` | 每台机器每分钟超过 1,200 个请求，或模型自检每分钟超过 1 次；带 `Retry-After` |
+| 429 | `budget_exhausted` | 本任务的模型请求数或 token 预算用完；不带 `Retry-After` |
 | 429 | `upstream_rate_limited` | 网关限流，原样带回 `Retry-After` |
-| 502 | `upstream_error` | 网关返回错误或连接失败 |
-| 503 | `control_starting` | control 正在启动或迁移；带 `Retry-After` |
-| 504 | `upstream_timeout` | 网关超时 |
+| 502 | `upstream_error` | 网关返回 5xx 或连不上 |
+| 503 | `relay_unavailable` | 实例没有配置网关地址或网关密钥 |
+| 504 | `upstream_timeout` | 网关 10 分钟内没有响应 |
 
 ## 节点状态
 
+机器的管理状态存在 control 的 `machines` 表里，对外记录（`MachineRecord.status`）叠加联络状态和健康门：
+
 | 状态 | 含义 | 怎样进入 | 能否领任务 |
 |---|---|---|---|
-| `pending` | 已在后台登记并生成令牌，节点还没用它心跳（或令牌被重置后还没用新令牌心跳） | A-38；A-43 | 否 |
-| `cordoned` | 已登记，或被管理员、健康门控隔离 | 用令牌的第一次心跳；A-40；主机健康越线时节点自行报告 | 否 |
-| `active` | 正常接任务 | 自检通过后管理员解除 cordon（A-41）；健康门控造成的 cordon 在恢复且满足回滞条件后自动解除 | 是 |
-| `draining` | 做完手头任务，不接新任务 | A-42 | 否 |
-| `needs_upgrade` | 协议版本不在范围内 | 心跳里的 `protocol` | 否 |
-| `disabled` | 节点被移除；令牌作废，历史保留 | A-44 | 否 |
-| `stale`、`offline`、`lost` | 按心跳间隔推导的联络状态，叠加在上面的状态上 | 30 秒、90 秒、`lost_after_s` 没有心跳 | `offline` 起否 |
+| `pending` | 已登记，还没用令牌心跳过；重置令牌后也回到这里 | 后台登记；重置令牌 | 否 |
+| `cordoned` | 已隔离 | 第一次心跳；管理员 cordon；`ready` 的机器健康门打开时对外显示为 `cordoned` | 否 |
+| `ready` | 正常接任务 | 管理员 uncordon，条件见下 | 是 |
+| `draining` | 手头任务做完，不接新任务 | 管理员 drain | 否 |
+| `offline` | 90 秒没有心跳（叠加在其它状态上显示） | 心跳中断 | 否 |
 
-自检在节点第一次心跳后自动执行一次，结果放在心跳的 `self_check` 里：起停一台 VM（vm 槽位为 0 时跳过）、`omp --version`、经 N-09 的模型列表路径确认中继连通、出网代理确实拒绝私网地址。自检没通过，A-41 返回 409 `self_check_failed`。
+uncordon 的条件（不满足返回 409）：协议版本在支持范围内；90 秒内有心跳；最近一次心跳的自检 `passed` 与 `model_ready` 都为真；至少有一种执行器就绪；健康门已关。
 
-## 消息表
+### 自检
 
-方向：「节点 → control」是节点发请求；「control → 节点」是 control 在响应里带回。类型名是计划放进 `@geek-bot/protocol` 的名字，由 #11 实现（N-05 随 #14，N-09 随 #13）。
+节点把自检结果放在心跳 `health.self_check` 里，固定为这几个键：`passed`、`omp_version`、`sandbox_ready`、`vm_ready`、`model_ready`，失败时另有 `error`。control 拒绝其它键；`omp_version` 为 `null` 时按没通过处理。自检只认真实采集的证据：
 
-| 编号 | 方法与路径 | 方向 | 请求字段 | 响应字段 | 错误与重试 | protocol 类型 |
-|---|---|---|---|---|---|---|
-| N-01 | `POST /api/node/v1/heartbeat` | 节点 → control，每 `heartbeat_interval_s` 一次；用令牌的第一次心跳就是登记 | `name`、`boot_id`、`seq`、`version`（节点软件版本）、`protocol`、`host`（`arch`、`cpu_threads`、`mem_total_mib`、`kvm_available`）、`capacity`（本地声明的 `sandbox`、`vm` 上限）、`free`（空闲槽位）、`leases`（每项 `task_id`、`lease_id`、`epoch`、`phase`）、`health`（见「主机健康字段」）、`self_cordon`（越线时写原因，恢复后为空）、`self_check`、`vm_image`（`digest`、`ready`）、`omp_version`、`acked_command_ids` | `server_time`、`state`（第一次心跳后从 `pending` 变 `cordoned`）、`effective_slots`（后台设定与本地上限取小）、`heartbeat_interval_s`、`lost_after_s`、`protocol_range`（`min`、`max`）、`voided_leases`（每项 `lease_id` 与原因）、`commands`（N-10、N-11） | 401 立即停止一切任务并停止领任务；版本不符时仍返回 200，`state` 为 `needs_upgrade`。网络错误按退避重试，不影响本地任务 | `NodeHeartbeatRequest`（含 `NodeHealth`、`NodeLeaseReport`）/ `NodeHeartbeatResponse` |
-| N-02 | `POST /api/node/v1/lease`（`Idempotency-Key`） | 节点 → control，长轮询 | `free`（各执行器的空闲槽位）、`wait_s`（最多 25） | 有任务 200 `{ lease: TaskSpec }`（见「TaskSpec」）；等到 `wait_s` 仍没有任务 204 | 409 `node_not_schedulable`；426。响应丢失时用同一个 key 重试 | `LeaseRequest` / `LeaseGrant`（`TaskSpec`） |
-| N-03 | `POST /api/node/v1/leases/{lease_id}/renew` | 节点 → control，每个活动租约每 `renew_interval_s` 一次；第一次即确认 | `epoch`、`phase`（`accepted`、`preparing`、`running`、`uploading`）、可选 `progress`（一行文字） | `status: "active"`、`lease_ttl_s`、`commands`（可能含本任务的取消） | 409 `lease_fenced`：立即停止任务。网络错误按退避重试，直到本地失联期限 | `LeaseRenewRequest` / `LeaseRenewResponse` |
-| N-04 | `GET /api/node/v1/tasks/{task_id}/bundle` | 节点 → control | 头：`X-Geek-Bot-Lease`、`X-Geek-Bot-Epoch`；可选 `Range` | `application/gzip` 的任务包（内容见「TaskSpec」），头里有 `Content-Length` 与 `X-Geek-Bot-Bundle-Sha256`。节点核对 sha256 与字节数都等于 TaskSpec 的 `bundle`，不符就走 N-08（`bundle_invalid`） | 409 `lease_fenced`；404 任务包已清理。网络错误用 `Range` 续传 | `TaskBundleRef`（TaskSpec 里的 `bundle`）；响应是二进制 |
-| N-05 | `POST /api/node/v1/tasks/{task_id}/events` | 节点 → control，批量 | `lease_id`、`epoch`、`from_seq`、`events`（每项 `seq`、`ts`、`line`：omp 或 runner 的一行 JSONL，已打码） | `ack_seq`；有断档时 `expect_seq`；`commands`。control 把原文追加到任务事件文件，派生时间线经 SSE 推给后台（目标端到端 3 秒内、上限 10 秒，未验证，由 #14 实测） | 409 `lease_fenced`；413。发不出去的事件进 spool，满了先丢文本增量，保留工具、错误、重试、降级事件 | `TaskEventBatch` / `TaskEventAck` |
-| N-06 | `PUT /api/node/v1/tasks/{task_id}/artifacts/{name}` | 节点 → control | 头：lease、epoch、`X-Geek-Bot-Artifact-Sha256`；`Content-Type: application/octet-stream`；`name` 只能取 protocol 定义的产物名（例如补丁 `patch.diff`） | 200 `{ name, sha256, bytes }` | 409 `lease_fenced`、`artifact_conflict`；413。按退避重试 | `TaskArtifactRef` |
-| N-07 | `POST /api/node/v1/tasks/{task_id}/result` | 节点 → control | `lease_id`、`epoch`、`status`（`succeeded`、`failed`、`cancelled`、`timed_out`）、可选 `failure`（`class`：`infra`、`model`、`schema`、`timeout`、`cancelled`；`message`）、`result`（按 TaskSpec 的 `result_schema`：review.v1、triage.v1、patch.v1）、`attempts`（runner 视角的模型尝试）、`usage`、`artifacts`（引用 N-06 已上传的 `name` 与 `sha256`） | `accepted: true`、`state`（`pending_publish`、`failed` 或 `cancelled`）。结果只进入待发布，不直接写 GitHub | 409 `lease_fenced`、`result_already_recorded`；400 结果不符合 schema（control 另按失败规则处理）。按退避重试 | `TaskResultSubmission`（`ReviewResultV1`、`TriageResultV1`、`PatchResultV1`）/ `TaskResultAck` |
-| N-08 | `POST /api/node/v1/leases/{lease_id}/release` | 节点 → control | `epoch`、`reason`（`bundle_invalid`、`vm_start_failed`、`resource_unavailable`、`infra_failure`、`draining`、`node_shutdown`）、可选 `detail`（最多 1 KB） | `requeued`、`infra_failures`（该任务累计的基础设施失败次数）。control 作废租约、epoch 加一；`draining`、`node_shutdown` 且任务没开始时不计失败 | 409 `lease_fenced`（已被收回，可以忽略）。按退避重试 | `LeaseReleaseRequest` / `LeaseReleaseResponse` |
-| N-09 | `POST /api/node/v1/model/v1/chat/completions`；`GET /api/node/v1/model/v1/models` | 节点 → control（节点把 sandbox 或 VM 的模型请求转上来） | 头：`Authorization: Bearer <节点令牌>`、`X-Geek-Bot-Task-Token: <每任务模型令牌>`、lease、epoch；请求体是 OpenAI 兼容格式，control 按字段白名单放行（见表后「模型中继的请求体」） | 流式或非流式的 OpenAI 兼容响应，由 control 用网关密钥转发。`models` 只列本任务池里的模型，由 control 按池生成，不访问网关。control 记录每个请求的模型、HTTP 状态、耗时和用量，这是降级记录里可信的一方 | 400 `relay_field_rejected`；401 `task_token_invalid`；403 `model_not_in_pool`；404（租约不属于本节点）；409 `lease_fenced`；429 `budget_exhausted`、`upstream_rate_limited`；502、504。节点不自动重试 | `ModelRelayHeaders`；请求与响应体不单独定义类型 |
-| N-10 | 命令 `cordon`、`uncordon`、`drain`，放在 N-01、N-03、N-05 响应的 `commands` 里 | control → 节点 | 无 | 每条：`command_id`、`kind`、`reason`。`cordon`：不再调用 N-02，手头任务继续；`uncordon`：恢复领任务；`drain`：手头任务做完后不再领新任务，心跳报告空租约 | 节点按 `command_id` 去重，在下一次心跳的 `acked_command_ids` 里确认 | `NodeCommand`（`kind` 为 `cordon`、`uncordon`、`drain`） |
-| N-11 | 命令 `cancel`，放在 N-01、N-03、N-05 响应的 `commands` 里 | control → 节点 | 无 | 每条：`command_id`、`kind: "cancel"`、`task_id`、`lease_id`、`reason`。sandbox 发 SIGTERM（omp 以 143 退出），30 秒后 SIGKILL；VM 发 QMP `system_powerdown`，30 秒后结束 qemu 进程。之后用 N-07 回报 `status: "cancelled"` | 同 N-10；租约已结束的取消直接确认 | `NodeCommand`（`kind` 为 `cancel`） |
+- **sandbox**：至少一个槽位的 runner 报到，交出的证据满足：`omp --version` 成功（节点配置了期望版本时还要一致）、runner 报出版本、uid 不是 0、CapEff 全 0、NoNewPrivs 为 1、Seccomp 为 2（filter）、根文件系统只读、除回环外没有网卡。
+- **VM**：前置条件满足（`/dev/kvm` 可读写、qemu 与 qemu-img 能执行、基础镜像、工具盘与 cloud-init 种子都在、node 进程自身 CapEff 全 0、NoNewPrivs 为 1、Seccomp 为 2），并且最近一次探针 VM 通过：QMP 可用且报告运行中；来宾里的 runner 发出事件；降权用户执行 `omp --version` 成功；经 guestfwd 的模型端点带 fw_cfg 里的一次性探针令牌返回 200；宿主别名、用户态网络 DNS、一个私网地址、云元数据地址和一个公网地址全部直连失败；240 秒内由来宾自行关机，并由 QMP 的 SHUTDOWN 事件确认原因是 `guest-shutdown`。探针通过后每 6 小时、失败后每 10 分钟重跑一次，只在没有 VM 任务时跑。
+- **模型中继**：节点调用 N-08，control 用自己的网关密钥对网关做一次只读的 `GET /models`，并要求实例配置了模型 catalog。通过后每 5 分钟、失败后约每 65 秒再检查一次。
 
-### 模型中继的请求体
-
-N-09 的请求体按字段白名单放行，control 在转发前改写或拒绝（#13 用夹具测试逐项证明）：
-
-- 只放行 `model`、`messages`、`tools`、`tool_choice`、`temperature`、`top_p`、`max_tokens`、`stop`、`stream`、`stream_options`、`reasoning_effort` 这些字段；其它字段返回 400 `relay_field_rejected`。放行字段的最终清单由 #13 按 omp 实际发出的请求核对后写回本文。
-- `model` 必须在本任务的池里；`reasoning_effort` 必须是池里给这个模型配的档位。
-- `tools` 每一项只许 `type: "function"`，其它类型（例如网关自带的检索或代码执行工具）一律拒绝。
-- `n` 强制为 1（请求里带了别的值就拒绝）。
-- `max_tokens` 按本任务剩余的 token 预算封顶，超出时改成剩余值，剩余为 0 时返回 429 `budget_exhausted`。
-- 流式请求强制带 `stream_options.include_usage: true`，保证 control 能按实际用量记账。
-
-### TaskSpec
-
-N-02 返回的任务描述，字段：
-
-- `task_id`、`lease_id`、`epoch`；
-- `kind`（`TASK_KINDS`：review、triage、followup、fix、rework，外加规则画像提取）、`channel`、`executor`（`sandbox` 或 `vm`，取自 `CHANNEL_EXECUTOR`；VM 就绪前 PR 审查可以临时是 `sandbox`）；
-- `repo`（GitHub 数字 id、全名、是否私有）、`item`（类型与编号）、`head_sha`；
-- `resources`（`vcpus`、`memory_mib`、`disk_mib`；默认来自 `GEEK_BOT_VM_VCPUS`、`GEEK_BOT_VM_MEMORY_MIB`）；
-- `bundle`（`sha256`、`bytes`）；
-- `omp`（`version`、`tools` 白名单、`max_time_s`）；
-- `models`（按池顺序的 `{ id, effort }` 列表）；
-- `egress_allowlist`（域名规则；sandbox 为空）；
-- `result_schema`（review.v1、triage.v1、patch.v1，画像提取的 schema 由 #10 定）；
-- `task_token`（每任务模型令牌）；
-- `lease_ttl_s`、`renew_interval_s`、`ack_deadline_s`。
-
-任务包（N-04）是一个 tar.gz，节点不需要任何 GitHub 凭据就能拿到全部输入：
-
-- `repo/`：目标提交的 `git archive`，剔除 `.omp/`、`.claude/`、`.cursor/`、`mcp.json`、`.env*`；规则文件已用 base 版本覆盖（[SECURITY](../../architecture/SECURITY.md) S-04、S-08）；
-- `diff.patch`、`rules/`；
-- `prompt.md`、`append-system.md`、`overlay.yml`、`models.yml.tmpl`、`meta.json`（含仓库画像里声明的校验命令）。
+`passed` 只在全部启用的执行器和模型中继都通过、且至少启用了一种执行器时为真。control 按 `sandbox_ready`、`vm_ready` 把节点声明的槽位收紧：没就绪的执行器槽位记为 0。节点自己也只在模型自检通过时领任务。
 
 ### 主机健康字段
 
-N-01 的 `health`，都是可选字段，采集不到的不填：CPU 负载、各温度传感器读数、可用内存、内存压力（PSI）、数据盘与 VM 工作目录的可用空间、文件系统未分配空间（有这个概念的文件系统才有）、是否接通电源与电池电量、内核与模块目录是否一致、vhost 模块是否可用、时钟偏差。control 每分钟保留一个点，保留 7 天；越线判定与回滞由节点本地执行（[ARCHITECTURE](../../architecture/ARCHITECTURE.md)「调度」），结果通过 `self_cordon` 报告。
+心跳 `health` 是开放对象（最多 64 个键）。control 解析并用于健康门的字段：
+
+| 字段 | 节点怎样采集 | control 怎样用 |
+|---|---|---|
+| `disk_free_percent`、`disk_free_mib` | 数据目录的 `statfs`；读不出时节点自我隔离 | 必需；缺失按「磁盘可用空间未知」关门 |
+| `mem_available_mib` | `/proc/meminfo` 的 MemAvailable，不是 Linux 时取 `os.freemem` | 必需；缺失关门。VM 任务要求它不小于任务内存加 1,024 MiB |
+| `max_temp_c` | `/sys/class/thermal` 与 `/sys/class/hwmon` 的最高读数；没有可读传感器时不填 | 可选；缺失只记提示，不关门 |
+| `on_battery` | `/sys/class/power_supply`；没有电源设备可读时不填 | 可选；为真时关门 |
+| `self_check` | 见上 | 必需；缺失或没通过关门 |
+| `self_cordon` | 节点本地越线判定的原因；没有时为 `null` | 非空时关门 |
+
+越线与恢复带回滞，节点和 control 用同一组阈值：已知温度 ≥ 95 °C、磁盘可用 < 8% 或 < 4,096 MiB、已知电池供电时关门；恢复要已知温度 < 85 °C、磁盘可用 ≥ 12% 且 ≥ 6,144 MiB。健康门开关时 control 写审计并发告警。
+
+节点还会上报只用于展示与对账的字段：`boot_id`、`seq`、`leases`、`running`、`replaying`、`sandbox_slots`（`connected`、`idle`、`busy`、`tainted`、`verified`）、`vm_ready`、`vm_reason`、`self_check_detail`、`kvm_available`、`temp_sensors`、`mem_total_mib`、`load`、`cpu_threads`、`battery_percent`。
+
+## 端点表
+
+方向都是节点 → control。请求和响应的 TypeScript 形状在 `packages/protocol/src/shared.ts`，control 的 JSON Schema 在 `app/control/src/routes/platform/node/contracts.ts`。
+
+| 编号 | 方法与路径 | 请求 | 成功响应 | 说明 |
+|---|---|---|---|---|
+| N-01 | `POST /api/node/v1/heartbeat` | `MachineHeartbeat`：`name`、`protocol_version`、`capacity`（`cpu`、`memory_mib`）、`slots`（`sandbox`、`vm`，节点按自检收紧后的值）、`tags`、`health` | `HeartbeatReply`：`machine_id`、`status`、`lease_lost_after_s`、`cancel_task_ids` | 第一次心跳把 `pending` 变成 `cordoned`，即登记。协议版本不符也接受 |
+| N-02 | `POST /api/node/v1/lease`，可带 `Idempotency-Key` | `LeaseRequest`：`available`（各执行器空闲槽位）、`resources`（剩余 `cpu`、`memory_mib`）、`wait_s`（0～25） | `{ task: ExecutionTask \| null }`，等到 `wait_s` 仍没有任务时 `task` 为 `null` | 挑选条件见下文「派发条件」 |
+| N-03 | `POST /api/node/v1/tasks/{task_id}/renew` | 体：`lease_id`、`epoch` | `lease_expires_at`、`lease_ttl_s`、`cancel` | 第一次即确认；`cancel` 为真时节点停止任务 |
+| N-04 | `GET /api/node/v1/tasks/{task_id}/bundle?lease_id=…&epoch=…` | 查询串栅栏 | 任务包原始字节（`application/json`），头 `X-Geek-Bot-Bundle-Sha256` | 节点核对 sha256 等于 `bundle_sha256`，不符交失败 `bundle_invalid` |
+| N-05 | `POST /api/node/v1/tasks/{task_id}/events` | `lease_id`、`epoch`、`events`（最多 500 条：`seq` ≥ 1、`at`、`kind`、`text` ≤ 65,536 字符） | `{ ack_seq }`：该任务已存事件的最大 `seq` | control 再打码一次后入库，`at` 改成 control 收到的时间，经 SSE 推给后台 |
+| N-06 | `POST /api/node/v1/tasks/{task_id}/result` | `lease_id`、`epoch`、`result`（`TaskResult`） | `{ status }` | 进入 `awaiting_publish`；已请求取消时记为 `cancelled` |
+| N-07 | `POST /api/node/v1/tasks/{task_id}/failure` | `lease_id`、`epoch`、`code`、`message`（≤ 4,000 字符） | `{ status, requeued }` | 失败码的处理见下 |
+| N-08 | `POST /api/node/v1/self-check/model` | 空对象 | `ok`、`checked_at`、`models`，失败时 `error` | 只用节点令牌，`pending` 的机器也能调用 |
+| N-09 | `GET /api/node/v1/model/v1/models`；`POST /api/node/v1/model/v1/chat/completions` | 头：`X-Geek-Bot-Task-Token`、`X-Geek-Bot-Lease`、`X-Geek-Bot-Epoch`、`X-Geek-Bot-Task`；chat 的体是 OpenAI 兼容格式 | `models` 只列本任务池里的模型，不访问网关；chat 由 control 换成网关密钥转发，流式或非流式原样返回 | 核对与请求体白名单见下文「模型中继的请求体」 |
+
+N-07 的失败码（`FAILURE_CODES`）：
+
+| 失败码 | control 的处理 |
+|---|---|
+| `bundle_invalid`、`vm_start_failed` | 收回重排，计一次基础设施失败，排除这台机器 |
+| `resource_unavailable`、`infra_failure` | 收回重排，计一次基础设施失败 |
+| `draining`、`node_shutdown` | 收回重排，不计失败 |
+| `timeout`、`model`、`schema` | 任务判 `failed` |
+| `cancelled` | 任务记为 `cancelled`；已请求取消时任何非基础设施失败码都记为 `cancelled` |
+
+### 派发条件
+
+N-02 在一个事务里按 `priority` 从高到低、创建时间从早到晚挑选第一个满足全部条件的 `queued` 任务：
+
+- 机器管理状态是 `ready`，健康门已关；
+- 项目已启用、仍在平台上存在，所属连接已启用；
+- 执行器槽位：取「后台设定」与「节点心跳声明（按自检收紧）」的较小值，减去运行中的任务，再与请求里的 `available` 取小，至少为 1；CPU 与内存同理；
+- VM 任务要求主机可用内存不小于任务内存加 1,024 MiB，未知时不派；
+- 私有项目只派给信任等级 `high` 的机器；
+- 机器标签包含项目要求的全部标签；机器不在该任务的排除名单里；项目绑定了机器时只派给绑定的机器。
+
+### TaskSpec（ExecutionTask）
+
+N-02 返回的 `ExecutionTask` 是 `TaskRecord` 加上执行用的字段：
+
+- `TaskRecord` 部分：`id`、`project_id`、`demand_id`、`item_id`、`kind`、`executor`、`status`、`priority`、`resources`（`cpu`、`memory_mib`）、`machine_id`、`epoch`、`lease_id`、`head_sha`、`base_sha`、`lease_expires_at`、`result`、`error`、`created_at`、`updated_at`；
+- 执行字段：`task_id`、`lease_id`、`model_token`、`model_pool`（按顺序的 `{ model, effort }`）、`timeout_s`、`bundle_sha256`、`prompt`、`tools`、`api_style`（固定 `openai`）。
+
+`tools` 由 control 按任务类型给出：review、triage、followup 是 `read`、`grep`、`glob`；fix、rework 另加 `edit`、`write`、`bash`。fix、rework 只能派到 `vm`；review、triage、followup 由派发时选择执行器。模型池与预算的来源见 [control 服务契约](../control/README.md)。
+
+节点交给 runner 的只是其中的 `task_id`、`kind`、`executor`、`timeout_s`、`bundle_sha256`、`prompt`、`tools`、`model_pool`，模型令牌另行传递，租约字段不进入 sandbox 和 VM。
+
+### 任务包
+
+N-04 返回的是 `TaskBundle` 的 JSON 字节，sha256 按落库时下发的原样字节计算，最大 20 MiB：
+
+- `files`：仓库文件，每项 `path`、`content`、`encoding`（`utf8` 或 `base64`）；
+- `diff`：变更的 diff；
+- `rules`：base 分支的规则文件，每项 `path`、`content`；
+- `meta`：元数据，必须含固定的 `head_sha` 与 `base_sha`。
+
+control 生成任务包时拒绝不安全路径（绝对路径、`..`、反斜杠、空段）和 `.omp`、`.claude`、`.cursor`、`mcp.json`、`.env*`；runner 解包前按更严的清单再核对一遍（[runner 服务契约](../runner/README.md)）。
+
+### 模型中继的请求体
+
+N-09 先核对：节点令牌有效；`X-Geek-Bot-Lease` 是 32 位十六进制、`X-Geek-Bot-Epoch` 是正整数；租约属于这台机器、`X-Geek-Bot-Task` 等于租约对应的任务；任务在运行中、epoch 一致、租约没过期；任务令牌的哈希等于本租约的令牌。之后：
+
+- 请求体只放行 `model`、`messages`、`tools`、`tool_choice`、`temperature`、`top_p`、`max_tokens`、`stop`、`stream`、`stream_options`、`reasoning_effort`、`n`；`n` 只能是 1，转发前删掉。
+- `model` 必须在本任务的池里；带了 `reasoning_effort` 时必须是池里给这个模型配的档位。
+- `tools` 每项只能是 `type: "function"`；`messages` 必须是数组；`stream` 必须是布尔值。
+- 流式请求强制 `stream_options.include_usage: true`；非流式删掉 `stream_options`。
+- 先占一次请求数，再把 `max_tokens` 封顶为剩余 token；任一预算用完返回 429 `budget_exhausted`。
+- control 记录每个请求的模型、档位、HTTP 状态、耗时与用量，并累计 token。非流式响应打码后返回，流式响应原样转发字节。
+
+runner 发出的实际字段见 [runner 服务契约](../runner/README.md)「omp 配置」。
 
 ## sandbox 与 VM 怎样访问节点
 
-sandbox 和 VM 不直接连 control，只连所在节点的**本地任务端点**。本地任务端点由 node 进程提供，不绑定宿主的任何 TCP 端口；它的消息形状同样放进 `@geek-bot/protocol`（#14、#17），runner 只做 type 导入。节点令牌不进入 sandbox 和 VM。
+sandbox 和 VM 不直接连 control，只连所在节点的本地端点。本地端点由 node 进程提供，不绑定宿主的任何 TCP 端口。节点令牌、租约 id 和 epoch 都不进入 sandbox 和 VM。
 
-| 用途 | sandbox（issue 通道） | VM（PR 通道） |
+| 用途 | sandbox | VM |
 |---|---|---|
-| 连接方式 | 每个槽位一个共享卷，里面一个由 node 监听的 unix socket。sandbox 容器没有网络；runner 在容器的回环地址上起一个转发器，把 omp 的 HTTP 请求转到这个 socket | QEMU 用户态网络的受限模式（`restrict=on`），来宾访问不到宿主和外网。只有两条 guestfwd：QEMU 用户态网络里一个来宾可见的内部地址上的两个端口，分别转到节点的本地模型代理和出网 CONNECT 代理。具体地址与端口由 #17 定，写进 VM 基础镜像的配置，不写成文档里的字面量 |
-| 任务输入 | `GET /v1/task`：任务元数据和模型令牌（只在内存里）；`GET /v1/bundle`：任务包 | 只读原始盘上的 tar（任务包与元数据） |
-| 模型令牌 | 随 `GET /v1/task` 的响应进入内存，不落盘 | 经 `-fw_cfg name=opt/geekbot/token,file=<0600 临时文件>` 传入，不进 qemu 的命令行参数；VM 起来后节点删除临时文件 |
-| 实时事件 | `POST /v1/events`：按行的 JSONL 流 | virtio-serial 通道，一行一个 JSONL 事件 |
-| 结果与产物 | `POST /v1/result`、`PUT /v1/artifacts/{name}` | 写到可写原始盘上的 tar，VM 关机后节点读取 |
-| 模型请求 | `/model/v1/*`，`Authorization: Bearer <模型令牌>` | 经 guestfwd 到本地模型代理的 `/model/v1/*`，同样带模型令牌 |
-| 出网 | 没有 | 只经出网 CONNECT 代理：域名白名单默认只放包管理源，不放 GitHub 的域名；域名解析后拒绝私网、CGNAT、链路本地、回环等地址段（含 IPv6）和部署者配置的组网网段，只连接校验过的那次解析结果；每个任务限制连接数和字节数。GitHub 域名清单和拒绝的地址段以 [SECURITY](../../architecture/SECURITY.md) S-14 为准 |
+| 连接方式 | 每个槽位一个 unix socket `<槽位目录>/sandbox-<n>/node.sock`（0600），经共享卷挂进槽位容器的 `/run/geek-bot/node.sock`。每个请求带 `X-Runner-Session`（runner 进程启动时生成的 UUID） | `-netdev user,restrict=on`，只有两条 guestfwd：QEMU 用户态网络的 guestfwd 地址上的模型端口和出网代理端口，各经 netcat 转到本任务目录里的 `model.sock`、`egress.sock`。节点没有配置出网白名单时不建出网那一条 |
+| 报到 | `POST /v1/hello`：交出隔离证据，响应 `accepted`、`problems` | 探针 VM 的输出盘 `probe-result.json` |
+| 任务输入 | `GET /v1/task?wait=25`：200 `{ task, model_token }` 或 204；`GET /v1/bundle`：任务包原始字节 | 只读原始盘上的 ustar：`task.json`（任务字段与两个端点，不含令牌）、`bundle.json` |
+| 模型令牌 | 随 `/v1/task` 的响应进入 runner 内存 | `-fw_cfg name=opt/geekbot/token,file=<0600 临时文件>`，QMP 可用后节点立即删除临时文件；来宾里只有 root 可读 |
+| 实时事件 | `POST /v1/events { events }`，响应 `{ cancel }` | virtio-serial 端口 `org.geekbot.events`，一行一个 JSON；300 秒内没有任何事件时节点结束 VM |
+| 结果 | `POST /v1/result { result }` 或 `POST /v1/failure { code, message }` | 可写原始盘（32 MiB）上的 `result.json` 或 `failure.json`，VM 关机后节点读取 |
+| 模型请求 | 同一个 socket 的 `/model/v1/chat/completions`、`/model/v1/models`，`Authorization: Bearer <模型令牌>` | 经 guestfwd 到 `model.sock` 的同样路径 |
+| 出网 | 没有网络 | 只经出网 CONNECT 代理，见 [node 服务契约](README.md)「出网代理」 |
+| 取消 | `/v1/events` 响应 `cancel: true`；35 秒内没交结局，节点按 `cancelled` 结束、撤销模型访问并把槽位记为污染 | QMP `system_powerdown`，30 秒后 `quit`，再 5 秒 SIGKILL |
 
-**本地模型代理**：收到 sandbox 或 VM 的模型请求后，先核对模型令牌对应本节点的一个活动租约，再把它移到 `X-Geek-Bot-Task-Token` 头里，加上自己的节点令牌、`lease_id` 和 `epoch`，转成 N-09 发给 control；响应原样流回。节点把本任务模型令牌的原值加进事件打码规则。
+sandbox 的槽位规则：只有通过自检的会话能领任务；同一会话交完结局后被记为退役，必须换新进程（新会话）才算空闲；任务交给槽位 15 秒内没有会话来领，按 `resource_unavailable` 结束并把槽位记为污染。只有领到任务的会话能取任务包、交事件、交结局和调模型。
 
-**事件打码**：节点在事件离开本机前打码，规则是密钥形态正则（`ghp_`、`gho_`、`ghu_`、`github_pat_`、`sk-`、`gbn_`、`gbt_`、`Bearer` 等）加上本任务模型令牌的原值；control 收到后不再假设事件是干净的，写入与推送前再按同一规则扫一遍。
+本地模型代理收到请求后，按常量时间比较 `Authorization` 与本任务的模型令牌，任务已结束或被撤销时返回 401 `task_token_invalid`；通过后把令牌移到 `X-Geek-Bot-Task-Token`，加上节点令牌、租约头和任务头转成 N-09，响应（含 SSE）原样流回。control 返回 401 且不是 `task_token_invalid` 时，节点整体停机。
 
-VM 隔离能否按上表成立（受限用户态网络、guestfwd 吞吐、fw_cfg 传令牌、2 GiB 内存是否够用）未验证，由 #12 实测；不通过时按 [ADR-0004](../../decisions/0004-execution-isolation.md) 的退路改选，并改写本节。
+### 事件打码
 
-## 验证（计划中）
+事件离开节点前打码：节点令牌和在跑任务的模型令牌按原值替换；再按密钥形态替换私钥块、`ghp_`/`gho_`/`ghu_`/`ghs_`/`ghr_`、`github_pat_`、`glpat-`、`sk-`、`gbn_`/`gbt_`、Slack 的 `xox?-`、`AKIA`，以及 `Bearer`、`Basic` 后面的凭据，替换成 `[已打码]`。control 收到后不假设事件干净，入库前按自己的规则再扫一遍。
 
-- 两端 schema 一致：节点消息与 TaskSpec 的 TypeScript 类型和 JSON Schema 由契约测试比对（#11）。
-- epoch 过期的结果、事件、续租返回 409；失联 `lost_after_s` 后两侧对称判定并重排；control 重启后的宽限；重置令牌后旧令牌 401，节点立即停止一切任务；协议版本在 N、N-1 范围外的节点只收心跳；主机健康越线自动 cordon（#11，见 [TESTING](../../conventions/TESTING.md) 回归矩阵）。
-- 领任务的响应丢失后用同一个 `Idempotency-Key` 重试，不出现第二个租约（#11）。
-- 池外模型 403、过期令牌 401、超预算 429（#13）。
-- sandbox 与 VM 里搜不到节点令牌、GitHub 令牌和网关密钥；VM 访问私网和宿主端口全部失败（#12、#14、#17）。
+## 验证状态
+
+#34 已实际执行：
+
+- 真实 HTTP/SQLite 烟雾：双平台项目同步、条目与需求派发、租约栅栏、一次性节点令牌重放 409、viewer 写入 403、重启数据持久；
+- 实际 ControlClient 对真实 control 领取任务、续租、取包并核对 sha256、交事件与结果；可执行 node 注册和心跳、无执行器时保持 cordoned、SIGTERM 退出 0；
+- Core HTTP 回归 8 项、runner 安全回归 99 项、磁盘 spool 回归 18 项。平台与模型上游是隔离夹具，未用真实账号或执行器完成任务。
+
+没有实际验收，不能标为 PASS：
+
+- 带 sandbox 或 VM 执行器的 worker 完整任务，以及 401 整体停机、409 单任务停止、失联销毁与缓存回放的集成演练；
+- 自检（sandbox 报到证据、探针 VM、模型自检）在真实隔离环境里的行为；
+- Linux/KVM 主机上的探针 VM、任务 VM、fw_cfg 令牌、guestfwd、QMP 关机与取消；
+- 节点镜像与 sandbox 镜像的构建，以及 sandbox 端到端执行；
+- 温度、供电等硬件传感器的读数和越线回滞；
+- 完整的节点/control 自动契约矩阵；实际 ControlClient 的本机 smoke 只覆盖上述主路径，不等于已覆盖所有消息边界。
+
+类型检查和源码一致只说明接口对得上，不代替以上任何一项。

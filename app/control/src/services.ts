@@ -8,7 +8,9 @@
  * 5. 清理备份目录里崩溃留下的临时文件，补登记没登记的备份文件；
  * 6. 组装 Fastify（/healthz、/readyz），listen 之后再开运维本地通道和每日备份任务。
  *
- * 停机（SIGTERM、SIGINT）：不再接新请求 → 等进行中的请求、备份做完 → WAL checkpoint(TRUNCATE) → 关库。
+ * 停机（SIGTERM、SIGINT）：不再接新请求 → 停共享平台的后台任务、结束长连接 → 等进行中的请求、备份做完 → WAL checkpoint(TRUNCATE) → 关库。
+ *
+ * 共享平台（src/platform）在迁移之后组装：它的配置或密钥文件不合法同样拒绝启动；listen 之后开定时同步、租约收回与 publisher 对账。
  */
 import { accessSync, constants } from "node:fs";
 import { buildApp, type ControlApp } from "./app.js";
@@ -22,6 +24,8 @@ import { createRedactor, type Redactor } from "./log/redact.js";
 import { createBackupService, OTHER_BACKUPS_KEPT, resetTempDir, type BackupRecord, type BackupService, type RetentionPolicy } from "./ops/backup.js";
 import { ChannelError, createOpsChannel, type OpsChannel } from "./ops/channel.js";
 import { createDailyJobs, type DailyJobs } from "./ops/scheduler.js";
+import { createSharedPlatform, PlatformConfigError, PlatformError, type SharedPlatform } from "./platform/index.js";
+import type { FetchImpl } from "./platform/context.js";
 import type { ReadinessCheck } from "./routes/health/contracts.js";
 import { KeyFileError, keyFileReadable, keyFingerprint, loadKeyFile, type LoadedKey } from "./secrets/key-files.js";
 
@@ -51,6 +55,8 @@ export interface StartOptions {
   readonly opsChannel?: boolean;
   /** 覆盖监听端口（测试用 0 取随机端口）；部署时端口只来自 GEEK_BOT_PORT。 */
   readonly port?: number;
+  /** 共享平台的出网请求实现（GitHub、GitLab、Feishu、模型网关）；测试注入打桩并默认拒绝网络。默认全局 fetch。 */
+  readonly fetchImpl?: FetchImpl;
 }
 
 export interface MigrationSummary {
@@ -81,6 +87,8 @@ export interface ControlHandle {
   readonly migrations: MigrationSummary;
   /** 代码认识的最高迁移编号 C。 */
   readonly codeVersion: number;
+  /** 共享平台（后台 API、节点 API、调度）；库停在只有 0001 的旧版本时（例如回滚测试）为 null。 */
+  readonly platform: SharedPlatform | null;
   /** 监听端口，返回地址；随后开运维本地通道与每日任务。 */
   listen(): Promise<string>;
   /** 优雅停机；重复调用返回同一个结果。 */
@@ -259,6 +267,20 @@ export async function startControl(options: StartOptions): Promise<ControlHandle
     const app = buildApp({ logger, readiness, shuttingDown: () => shuttingDown });
     const jobs = createDailyJobs({ backups, clock, hourUtc: config.behavior.backupHourUtc, keepWeekly: config.behavior.backupKeepWeekly, logger });
 
+    // 共享平台需要 0002 的表；默认迁移目录下迁移已全部执行，只有测试用旧迁移目录模拟上一版代码时才没有。
+    let platform: SharedPlatform | null = null;
+    if (db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'tasks'").get()) {
+      try {
+        platform = createSharedPlatform({ db, masterKey: keys.master.key, backupKey: keys.backup.key, env: options.env, deployment, clock, redactor, logger, fetchImpl: options.fetchImpl, cwd: options.cwd });
+      } catch (error) {
+        if (error instanceof PlatformConfigError) return fail(error.problems);
+        throw error;
+      }
+      platform.register(app);
+    } else {
+      logger.warn("库里没有共享平台的表（迁移停在 0002 之前）：不注册后台 API 与节点 API");
+    }
+
     const handle: ControlHandle = {
       app,
       db,
@@ -268,6 +290,7 @@ export async function startControl(options: StartOptions): Promise<ControlHandle
       backups,
       jobs,
       codeVersion,
+      platform,
       migrations: Object.freeze({ before, applied, preMigrationBackup: preMigrationBackup?.file ?? null, databaseNewer: plan.databaseNewer }),
       async listen() {
         const address = await app.listen({ host: deployment.host, port: options.port ?? deployment.port });
@@ -291,12 +314,23 @@ export async function startControl(options: StartOptions): Promise<ControlHandle
                 }
                 return { report: await backups.verify(file, { type: "cli" }) };
               },
+              "/v1/bootstrap-code": async body => {
+                if (Object.keys(body).length > 0) throw new ChannelError(400, "validation_failed", "bootstrap-code 不接受参数");
+                if (!platform) throw new ChannelError(409, "not_ready", "共享平台没有启用");
+                try {
+                  return platform.bootstrapCode();
+                } catch (error) {
+                  if (error instanceof PlatformError) throw new ChannelError(error.status, error.code, error.message);
+                  throw error;
+                }
+              },
             },
             logger,
           );
           await channel.listen();
         }
         if (options.dailyJobs !== false) jobs.start();
+        platform?.start();
         logger.info(
           { address, instance_role: deployment.instanceRole, app_version: deployment.appVersion, user_version: readSchemaState(db, codeVersion).userVersion, code_version: codeVersion },
           "control 已启动",
@@ -309,6 +343,7 @@ export async function startControl(options: StartOptions): Promise<ControlHandle
         shutdownPromise = (async () => {
           logger.info({ reason }, "开始停机：不再接新请求，等进行中的请求和备份做完");
           jobs.stop();
+          await platform?.stop();
           await app.close();
           await channel?.close();
           await jobs.idle();

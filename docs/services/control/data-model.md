@@ -1,554 +1,91 @@
 # control 数据模型
 
-> control 的 SQLite 库：每张表的用途、主要列、索引、写入模块、保留期和密文列，以及迁移与兼容版本、备份与每日恢复校验、从 GitHub 重建状态的规则。
+> control 的 SQLite 表、密文与租约字段、去重约束，以及只扩不缩的迁移、加密备份和恢复边界。
 
-状态：`proposed` · 更新：2026-09-26 · 适用：`app/control` 的 SQLite 库与数据卷（由 #3 起实现，各表随对应 issue 以新迁移加入）
+状态：`current` · 更新：2026-10-03 · 适用：`app/control` 的 SQLite 库（#3 基础表、#34 共享平台）
 
-#3 引入了 better-sqlite3，第一个迁移 `0001_foundation.sql` 建了表清单里标 #3 的 7 张表；其余表还没有，随对应 issue 以新迁移加入。本文是实现目标：表名、列名照这里写；实现时发现要改，先改本文再改代码。来源是 [ARCHITECTURE](../../architecture/ARCHITECTURE.md)「数据」、[ADR-0003](../../decisions/0003-single-writer-control.md)（单进程单写者）和 [ADR-0008](../../decisions/0008-sqlite-migrations-recovery.md)（迁移、备份与重建）；后台 API 需要的版本号和幂等记录来自 [API](../../architecture/API.md)，节点与令牌的状态来自 [节点协议](../node/protocol.md)，密钥的存放来自 [SECURITY](../../architecture/SECURITY.md)。
-
-表名用 snake_case，与架构草案一致。草案之外新增了 7 张表：`schema_migrations`、`repo_overrides`、`node_tokens`、`task_results`、`backups`、`revisions`、`idempotency_keys`；任务事件表沿用草案的 `task_events`，审计表沿用 `audit_logs`。配置项名和默认值见 [默认行为与配置项](behavior.md)。
+结构来源是 `app/control/src/db/migrations/0001_foundation.sql` 与 `0002_shared_platform.sql`；写入语义来源是 `src/platform/`、`src/publisher/` 和 `src/ops/`。#34 按 [ADR-0012](../../decisions/0012-shared-cross-platform-workspace.md) 用连接、项目、需求和共享机器池取代单机器人账号设计。本文描述源码，不证明真实外部账号、KVM 或正式恢复已验收。
 
 ## 存储与通用约定
 
-- **一个环境一个库。** 容器内 `/data/geek-bot.db`（`GEEK_BOT_DB_PATH`），放在该环境自己的命名卷里；preview 与 production 各一个库，互不共享。镜像里 `/data` 属运行用户、权限 0700（#3）；compose 里的命名卷随 #7。
-- **只有 control 进程写库。** console、node、runner、部署脚本都不打开库。#3 定稿的做法：control 以 `locking_mode=EXCLUSIVE` 打开库，第一次访问后一直持有文件锁到关库为止，同一个库的任何别的连接或进程都打不开（等满 `busy_timeout` 后 SQLITE_BUSY）；会写库的 CLI 子命令（`backup`、`verify-backup`，以后的 `bootstrap-code`）经容器内的本地通道（`<库所在目录>/run/control.sock`，unix socket 上的 HTTP，`run/` 权限 0700）交给运行中的 control 执行，CLI 自己不开写连接；control 没在运行时，CLI 以同样的独占方式打开库自己执行，拿不到锁就失败。`restore` 与 `rotate-master-key` 只在 control 停止时以独占方式运行（#20、#5）。实现与测试见 [control 服务契约](README.md)「运维命令与单写者」。
-- **连接参数。** `journal_mode=WAL`、`synchronous=FULL`、`foreign_keys=ON`、`busy_timeout=5000`（毫秒），加上 `locking_mode=EXCLUSIVE`（见上一条；WAL 下先设独占再访问库，SQLite 不建 `-shm` 文件）。停机时 `wal_checkpoint(TRUNCATE)` 后关库。
-- **类型。**
-  - 时间：`INTEGER`，UTC 的 Unix 毫秒，列名以 `_at` 结尾。
-  - 布尔：`INTEGER`，`CHECK (x IN (0, 1))`。
-  - 枚举：`TEXT` 加 `CHECK` 列出取值；取值要扩充时按「迁移规则」重建表。
-  - JSON：`TEXT`，列名以 `_json` 结尾，写入前按 `@geek-bot/protocol` 的 schema 或本文说明校验。
-  - GitHub 的用户、组织、仓库按数字 id 识别；login 和仓库名只用于显示，每次发现时刷新。仓库和节点另有本库的自增 id（API 里的 `repo_id`、`node_id`），其它表按它关联。
-  - 任务 id、租约 id 是 `TEXT` 随机 id（至少 128 位随机，编码 #8 定），会出现在节点协议和隐藏标记里；其余表用 `INTEGER` 自增主键。
-- **密文列**（列名以 `_ct` 结尾）：AES-256-GCM，每个值用独立的随机 nonce，列里依次存 nonce、密文和认证标签，同一行存 `key_version`。master key 以文件挂载，不进库、不进备份（[SECURITY](../../architecture/SECURITY.md) S-01）。`rotate-master-key` 在一个事务里重新加密全部密文并提升 `key_version`。
-- **哈希列**（列名以 `_hash` 结尾）：对高熵随机令牌存 SHA-256，比较用常量时间；明文只在生成时显示一次，或只在内存里。
-- **库里不存**：master key、会话签名密钥、备份加密密钥、OAuth client secret、模型网关密钥（都是 `*_FILE` 文件）；会话 id、认领码、登录流程 cookie、节点令牌、每任务模型令牌的明文。
-- **库外文件**：同一个卷下的 `mirrors/`（镜像克隆）、`bundles/`（任务包）、`tasks/<任务 id>/`（事件原文 `events.jsonl.gz`、补丁等产物）、`backups/`（加密备份，#3）、`run/`（运维本地通道的 socket，#3）、`tmp/`（备份与恢复校验的明文临时文件，权限 0700，control 启动时清空，#3）。它们的保留期写在对应的表下面。库、备份和事件文件里有仓库内容和任务输出，按实例数据对待：不进仓库、不进镜像、不进日志（ADR-0008）。
+- 每个环境有自己的 `GEEK_BOT_DB_PATH`、密钥和数据卷，preview 与 production 不共享。
+- control 是唯一写者。连接参数为 `journal_mode=WAL`、`synchronous=FULL`、`foreign_keys=ON`、`busy_timeout=5000`、`locking_mode=EXCLUSIVE`；第二个连接拿不到锁。运维写命令经库目录的 `run/control.sock` 交给运行中的 control，离线时独占打开库。
+- 时间是 UTC Unix 毫秒 `INTEGER`；布尔和枚举用 `CHECK`；JSON 用 `TEXT`，列名以 `_json` 结尾。SQL 值参数化，动态列名只从代码白名单取。
+- 后台管理员按 GitHub 数字 id 识别。项目用连接 id 与平台 external id 稳定识别；名称和平台路径用于显示与读取，不承担授权身份。
+- 平台凭据存 `connection_credentials.credentials_ct` 的 AES-256-GCM 密文，短期 device code 存 `oauth_flows.device_code_ct`。只有 control 的相应读取或 publisher 路径解密；主密钥不进库或备份。
+- 会话、认领票据、节点令牌和任务模型令牌只存 SHA-256 哈希。会话 cookie 另用独立 session key 签名。master、backup、session、OAuth secret 和模型 gateway key 经文件提供，不能混用。
+- control 库目录有 `backups/`、`run/` 和 `tmp/`；任务包、结果和事件目前存库。节点的磁盘 spool 是转发缓冲，不是业务数据库。
 
-## 表清单
+## 当前表清单
 
-「写入模块」都在 control 进程里，对应 [control 服务契约](README.md)「计划中的模块与对应 issue」。
+两次迁移共建 24 张表。`0002` 是 `shrink=false` 的新增表迁移，不修改 `0001` 的表结构；兼容版本沿用原值。不存在单独的 `bot_account`、`repos`、`nodes`、`leases`、`task_results` 或 `outbox` 表。
 
-| 表 | 用途 | 写入模块 | 保留期 | 密文或哈希 | 实现 |
-|---|---|---|---|---|---|
-| `schema_migrations` | 已应用的迁移、校验和、兼容版本 | 迁移器 | 永久 | — | #3 |
-| `settings` | 后台保存的全局配置与暂停开关 | 后台设置、暂停 | 永久；删行即恢复默认 | — | #3 |
-| `revisions` | 配置类资源的版本号（`ETag` / `If-Match`） | 各配置路由 | 永久 | — | #3 |
-| `idempotency_keys` | 创建类请求的幂等记录 | 后台 API | 24 小时 | 哈希 | #3 |
-| `admins` | 后台账号与角色 | 登录、管理员 | 永久；移除后保留行 | — | #5 |
-| `sessions` | 后台会话 | 登录 | 登出、移除管理员或过期后删除 | 哈希 | #5 |
-| `bootstrap_codes` | 首次认领码 | 登录 | 用过、作废或过期后删除 | 哈希 | #5 |
-| `oauth_flows` | 进行中的 device flow 与 web flow | 登录、机器人绑定 | 完成或过期后删除 | 密文、哈希 | #5 |
-| `bot_account` | 机器人账号与加密令牌（单行） | 机器人绑定、GitHub 读取层 | 当前一行；解绑后清空密文 | 密文 | #5 |
-| `orgs` | 机器人所在组织与访问状态 | 发现 | 永久 | — | #6 |
-| `repos` | 仓库、权限、能力开关、写入模式、暂停 | 发现、后台仓库 | 永久；`lost` 也保留 | — | #6 |
-| `repo_overrides` | 后台对单个仓库的配置覆盖 | 后台仓库 | 永久；删行即回到下一层 | — | #10 |
-| `repo_profiles` | 每个仓库合并后的规则画像与建议画像 | 规则 | 只存当前一份 | — | #10 |
-| `poll_cursors` | 条件请求的 ETag 与下次轮询时间 | 发现、轮询 | 跟随仓库 | — | #6、#8 |
-| `items` | 每个 issue 与 PR 的状态、静默计时、已审 head | 轮询、受理、publisher | 永久 | — | #8 |
-| `threads` | issue 的等回复状态机：追问轮次、到期时间 | 受理与跟进、确定性动作 | 跟随 `items` | — | #16 |
-| `bot_writes` | 机器人自己的写入，用来识别自身活动 | publisher | 未定（#9） | — | #9 |
-| `tasks` | 任务队列与任务状态 | 受理、调度、节点 API、publisher | 永久 | — | #8 |
-| `leases` | 租约与 epoch | 调度、节点 API | 同 `tasks` | — | #11 |
-| `task_events` | 任务事件摘要（原文在库外文件） | 节点 API | 30 天 | — | #14 |
-| `task_results` | 节点回报的结构化结果 | 节点 API | 状态永久；内容 30 天 | — | #11、#14 |
-| `model_attempts` | 每次模型尝试与中继请求 | 模型中继、节点 API | 30 天 | — | #13、#14 |
-| `model_pools` | 按任务类型的模型池 | 后台模型池 | 永久 | — | #13 |
-| `relay_tokens` | 每任务模型令牌 | 调度、模型中继 | 吊销后删除 | 哈希 | #13 |
-| `nodes` | 工作节点、槽位、信任等级、最近健康数据 | 后台节点、节点 API | 永久；移除后保留行 | — | #11 |
-| `node_tokens` | 节点令牌 | 后台节点 | 永久 | 哈希 | #11 |
-| `node_health_samples` | 节点健康曲线，每分钟一点 | 节点 API | 7 天 | — | #11 |
-| `outbox` | 待写与已写的 GitHub 写入 | publisher | 非终态不删；终态未定（#9） | — | #9 |
-| `bot_branches` | 机器人推过的分支与最近推送的提交 | publisher | 永久 | — | #18 |
-| `alerts` | 告警 | 运维与各模块 | 已解决的未定（#20） | — | #3、#20 |
-| `audit_logs` | 审计记录，只追加 | 各模块经同一个审计函数 | 永久 | — | #3 |
-| `backups` | 备份文件登记与恢复校验结果 | 运维 | 跟随备份文件 | — | #3 |
-
-共 32 张表。库执行到第几号迁移用 `PRAGMA user_version` 记录，兼容版本记在 `schema_migrations`（见「迁移规则」）。
-
-## 各表的列
-
-下面只列主要列；`id INTEGER PRIMARY KEY` 这类自增主键不再逐表解释。
-
-### 库版本、设置与 API 记录
-
-**`schema_migrations`**：已应用的迁移，一个文件一行。
-
-| 列 | 类型与约束 | 说明 |
+| 表 | 主要内容与约束 | 写入者 |
 |---|---|---|
-| `version` | `INTEGER PRIMARY KEY` | 迁移编号 NNNN；最大值等于 `PRAGMA user_version` |
-| `name` | `TEXT NOT NULL` | 文件名 `NNNN_<slug>.sql` |
-| `sha256` | `TEXT NOT NULL` | 文件内容哈希；启动时和代码里的同名文件比对 |
-| `shrink` | `INTEGER NOT NULL`，布尔 | 1 表示这是收缩类迁移（删列、改语义），要有 ADR 批准 |
-| `compat_version` | `INTEGER NOT NULL` | 应用这个迁移之后库的兼容版本：收缩类迁移等于自己的编号，其余沿用前一个迁移的值（`0001` 为 0） |
-| `app_version` | `TEXT NOT NULL` | 执行这次迁移的镜像版本 |
-| `applied_at` | `INTEGER NOT NULL` | |
-
-库当前的兼容版本就是编号最大那一行的 `compat_version`。
-
-**`settings`**：后台「设置」页保存的全局值和运行时的暂停开关。
-
-| 列 | 类型与约束 | 说明 |
-|---|---|---|
-| `key` | `TEXT PRIMARY KEY` | behavior.md 配置项一览里的环境变量名（如 `GEEK_BOT_QUIET_WINDOW_SECONDS`）或设置键（如 `review.own_prs`、`priority.pr`）；另有暂停开关 `pause.global`、`pause.channel.issue`、`pause.channel.pr`、`pause.writes` |
-| `value_json` | `TEXT NOT NULL` | 保存前按该项的取值范围校验；暂停开关的值是 `{paused, reason, auto, at}` |
-| `updated_by` | `INTEGER` | 管理员的 GitHub id；自动触发的暂停为空 |
-| `updated_at` | `INTEGER NOT NULL` | |
-
-behavior.md 里标「只读」的项只认环境变量，不写进这张表（API 返回 `setting_locked`）；以 `_FILE` 结尾的键和任何密钥都拒绝保存。每次修改写 `audit_logs`。
-
-**`revisions`**：配置类资源的版本号。后台 GET 响应的 `ETag` 取这里的值，PUT、PATCH 带的 `If-Match` 与它比对，不符返回 412（[API](../../architecture/API.md)「幂等」）。
-
-| 列 | 类型与约束 | 说明 |
-|---|---|---|
-| `scope` | `TEXT PRIMARY KEY` | `settings`、`model_pool/<任务类型>`、`repo/<repo_id>/switches`、`repo/<repo_id>/overrides`、`repo/<repo_id>/suggestion`、`node/<node_id>` |
-| `revision` | `INTEGER NOT NULL` | 每次修改加 1，与资源本身在同一个事务里更新 |
-| `updated_at` | `INTEGER NOT NULL` | |
-
-**`idempotency_keys`**：创建类请求（邀请管理员、重新排队、接受协作邀请、生成节点令牌、重置节点令牌）的幂等记录。
-
-| 列 | 类型与约束 | 说明 |
-|---|---|---|
-| `github_id`、`route`、`key` | `INTEGER NOT NULL`、`TEXT NOT NULL`、`TEXT NOT NULL` | 会话账号、路由和 `Idempotency-Key`；主键 `(github_id, route, key)` |
-| `request_hash` | `TEXT NOT NULL` | 请求体的 SHA-256；同一个 key 配不同请求体返回 409 |
-| `status` | `INTEGER NOT NULL` | 第一次响应的状态码 |
-| `response_json` | `TEXT` | 第一次响应的响应体；返回一次性密钥的端点**不存**这个字段，重放时返回 409 `secret_already_issued` |
-| `created_at` | `INTEGER NOT NULL` | 24 小时后删除 |
-
-### 后台身份与会话
-
-**`admins`**：能登录后台的账号。角色分三种：`owner`（认领实例的账号，只有一个；默认路径下它同时是机器人账号）、`operator`、`viewer`（后两种由 owner 按 GitHub 数字 id 邀请，[ADR-0002](../../decisions/0002-github-identity.md)）。
-
-| 列 | 类型与约束 | 说明 |
-|---|---|---|
-| `github_id` | `INTEGER PRIMARY KEY` | 按数字 id 判定，不按 login |
-| `login` | `TEXT` | 最近一次看到的 login，登录时刷新；受邀还没登录过时为空 |
-| `role` | `TEXT NOT NULL CHECK (role IN ('owner','operator','viewer'))` | 部分唯一索引 `UNIQUE (role) WHERE role = 'owner'` 保证只有一个 owner |
-| `invited_by` | `INTEGER REFERENCES admins(github_id)` | owner 为空 |
-| `note` | `TEXT` | 邀请时的备注 |
-| `created_at`、`last_login_at` | `INTEGER` | |
-| `removed_at` | `INTEGER` | 被移除时写，同时删除他的全部会话；行保留，审计和其它表的引用不断 |
-
-**`sessions`**：浏览器的 `gb_session` 只放随机会话 id，库里只存它的哈希。
-
-| 列 | 类型与约束 | 说明 |
-|---|---|---|
-| `sid_hash` | `BLOB PRIMARY KEY` | 会话 id 的 SHA-256 |
-| `github_id` | `INTEGER NOT NULL REFERENCES admins(github_id)` | |
-| `created_at`、`last_seen_at` | `INTEGER NOT NULL` | 空闲 2 小时过期，按 `last_seen_at` 算 |
-| `expires_at` | `INTEGER NOT NULL` | 最长 12 小时 |
-| `reauth_at` | `INTEGER` | 最近一次重新认证；高危操作要求 10 分钟内 |
-
-索引：`(github_id)`、`(expires_at)`。登出、移除管理员、解绑机器人时删除对应的行，过期的行由清理任务删除。
-
-**`bootstrap_codes`**：首次认领码。明文只打印到目标机终端，不写日志；再次生成会作废旧码（S-10）。
-
-| 列 | 类型与约束 | 说明 |
-|---|---|---|
-| `code_hash` | `BLOB NOT NULL UNIQUE` | 认领码的 SHA-256 |
-| `claim_cookie_hash` | `BLOB` | 认领码通过后下发的 `gb_claim` 的 SHA-256 |
-| `created_at`、`expires_at` | `INTEGER NOT NULL` | 15 分钟有效 |
-| `used_at`、`used_by` | `INTEGER` | 认领成功的时间和 GitHub id |
-| `revoked_at` | `INTEGER` | 被新生成的码作废 |
-
-**`oauth_flows`**：进行中的授权流程，每行只活几分钟。`gb_flow` cookie 把一次 flow 绑定到发起它的浏览器。
-
-| 列 | 类型与约束 | 说明 |
-|---|---|---|
-| `id` | `TEXT PRIMARY KEY` | API 里的 `flow_id` |
-| `purpose` | `TEXT NOT NULL CHECK (purpose IN ('claim','login','reauth','bot_reauthorize'))` | 取值同 API 的 A-03、A-05 |
-| `flow` | `TEXT NOT NULL CHECK (flow IN ('device','web'))` | |
-| `flow_cookie_hash` | `BLOB NOT NULL` | `gb_flow` 的 SHA-256 |
-| `bootstrap_code_id`、`session_sid_hash` | `INTEGER`、`BLOB` | 发起方：`claim` 是认领码，其余是会话 |
-| `device_code_ct` | `BLOB` | device flow 的 device_code，密文 |
-| `user_code` | `TEXT` | 给人输入的短码，不是密钥 |
-| `pkce_verifier_ct` | `BLOB` | web flow 的 PKCE verifier，密文 |
-| `state_hash` | `BLOB` | web flow 的 state 的 SHA-256 |
-| `key_version` | `INTEGER` | 密文列用的 master key 版本 |
-| `created_at`、`expires_at`、`completed_at` | `INTEGER` | `expires_at` 取 GitHub 返回的过期时间 |
-
-### 机器人账号与仓库
-
-**`bot_account`**：单行表。机器人令牌只以密文存在这里，只有 publisher 和 GitHub 读取层能解密（S-01）。
-
-| 列 | 类型与约束 | 说明 |
-|---|---|---|
-| `id` | `INTEGER PRIMARY KEY CHECK (id = 1)` | 单行 |
-| `github_id`、`login` | `INTEGER NOT NULL`、`TEXT NOT NULL` | 重新授权时新令牌必须属于同一个 GitHub id |
-| `token_kind` | `TEXT NOT NULL CHECK (token_kind IN ('oauth','classic_pat'))` | classic PAT 是兜底，默认关闭 |
-| `token_ct` | `BLOB` | 机器人令牌密文；解绑后置空 |
-| `key_version` | `INTEGER` | |
-| `scopes` | `TEXT NOT NULL` | 最近一次 `X-OAuth-Scopes` 原文 |
-| `token_status` | `TEXT NOT NULL CHECK (token_status IN ('valid','invalid','revoked','scope_changed','unknown'))` | 取值同 API 的 A-12；解绑后为 `revoked` |
-| `bound_by` | `INTEGER NOT NULL REFERENCES admins(github_id)` | |
-| `bound_at`、`verified_at` | `INTEGER` | `verified_at`：每天 `GET /user` 校验一次 |
-
-「暂停全部写入」不在这张表，存在 `settings` 的 `pause.writes`（behavior B-55）。
-
-**`orgs`**：机器人所在的组织。
-
-| 列 | 类型与约束 | 说明 |
-|---|---|---|
-| `github_id` | `INTEGER PRIMARY KEY` | |
-| `login` | `TEXT NOT NULL` | |
-| `membership_role` | `TEXT CHECK (membership_role IN ('member','admin'))` | `admin` 时后台标红 |
-| `access_state` | `TEXT NOT NULL CHECK (access_state IN ('ok','oauth_restricted','unknown'))` | `oauth_restricted`：是成员，但仓库列表里没有该组织的私有仓库，需要组织批准 OAuth App |
-| `checked_at`、`lost_at` | `INTEGER` | 不再是成员时写 `lost_at` |
-
-**`repos`**：机器人能访问的仓库。能力开关放在这里（热路径、结构固定），其它按仓库的配置放在 `repo_overrides`；条件请求的 ETag 放在 `poll_cursors`，因为一个仓库有多个游标。
-
-| 列 | 类型与约束 | 说明 |
-|---|---|---|
-| `id` | `INTEGER PRIMARY KEY` | API 里的 `repo_id` |
-| `github_id` | `INTEGER NOT NULL UNIQUE` | 改名、转移后不变 |
-| `owner_id` | `INTEGER NOT NULL` | 所有者（用户或组织）的 GitHub id |
-| `owner_login`、`name` | `TEXT NOT NULL` | 显示和 API 路径用，发现时刷新 |
-| `private`、`fork` | `INTEGER NOT NULL`，布尔 | |
-| `default_branch` | `TEXT NOT NULL` | |
-| `permission` | `TEXT NOT NULL CHECK (permission IN ('pull','triage','push','maintain','admin'))` | 来自 `permissions` 字段，每 10 分钟刷新 |
-| `assignable` | `INTEGER`，布尔 | 可分配检查的结果（204 为 1，404 为 0）；未检查为空 |
-| `state` | `TEXT NOT NULL CHECK (state IN ('active','archived','lost'))` | `archived`：GitHub 上已归档，只读，只监控、不做动作（B-05）；`lost`：失去访问权，优先于 `archived` |
-| `sw_monitor`、`sw_review`、`sw_triage`、`sw_fix`、`sw_rework` | `INTEGER NOT NULL`，布尔 | 后台开关（B-01、B-02）；新仓库的 `sw_monitor` 按环境变量，其余为 0 |
-| `write_mode` | `TEXT NOT NULL DEFAULT 'off' CHECK (write_mode IN ('off','dry_run','on'))` | 后台设置（B-03）；生效值还要和其它层取更严 |
-| `paused` | `INTEGER NOT NULL DEFAULT 0`，布尔 | 仓库范围的暂停 |
-| `last_activity_at` | `INTEGER` | 最近一次条目变动，决定是否降频（B-08） |
-| `discovered_at`、`refreshed_at`、`lost_at` | `INTEGER` | |
-
-索引：`(owner_login, name)`（不唯一，改名转移的过渡期可能重名）、`(state)`。开关的版本号在 `revisions` 的 `repo/<repo_id>/switches`。
-
-**`repo_overrides`**：后台对单个仓库的配置覆盖，是配置优先级里的第 2 层（behavior.md「配置的来源与优先级」）。
-
-| 列 | 类型与约束 | 说明 |
-|---|---|---|
-| `repo_id` | `INTEGER NOT NULL REFERENCES repos(id)` | |
-| `key` | `TEXT NOT NULL` | behavior.md 的设置键，如 `followup.remind_after_days`；主键 `(repo_id, key)` |
-| `value_json` | `TEXT NOT NULL` | 保存前校验 |
-| `updated_by` | `INTEGER NOT NULL REFERENCES admins(github_id)` | 改仓库覆盖只归 owner，要求重新认证（清单见 [SECURITY](../../architecture/SECURITY.md) S-09） |
-| `updated_at` | `INTEGER NOT NULL` | |
-
-**`repo_profiles`**：每个仓库合并后的规则画像，只从 base 分支按 blob sha 读取（[ADR-0005](../../decisions/0005-rules-from-base-branch.md)）。
-
-| 列 | 类型与约束 | 说明 |
-|---|---|---|
-| `repo_id` | `INTEGER PRIMARY KEY REFERENCES repos(id)` | |
-| `base_ref`、`base_sha` | `TEXT NOT NULL` | 读规则用的分支和当时的提交 |
-| `sources_json` | `TEXT NOT NULL` | 每个来源文件的路径和 blob sha（缓存键），包括组织 `.github` 仓库的来源：`.github/geek-bot.yml`，以及目标仓库没有时回退使用的 CONTRIBUTING、issue 模板、PR 模板（B-07） |
-| `profile_json` | `TEXT NOT NULL` | 合并后的机器可执行字段（RepoProfile，schema 由 #10 定） |
-| `suggested_json` | `TEXT` | 从散文规范提取的建议画像；版本号在 `revisions` 的 `repo/<repo_id>/suggestion` |
-| `confirmed_by`、`confirmed_at` | `INTEGER` | owner 确认影响写入的字段；为空时该仓库修复通道关闭（B-07） |
-| `built_at` | `INTEGER NOT NULL` | |
-
-**`poll_cursors`**：条件请求的游标。
-
-| 列 | 类型与约束 | 说明 |
-|---|---|---|
-| `scope` | `TEXT PRIMARY KEY` | `repo/<repo_id>/issues`、`repo/<repo_id>/pulls`、`discovery/user_repos/<页>`、`discovery/user_orgs`、`discovery/memberships` |
-| `repo_id` | `INTEGER REFERENCES repos(id)` | 发现类游标为空 |
-| `etag` | `TEXT` | 上一次 200 响应的 ETag |
-| `polled_at`、`changed_at` | `INTEGER` | `changed_at`：最近一次返回 200 |
-| `next_poll_at` | `INTEGER NOT NULL` | 按 B-08、B-09 算 |
-
-索引：`(next_poll_at)`。仓库变成 `lost` 后删除它的游标。
-
-### 条目与等回复
-
-**`items`**：每个 issue 和 PR 一行。静默计时、已审 head、人是否重开过都在这里；等回复的状态机在一对一的 `threads` 表。
-
-| 列 | 类型与约束 | 说明 |
-|---|---|---|
-| `repo_id`、`number` | `INTEGER NOT NULL` | `UNIQUE (repo_id, number)` |
-| `kind` | `TEXT NOT NULL CHECK (kind IN ('issue','pr'))` | |
-| `author_id` | `INTEGER NOT NULL` | |
-| `by_bot` | `INTEGER NOT NULL`，布尔 | 机器人账号开的（B-16） |
-| `from_fork` | `INTEGER`，布尔 | PR 的 head 在 fork 仓库（B-17） |
-| `state` | `TEXT NOT NULL CHECK (state IN ('open','closed','merged'))` | |
-| `draft` | `INTEGER`，布尔 | |
-| `head_sha`、`base_ref` | `TEXT` | PR 当前的 head 和目标分支 |
-| `assignee_ids_json`、`labels_json` | `TEXT NOT NULL` | 接不接的判定用 |
-| `linked_prs_json` | `TEXT` | issue 的开着的关联 PR 编号（behavior.md「关联 PR」） |
-| `gh_updated_at` | `INTEGER NOT NULL` | GitHub 的 `updated_at` |
-| `last_human_at` | `INTEGER` | 最后一次非机器人变动，静默窗口起点（B-10、B-11） |
-| `eligible_at` | `INTEGER` | `last_human_at` 加静默窗口 |
-| `intake` | `TEXT NOT NULL CHECK (intake IN ('pending','queued','skipped','waiting','done'))` | 受理状态 |
-| `skip_reason`、`next_check_at` | `TEXT`、`INTEGER` | 不接的原因和下次检查时间，后台「未接的 issue」显示 |
-| `reviewed_head_sha`、`last_review_at` | `TEXT`、`INTEGER` | 最近一次已发出的审查（B-19、B-20）；对应的 outbox 行 `confirmed` 后写 |
-| `human_reopened_at` | `INTEGER` | 人重开 issue 的时间；非空时机器人不再关（B-37） |
-| `merged_at`、`closed_at` | `INTEGER` | |
-
-索引：`(repo_id, state)`、`(intake, eligible_at)`。
-
-**`threads`**：issue 的等回复与关闭状态，只对 issue。追问过的 issue 有一行；机器人没追问就直接关闭的（价值不高、重复），关闭时建一行，`rounds` 为 0。到期时间在追问发出时按当时的配置算好落库，之后改天数只影响新的追问。
-
-| 列 | 类型与约束 | 说明 |
-|---|---|---|
-| `item_id` | `INTEGER PRIMARY KEY REFERENCES items(id)` | |
-| `status` | `TEXT NOT NULL CHECK (status IN ('waiting','replied','resolved','closed'))` | `waiting` 等回复；`replied` 收到回复待跟进；`resolved` 已说清楚，转入受理或改写；`closed` 机器人已关闭 |
-| `rounds` | `INTEGER NOT NULL DEFAULT 0` | 已追问轮数，不超过 `max_rounds`（B-34） |
-| `asked_at` | `INTEGER` | 本轮追问在 GitHub 上确认发出的时间，计时起点 |
-| `remind_at`、`close_at` | `INTEGER` | 本轮的提醒和关闭时间（B-32、B-33） |
-| `reminded_at` | `INTEGER` | 本轮已提醒 |
-| `body_sha256` | `TEXT` | 追问时的正文哈希，用来判断作者是否改了正文（B-31） |
-| `replied_at`、`replied_by` | `INTEGER` | |
-| `rewritten_to` | `INTEGER` | 改写后新 issue 的编号（B-36） |
-| `close_reason` | `TEXT CHECK (close_reason IN ('no_reply','unclear_after_followup','low_value','duplicate','superseded_by_rewrite'))` | 机器人关闭的原因，与 [写入白名单](write-whitelist.md) W-08 的 `close_reason` 逐字一致：到期无人回复（B-33）、追问轮数用完仍不清楚（B-34）、价值不高（B-35）、重复（B-35）、被改写重开的新 issue 取代（B-36） |
-
-索引：`(status, remind_at)`、`(status, close_at)`。确定性动作按这两个索引扫描到期的线程。
-
-**`bot_writes`**：机器人自己的写入。轮询看到这些写入时不重新计时静默窗口（B-11）。
-
-| 列 | 类型与约束 | 说明 |
-|---|---|---|
-| `repo_id` | `INTEGER REFERENCES repos(id)` | 不落在仓库上的写入（接受邀请、吊销令牌）为空 |
-| `number` | `INTEGER` | 所在的 issue 或 PR；推送时为空 |
-| `kind` | `TEXT NOT NULL CHECK (kind IN ('review','comment','comment_edit','label','close','issue_create','push','pr_create','invitation','token_revoke'))` | |
-| `github_ref` | `TEXT` | 写入对象在 GitHub 上的 id：评论 id、review id、提交 SHA 或新 issue 编号 |
-| `outbox_id` | `INTEGER REFERENCES outbox(id)` | |
-| `written_at` | `INTEGER NOT NULL` | GitHub 返回的时间 |
-
-outbox 行在对象 id 和标记写进这张表后才算 `confirmed`。索引：`(repo_id, number, written_at)`。保留期由 #9 按体积定，至少要长于静默窗口加一个轮询间隔；定之前不自动删除。
-
-### 任务与执行
-
-**`tasks`**：任务队列。派发时在同一个事务里改 `tasks` 并写 `leases`（ADR-0003）。
-
-| 列 | 类型与约束 | 说明 |
-|---|---|---|
-| `id` | `TEXT PRIMARY KEY` | 随机 id，出现在节点协议和隐藏标记里 |
-| `item_id` | `INTEGER REFERENCES items(id)` | 规则画像提取任务为空 |
-| `repo_id` | `INTEGER NOT NULL REFERENCES repos(id)` | |
-| `kind` | `TEXT NOT NULL CHECK (kind IN ('review','triage','followup','fix','rework','profile'))` | 前五种同 `@geek-bot/protocol` 的 `TASK_KINDS`；`profile` 由 #10 加进 protocol |
-| `channel`、`executor` | `TEXT NOT NULL` | `issue`/`pr`、`sandbox`/`vm`，取值同 protocol |
-| `reason`、`priority` | `TEXT NOT NULL`、`INTEGER NOT NULL` | 入队来由（如 `review_others_pr`）和按 `priority.pr`、`priority.issue` 取的优先级 |
-| `status` | `TEXT NOT NULL CHECK (status IN ('queued','leased','running','cancelling','pending_publish','done','failed','cancelled','superseded'))` | `cancelling`：已下发取消，等节点回报；`pending_publish`：结果已收到，等 publisher |
-| `head_sha` | `TEXT` | 审查、返工对应的 head |
-| `dry_run` | `INTEGER NOT NULL`，布尔 | 入队时的生效写入模式 |
-| `eligible_at` | `INTEGER NOT NULL` | |
-| `bumped_by` | `INTEGER REFERENCES admins(github_id)` | 后台「提到最前」（B-52） |
-| `infra_retries` | `INTEGER NOT NULL DEFAULT 0` | 不超过 `GEEK_BOT_INFRA_RETRY_MAX`（B-53）；重新排队时清零 |
-| `excluded_nodes_json`、`required_labels_json` | `TEXT NOT NULL DEFAULT '[]'` | 派发过滤；重新排队时清空 `excluded_nodes_json` |
-| `min_trust` | `TEXT NOT NULL CHECK (min_trust IN ('high','standard'))` | 私有仓库为 `high`（B-54） |
-| `bundle_sha256`、`bundle_bytes` | `TEXT`、`INTEGER` | 任务包校验值 |
-| `failure` | `TEXT` | 失败或放弃的原因，包括复核时哪条条件变了（B-41） |
-| `created_at`、`started_at`、`finished_at` | `INTEGER` | |
-
-索引：`(status, channel, priority, eligible_at)`（派发）、`(repo_id, status)`；部分唯一索引 `UNIQUE (item_id) WHERE status IN ('queued','leased','running','cancelling','pending_publish')`，保证同一条目同时最多一个活跃任务（B-13）。同一仓库的写入类任务数由调度代码按 `GEEK_BOT_MAX_WRITE_TASKS_PER_REPO` 控制。行永久保留；大字段按 `task_events`、`task_results` 的保留期清理。任务包文件在任务进入终态后删除（保留时长由 #11 定）。
-
-**`leases`**：租约，一个租约是 `(task_id, lease_id, epoch, node_id)`。任务相关的节点请求带的 `lease_id` 和 `epoch` 与这里的 `active` 行不符时，节点 API 返回 409 `lease_fenced`（[节点协议](../node/protocol.md)）。
-
-| 列 | 类型与约束 | 说明 |
-|---|---|---|
-| `id` | `TEXT PRIMARY KEY` | lease_id |
-| `task_id` | `TEXT NOT NULL REFERENCES tasks(id)` | |
-| `node_id` | `INTEGER NOT NULL REFERENCES nodes(id)` | |
-| `epoch` | `INTEGER NOT NULL` | 从 1 起；每次收回或重派同一任务加 1 |
-| `state` | `TEXT NOT NULL CHECK (state IN ('active','completed','fenced'))` | |
-| `end_reason` | `TEXT CHECK (end_reason IN ('finished','reclaimed','unacked','cancelled','superseded','requeued','token_reset','node_restart'))` | 租约结束的原因；`finished` 对应 `completed`，其余对应 `fenced` |
-| `phase` | `TEXT` | 续租时上报的阶段 |
-| `last_event_seq` | `INTEGER NOT NULL DEFAULT 0` | 已确认的事件序号；事件按 seq 幂等 |
-| `granted_at` | `INTEGER NOT NULL` | |
-| `acked_at` | `INTEGER` | 第一次续租的时间；超过 `ack_deadline_s` 还为空就作废 |
-| `renewed_at`、`expires_at` | `INTEGER NOT NULL` | 最近一次续租和按 `lease_ttl_s` 算出的到期时间 |
-| `ended_at` | `INTEGER` | |
-
-约束：`UNIQUE (task_id, epoch)`；部分唯一索引 `UNIQUE (task_id) WHERE state = 'active'`。索引：`(node_id, state)`、`(state, expires_at)`。
-
-**`task_events`**：任务时间线的摘要，只存状态变化、工具调用、错误、重试和降级；原始 JSONL 逐行追加到 `tasks/<任务 id>/events.jsonl.gz`，不进库。
-
-| 列 | 类型与约束 | 说明 |
-|---|---|---|
-| `task_id` | `TEXT NOT NULL REFERENCES tasks(id)` | |
-| `epoch`、`seq` | `INTEGER NOT NULL` | 节点给的序号；主键 `(task_id, epoch, seq)` |
-| `at` | `INTEGER NOT NULL` | |
-| `type` | `TEXT NOT NULL CHECK (type IN ('status','tool','error','retry','fallback'))` | |
-| `summary` | `TEXT NOT NULL` | 节点打码后的摘要，长度有上限 |
-
-保留 `GEEK_BOT_TASK_DATA_RETENTION_DAYS`（默认 30 天），行和原文文件一起删；原文总量上限由 #14 定。
-
-**`task_results`**：节点回报的结构化结果，每个租约最多记一次，只接受 epoch 匹配的一份。结果只进入「待发布」，节点从不写 GitHub。
-
-| 列 | 类型与约束 | 说明 |
-|---|---|---|
-| `task_id` | `TEXT PRIMARY KEY REFERENCES tasks(id)` | |
-| `lease_id`、`epoch` | `TEXT NOT NULL`、`INTEGER NOT NULL` | 回报时的租约 |
-| `status` | `TEXT NOT NULL CHECK (status IN ('succeeded','failed','timed_out','cancelled'))` | `timed_out`：超过任务时限 |
-| `schema` | `TEXT` | 结果 schema 名，如 `review.v1`、`triage.v1`、`patch.v1` |
-| `valid`、`invalid_reason` | `INTEGER NOT NULL`、`TEXT` | schema 校验结果 |
-| `result_json` | `TEXT` | 校验并打码后的结构化结果 |
-| `artifact_path`、`artifact_sha256` | `TEXT` | 补丁等产物在 `tasks/<任务 id>/` 下的相对路径和哈希 |
-| `usage_json` | `TEXT` | 节点回报的用量 |
-| `received_at` | `INTEGER NOT NULL` | |
-
-`result_json` 和产物文件在 `GEEK_BOT_TASK_DATA_RETENTION_DAYS` 后清空（已发到 GitHub 的内容以 GitHub 为准），其余列永久保留。
-
-**`model_attempts`**：模型尝试记录。中继每个请求记一行（`source='relay'`，可信的一方）；runner 回报的每次尝试也记一行（`source='runner'`），后台时间线把两边对照显示。
-
-| 列 | 类型与约束 | 说明 |
-|---|---|---|
-| `task_id`、`epoch` | `TEXT NOT NULL`、`INTEGER NOT NULL` | |
-| `source` | `TEXT NOT NULL CHECK (source IN ('relay','runner'))` | |
-| `model_id`、`effort` | `TEXT NOT NULL` | catalog id 与思考档位 |
-| `started_at`、`ended_at` | `INTEGER` | |
-| `http_status` | `INTEGER` | 中继记录的上游状态码 |
-| `outcome` | `TEXT NOT NULL CHECK (outcome IN ('ok','error','timeout','rate_limited','interrupted','context_overflow','cancelled','budget_exhausted','invalid_result'))` | 降级依据（B-57）；`budget_exhausted` 不降级到下一个模型 |
-| `prompt_tokens`、`completion_tokens` | `INTEGER` | |
-
-索引：`(task_id)`。保留同 `task_events`。
-
-**`model_pools`**：按任务类型的模型池，每个池 1 到 8 项。保存时整池替换（一个事务），版本号在 `revisions` 的 `model_pool/<任务类型>`，写审计，并生成 omp 用的 `modelRoles` 和 `fallbackChains`。
-
-| 列 | 类型与约束 | 说明 |
-|---|---|---|
-| `task_kind` | `TEXT NOT NULL CHECK (task_kind IN ('review','triage','followup','fix','rework','profile'))` | |
-| `position` | `INTEGER NOT NULL` | 从 0 起，小的先用；主键 `(task_kind, position)` |
-| `model_id` | `TEXT NOT NULL` | 必须在 catalog 里；catalog 里消失的后台标红 |
-| `effort` | `TEXT NOT NULL` | 必须是该模型在 catalog 里的档位；没有 efforts 的只能是 `off` |
-| `updated_by`、`updated_at` | `INTEGER NOT NULL` | |
-
-**`relay_tokens`**：每任务模型令牌，限定池内模型、请求数、token 预算和租约期（S-02）。
-
-| 列 | 类型与约束 | 说明 |
-|---|---|---|
-| `token_hash` | `BLOB PRIMARY KEY` | 令牌的 SHA-256；明文只在 TaskSpec、节点内存、sandbox 或 VM 里 |
-| `task_id`、`lease_id` | `TEXT NOT NULL` | |
-| `models_json` | `TEXT NOT NULL` | 允许的模型，取自本任务的池 |
-| `max_requests`、`max_tokens` | `INTEGER NOT NULL` | 预算 |
-| `used_requests`、`used_tokens` | `INTEGER NOT NULL DEFAULT 0` | |
-| `issued_at`、`revoked_at` | `INTEGER` | 租约结束、任务取消或 epoch 变化时吊销 |
-
-索引：`(lease_id)`。吊销后由清理任务删除。
-
-### 节点
-
-**`nodes`**：工作节点。库里只存管理状态；`needs_upgrade` 由协议版本推出，`stale`、`offline`、`lost` 由 `last_heartbeat_at` 推出，都不存列（[节点协议](../node/protocol.md)「节点状态」）。
-
-| 列 | 类型与约束 | 说明 |
-|---|---|---|
-| `id` | `INTEGER PRIMARY KEY` | API 里的 `node_id`；重置令牌后不变 |
-| `name` | `TEXT NOT NULL UNIQUE` | 规则同节点的 `GEEK_BOT_NODE_NAME`；节点心跳带的名称必须与这里一致 |
-| `status` | `TEXT NOT NULL CHECK (status IN ('pending','cordoned','active','draining','disabled'))` | owner 在后台添加节点、生成节点令牌时为 `pending`，第一次心跳后 `cordoned`，owner 或 operator 解除后 `active`；移除后 `disabled` |
-| `trust` | `TEXT NOT NULL DEFAULT 'standard' CHECK (trust IN ('high','standard'))` | 调到 `high` 只归 owner，要求重新认证（清单见 [SECURITY](../../architecture/SECURITY.md) S-09；B-54） |
-| `labels_json` | `TEXT NOT NULL DEFAULT '[]'` | |
-| `declared_slots_json` | `TEXT` | 节点声明的槽位上限 `{sandbox, vm}` |
-| `slots_json` | `TEXT NOT NULL` | 后台设置的实际值，不超过声明 |
-| `version`、`protocol`、`boot_id` | `TEXT`、`INTEGER`、`TEXT` | `boot_id` 变化说明节点重启过，缺少的租约作废重排 |
-| `last_heartbeat_at` | `INTEGER` | |
-| `health_json`、`self_check_json` | `TEXT` | 最近一次健康数据和自检结果 |
-| `cordon_reason` | `TEXT` | 管理员填的原因，或健康门控的原因（温度、磁盘、电源等） |
-| `created_by`、`created_at` | `INTEGER NOT NULL` | |
-
-版本号在 `revisions` 的 `node/<node_id>`。
-
-**`node_tokens`**：节点令牌。没有单独的加入令牌：owner 重新认证后在后台生成节点令牌（256 位，只显示一次），运维把它放进节点宿主的密钥文件，节点从 `GEEK_BOT_NODE_TOKEN_FILE` 读取；库里只存 SHA-256（[SECURITY](../../architecture/SECURITY.md) 密钥表、[ADR-0003](../../decisions/0003-single-writer-control.md)）。
-
-| 列 | 类型与约束 | 说明 |
-|---|---|---|
-| `node_id` | `INTEGER NOT NULL REFERENCES nodes(id)` | |
-| `token_hash` | `BLOB NOT NULL UNIQUE` | 节点令牌的 SHA-256 |
-| `created_by` | `INTEGER NOT NULL REFERENCES admins(github_id)` | 生成它的 owner |
-| `created_at` | `INTEGER NOT NULL` | |
-| `first_used_at`、`last_used_at` | `INTEGER` | 第一次和最近一次成功认证的时间 |
-| `revoked_at` | `INTEGER` | 重置令牌或移除节点时写；旧令牌立即返回 401 |
-
-部分唯一索引：`UNIQUE (node_id) WHERE revoked_at IS NULL`，保证一个节点同时只有一枚有效的令牌。重置令牌在一个事务里作废旧行、写新行，并收回该节点的全部租约。作废的行保留，用于审计。
-
-**`node_health_samples`**：节点健康曲线。
-
-| 列 | 类型与约束 | 说明 |
-|---|---|---|
-| `node_id`、`at` | `INTEGER NOT NULL` | 每分钟一点；主键 `(node_id, at)` |
-| `sample_json` | `TEXT NOT NULL` | CPU 负载、温度、可用内存、PSI、磁盘与 VM 工作目录的可用空间、电源等，字段由 protocol 定义 |
-
-保留 `GEEK_BOT_HEALTH_SAMPLE_RETENTION_DAYS`（默认 7 天）。
-
-### GitHub 写入
-
-**`outbox`**：publisher 的写入队列，保证同一件事只写一次（[写入白名单](write-whitelist.md)、S-06）。
-
-| 列 | 类型与约束 | 说明 |
-|---|---|---|
-| `dedupe_key` | `TEXT NOT NULL` | 同一逻辑写入的唯一键：写入类型、目标，加上对这次写入稳定的键（被审的 head、追问轮次等），不含任务 id；组成以 [写入白名单](write-whitelist.md)「幂等与 outbox」为准 |
-| `task_id` | `TEXT REFERENCES tasks(id)` | 只作追溯，不参与去重；确定性动作和后台触发的写入为空 |
-| `target_kind` | `TEXT NOT NULL CHECK (target_kind IN ('repo','user','app'))` | `repo`：落在某个仓库上的写入；`user`：机器人账号自身，例如接受协作邀请（W-13）；`app`：OAuth App，例如吊销令牌（W-14） |
-| `repo_id`、`number` | `INTEGER`、`INTEGER` | `target_kind` 为 `repo` 时 `repo_id` 必填，其余为空 |
-| `action` | `TEXT NOT NULL` | 白名单允许项编号（W-xx） |
-| `request_json` | `TEXT NOT NULL` | 方法、路径和参数，已中和；不含令牌 |
-| `marker` | `TEXT NOT NULL` | 这条写入的隐藏标记（B-62） |
-| `status` | `TEXT NOT NULL CHECK (status IN ('pending','sending','sent','confirmed','failed','rejected','dry_run','unknown'))` | 见下 |
-| `reject_code` | `TEXT` | 被白名单拒绝时的拒绝项编号（D-xx） |
-| `attempts`、`next_attempt_at` | `INTEGER` | |
-| `github_ref` | `TEXT` | 写成后的评论 id、review id、提交 SHA 或 issue 编号 |
-| `last_error` | `TEXT` | 不含令牌 |
-| `created_at`、`sent_at`、`confirmed_at` | `INTEGER` | |
-
-状态机以 [写入白名单](write-whitelist.md)「幂等与 outbox」为准，这里照抄：`pending → sending → sent → confirmed | failed | rejected | dry_run | unknown`。
-
-- `sending`：在同一个事务里改状态后才发请求。
-- `sent`：GitHub 返回成功，记下对象 id。
-- `confirmed`：对象 id 和隐藏标记已经写进 `bot_writes`；推送类另外用 `ls-remote` 核对过远端 sha。
-- `failed`：GitHub 明确拒绝（限额以外的 4xx），不自动重试，后台显示原因。
-- `rejected`：白名单或发送前复核（B-41）拒绝，记下 D 编号并写审计，不重试。
-- `dry_run`：生效的写入模式是 `dry_run`，只保存渲染好的请求，后台显示「未发布」。
-- `unknown`：请求可能已经发出，但没有拿到确定的结果：超时、连接中断、5xx、临时错误的重试次数用完，或进程在 `sending` 时崩溃（重启时这些行都转成 `unknown`）。`unknown` 不盲目重发：先按标记到 GitHub 核对，找到就置 `confirmed` 并补 `github_ref`，确认没有才重新跑前置核对后重发。
-
-`dedupe_key` 用部分唯一索引 `UNIQUE (dedupe_key) WHERE status NOT IN ('failed','rejected')`：失败和被拒的行不参与，同一件事可以重新插入一行再试，与白名单 C-10 一致。其它索引：`(status, next_attempt_at)`、`(repo_id, number)`。非终态的行永不自动删除；终态行的保留期由 #9 按体积定，定之前不自动删除。
-
-**`bot_branches`**：机器人推过的分支。publisher 推送前核对：分支登记在这里或是新建的；新提交必须是 `head_sha` 的后代（只快进）。
-
-| 列 | 类型与约束 | 说明 |
-|---|---|---|
-| `repo_id`、`branch` | `INTEGER NOT NULL`、`TEXT NOT NULL` | 主键 `(repo_id, branch)`；分支名符合画像的分支模板 |
-| `item_id` | `INTEGER REFERENCES items(id)` | 对应的 issue |
-| `pr_number` | `INTEGER` | 机器人开的 PR |
-| `head_sha` | `TEXT NOT NULL` | 最近一次推送的提交 |
-| `state` | `TEXT NOT NULL CHECK (state IN ('open','merged','closed'))` | |
-| `created_at`、`pushed_at` | `INTEGER NOT NULL` | |
-
-行永久保留；机器人不删分支，GitHub 上的分支由人或仓库自己的规则删除。
-
-### 运维
-
-**`alerts`**：告警。同一件事只有一条未解决的告警，重复发生只加计数。
-
-| 列 | 类型与约束 | 说明 |
-|---|---|---|
-| `kind` | `TEXT NOT NULL` | 例如 `backup_failed`、`backup_verify_failed`、`node_offline`、`writes_paused`、`catalog_model_missing`、`pool_empty`、`rebuilt_from_github` |
-| `severity` | `TEXT NOT NULL CHECK (severity IN ('info','warning','critical'))` | |
-| `subject` | `TEXT NOT NULL` | 对象，如 `node/<node_id>`、`repo/<repo_id>`、`backup/<id>` |
-| `message` | `TEXT NOT NULL` | 不含密钥、令牌 |
-| `first_at`、`last_at`、`count` | `INTEGER NOT NULL` | |
-| `acked_by`、`acked_at` | `INTEGER` | |
-| `resolved_at` | `INTEGER` | |
-
-部分唯一索引：`UNIQUE (kind, subject) WHERE resolved_at IS NULL`。已解决告警的保留期由 #20 定，定之前不自动删除。
-
-**`audit_logs`**：审计记录，只追加（S-16）。迁移里给它建 `BEFORE UPDATE` 和 `BEFORE DELETE` 触发器，执行 `RAISE(ABORT)`，代码没法改或删已有记录。
-
-| 列 | 类型与约束 | 说明 |
-|---|---|---|
-| `at` | `INTEGER NOT NULL` | |
-| `actor_type` | `TEXT NOT NULL CHECK (actor_type IN ('user','bot','system','node','cli'))` | `user`：后台账号（任一角色）；`bot`：publisher 代机器人写入，`actor_id` 是任务 id |
-| `actor_id` | `TEXT` | 后台账号的 GitHub 数字 id、任务 id 或节点 id |
-| `action` | `TEXT NOT NULL` | 例如 `repo.switch.enable`、`bot.bind`、`node.token.reset`、`settings.update`、`task.bump`、`publisher.allow`、`publisher.reject`、`publisher.dry_run` |
-| `code` | `TEXT` | 相关的白名单编号：允许写 W-xx，拒绝写命中的 D-xx |
-| `target` | `TEXT` | |
-| `detail_json` | `TEXT` | 原因和变更前后的值；不含密钥、令牌和会话 id |
-| `reauth` | `INTEGER NOT NULL`，布尔 | 这次操作前 10 分钟内是否重新认证过 |
-
-索引：`(at)`、`(action)`。永久保留。
-
-**`backups`**：备份文件登记。备份完成后才写这一行，所以一份备份里不含它自己的登记；从备份恢复后，control 启动时扫描 `backups/` 目录补齐缺的行。迁移前备份（`pre_migration`）在执行迁移之前写这一行，库还停在旧版本，所以备份服务只读写下表这些 `0001` 就有的列（代码里是 `BACKUP_COLUMNS`）；以后给本表加的列必须可空或带默认值，备份服务不依赖它们。
-
-| 列 | 类型与约束 | 说明 |
-|---|---|---|
-| `kind` | `TEXT NOT NULL CHECK (kind IN ('daily','weekly','pre_deploy','pre_migration','manual'))` | 每周第一次每日备份记为 `weekly`；`GEEK_BOT_BACKUP_KEEP_WEEKLY` 为 0 时一律记为 `daily` |
-| `file` | `TEXT NOT NULL UNIQUE` | `backups/` 下的文件名 |
-| `sha256`、`bytes` | `TEXT NOT NULL`、`INTEGER NOT NULL` | 加密后文件的哈希和大小 |
-| `schema_version`、`compat_version`、`app_version` | `INTEGER NOT NULL`、`INTEGER NOT NULL`、`TEXT NOT NULL` | 备份时的 `user_version`、兼容版本和镜像版本 |
-| `backup_key_id` | `TEXT NOT NULL` | 加密用的备份密钥的指纹（不是密钥本身），轮换后据此找对应的离线密钥。#3 的算法：`sha256("geek-bot/backup-key/v1\0" ‖ 密钥)` 的前 16 位十六进制 |
-| `row_counts_json` | `TEXT NOT NULL` | 备份时各表的行数，恢复校验时核对 |
-| `created_at` | `INTEGER NOT NULL` | |
-| `verified_at`、`verify_result`、`verify_detail` | `INTEGER`、`TEXT CHECK (verify_result IN ('ok','failed'))`、`TEXT` | 每日恢复校验的结果 |
-| `pruned_at` | `INTEGER` | 文件按保留策略删除的时间 |
+| `schema_migrations` | 迁移编号、文件名、sha256、shrink、compat_version、app_version、applied_at | 迁移器 |
+| `settings` | `key` 主键、`value_json`、更新人和时间；模型池用 `model_pool.<kind>` 键 | models 与基础配置 |
+| `revisions` | `scope` 主键、revision、updated_at；模型池用 `model_pool.<kind>` scope | models |
+| `idempotency_keys` | 主键 `(github_id, route, key)`，请求哈希、HTTP 状态与可空响应 | 后台幂等层 |
+| `alerts` | kind、subject、严重度、次数、确认与解决时间；未解决的 `(kind, subject)` 唯一 | 告警服务 |
+| `audit_logs` | 操作者、动作、原因和 reauth；触发器拒绝 UPDATE 与 DELETE | 审计服务 |
+| `backups` | 文件、sha256、大小、版本、密钥指纹、行数与恢复校验结果 | 备份服务 |
+| `admins` | github_id 主键，login、role、邀请信息；部分唯一索引保证只有一个 owner | auth 与 admins |
+| `bootstrap_codes` | 唯一 code_hash、过期时间、失败次数、作废与使用时间 | auth / CLI |
+| `claim_grants` | token_hash 主键，code_id 外键、创建与过期时间 | auth |
+| `sessions` | id_hash 主键，github_id 外键、创建、最近访问、过期与重新认证时间 | auth |
+| `oauth_flows` | purpose、browser_hash、发起票据、加密 device_code、轮询节奏和终态 | auth |
+| `connections` | provider、唯一 name、base_url、启用、账号外部 id、权限与 revision | connections |
+| `connection_credentials` | connection_id 主键及外键、credentials_ct、key_version | 连接凭据层 |
+| `projects` | 稳定 id、连接外键、external_id、平台权限、处理开关、写入模式和机器范围；`(connection_id, external_id)` 唯一 | connections |
+| `items` | 项目外键、issue/change、origin、编号、正文、head/base、作者事实、标签与负责人；`(project_id, kind, external_id)` 唯一 | 平台同步 |
+| `demands` | 项目、来源连接、来源条目、状态与 revision；非空 item_id 唯一 | demands 与 intake |
+| `intake_events` | 主键 `(connection_id, event_id)`、demand_id 和 received_at | IM 入站 |
+| `machines` | 唯一 name、管理状态、信任、槽位、资源、声明、自检、boot_id/seq、唯一 token_hash、revision | machines 与节点心跳 |
+| `tasks` | 项目、需求、条目快照、预算、执行器、状态、租约、模型令牌哈希、任务包和结果 | tasks、relay 与 publisher |
+| `task_events` | 主键 `(task_id, seq)`，时间、kind、打码文本与 lease_id | 节点报告 |
+| `model_usage` | task_id、lease_id、模型、档位、HTTP 状态、耗时、token 用量 | 模型中继 |
+| `publications` | 任务/项目/连接外键、action、唯一 dedupe_key、状态、写入模式、payload、预览、外部引用与错误 | publisher |
+| `im_publications` | 需求/任务/连接外键、source_ref、message、唯一 dedupe_key、状态、外部引用与错误 | IM publisher |
+
+完整列、默认值、外键和索引以 SQL 为准。公共返回字段以 [protocol](../protocol/README.md) 和 [API](../../architecture/API.md) 为准，不把库行直接序列化给浏览器。
+
+## 身份、连接和需求
+
+owner、operator、viewer 共用实例数据，不建租户。管理员身份与平台连接分离；认领和登录不会自动把登录账号变成机器人连接。移除管理员会删除其会话，owner 不能移除。
+
+device flow 的 purpose 为 `claim`、`login`、`reauth`、`connection`。browser_hash 将流程绑定到发起浏览器；device_code 是密文。会话空闲 2 小时、最长 12 小时，高危操作要求 10 分钟内重新认证。`claim_grants` 是核对认领码后的短期票据，不是后台会话。
+
+新项目四类处理开关全关，write_mode 为 off。配置资源直接在自己的行保存 revision，模型池单独使用 `settings` 与 `revisions`。目录 catalog 来自只读文件，不建模型目录表。
+
+需求来源为 manual、github、gitlab、feishu、webhook。数据库约束要求代码平台来源有 item_id，且有关联项目；其它来源没有 item_id。IM 事件去重与需求创建在同一事务完成。未关联项目不能派发，平台需求的项目和条目身份固定。
+
+创建请求的成功响应保留 24 小时。`idempotency_keys` 在下一次幂等请求查询时清理过期行；同 key 不同正文返回 409。节点令牌类响应不保存明文，重放返回 `secret_already_issued`，不再发第二枚令牌。
+
+## 任务、租约和事件
+
+task 的状态为 queued、running、awaiting_publish、completed、failed、cancelled、superseded。需求另有 new、blocked、queued、running、completed、failed，不能直接套用任务状态。
+
+当前租约直接存 `tasks.machine_id`、`lease_id`、`epoch`、`lease_expires_at`、`lease_acked_at` 和 `lease_request_key`。lease_id 唯一；续租、任务包和报告同时校验节点身份、租约、epoch 与有效期。收回或重排提升 epoch，旧结果返回 409。资源、槽位、标签、信任与项目机器范围的分配在同一写者事务里完成。
+
+每个条目同时最多一个活跃任务、每项目最多一个活跃 fix/rework，由任务服务在事务里检查；不是 SQL 部分唯一索引。自动入队用 `(item_id, kind, item_version)` 查询去重，PR/MR 的版本是 head，issue 的版本是标题正文哈希。任务创建时冻结 item_snapshot_json，不从模型文本推导写入目标。
+
+任务模型令牌哈希、冻结的模型池、请求/token 预算和用量也存 tasks。结果经校验和打码后存 result_json，result_lease_id 记录接受它的租约；相同租约的相同结果可重放，不同结果返回 409。没有平台条目的只读任务直接 completed；需要外部发布的结果进入 awaiting_publish。
+
+事件按 `(task_id, seq)` 去重，另存 lease_id；接收事件之前先校验栅栏，响应 ack_seq 是该任务已保存的最大序号。当前没有库外 gzip 事件原文、独立租约历史表或健康采样曲线表。
+
+## 持久 outbox
+
+代码平台发布与 IM 回传分别用 publications、im_publications。状态取值都是 pending、sending、sent、confirmed、failed、rejected、dry_run、unknown；dedupe_key 是整表唯一，失败行也不通过插入新行绕过。
+
+publisher 先落意图再发外部请求；重启后 sending 转 unknown。未知状态必须先核对，不能把超时或 5xx 当成没有发送。IM 入站与节点结果不等待网络回传才应答，回传由事务后的微任务排入 publisher。
+
+实际动作子集和核对语义见 [写入白名单](write-whitelist.md) 的当前实现部分；旧设计中的 W/D 编号仍是安全基线，不能据本文声明其全部已经实现或验证。
+
+## 保留与尚未实现的恢复
+
+当前没有任务内容、事件、model_usage、平台条目、publication 终态的自动保留期清理。不要把原设计的 30 天写成已启用；数据库增长需要部署者观察。审计只追加，备份文件按下文策略保留。
+
+正式恢复、异地副本、master key 轮换与从外部标记重建整个数据库仍未实现。当前 CLI 的 restore 只做 dry-run；没有可用备份时，不能从外部评论恢复管理员、凭据、机器令牌、任务历史或审计。
 
 ## 迁移规则
 
@@ -599,7 +136,7 @@ outbox 行在对象 id 和标记写进这张表后才算 `confirmed`。索引：
 **触发**
 
 - 每天一次：UTC 的 `GEEK_BOT_BACKUP_HOUR_UTC` 点（默认 3）之后，control 每 10 分钟检查一次，上一次 `daily` 或 `weekly` 备份早于最近一个到点时刻就做；control 停机错过的，启动后补做。本周（周一 00:00 UTC 起）还没有 `weekly` 时，这一次记为 `weekly`。
-- 部署前由部署脚本请求一次（`pre_deploy`，#7）；迁移前由 control 自动做一次（`pre_migration`）；管理员可以在后台或用 CLI 手动做（`manual`）。
+- 部署前的 `pre_deploy` 由 #7 的部署脚本接入；迁移前由 control 自动做 `pre_migration`；现有 CLI 可以做 `manual`。当前后台没有备份操作页。
 
 **做法**
 
@@ -623,7 +160,7 @@ master key 和备份加密密钥都不进备份，所有者各另存一份离线
 5. 各表行数等于 `row_counts_json`；
 6. 删除 `tmp/` 里的临时文件，写 `verified_at` 和 `verify_result`。
 
-#3 在每天的备份做完后立即校验这一份；`geek-bot verify-backup` 可以随时手动校验。任何一步失败：`verify_result` 记 `failed`，写一条 `critical` 告警（`backup_verify_failed`，对象 `backup/<id>`），后台概览显示「最近一次恢复校验失败」（概览随 A-35）；之后有一次校验通过，就把未解决的 `backup_verify_failed` 标为已解决。备份本身失败写 `critical` 告警 `backup_failed`（对象 `backup/<种类>`），下一次检查时重试。
+#3 在每天的备份做完后立即校验这一份；`geek-bot verify-backup` 可以随时手动校验。任何一步失败会记录 failed，并写 critical 告警 backup_verify_failed；下一次通过后解决该告警。备份本身失败写 backup_failed，下一次检查重试。数据已持久化，当前后台没有恢复校验与告警管理页。
 
 **异地副本**：可选，把加密后的备份文件复制到外置盘或 NAS 目录（配置项由 #20 定）。
 
@@ -631,50 +168,14 @@ master key 和备份加密密钥都不进备份，所有者各另存一份离线
 
 - `restore --dry-run <文件>` 先做上面的校验（不碰库，只读备份文件和备份加密密钥），报告会恢复到哪个库版本和哪个时间点、这版代码能否直接打开，不改任何东西（#3 已实现）。
 - 正式恢复由获授权的人执行，要求 control 已停止；恢复前把当前库另存一份。命令还没有实现，随 #20 的恢复演练写入。
-- 恢复后启动 control：`outbox` 里 `sending` 的行转为 `unknown` 并按标记核对；恢复点之后 GitHub 上发生的事，按下一节补齐。
+- 恢复后 publications 和 im_publications 的 sending 行转 unknown。现有核对只处理已记录意图，不是全库重建；恢复点之后的外部状态补齐仍待 #20 演练。
 
-## 从 GitHub 重建状态
+## 验证与边界
 
-依据 ADR-0008 与 [ADR-0005](../../decisions/0005-rules-from-base-branch.md)。publisher 的每条写入在正文**最后一行**带隐藏标记 `<!-- geek-bot v1 env=<环境> kind=<写入类型> task=<任务 id> sha=<head 前 12 位> round=<轮次> -->`（behavior B-62）；第一行留给追踪记录头。
+- `tests/control/database.test.ts`、`backup.test.ts`、`server.test.ts`、`cli.test.ts` 覆盖迁移、兼容、独占连接、审计只追加与加密备份恢复校验。#34 的 `shared-platform-http.test.ts` 用真实路由和临时 SQLite 验证权限、资源、租约与结果拒绝。
+- #34 本机真实 HTTP/SQLite 烟雾已观察：双平台项目与条目、需求去重、真实 ControlClient 续租/取包/回报、迟到 epoch 409、一次性节点令牌重放 409、viewer 403、重启后结果保留。外部平台接口隔离打桩，不是外部账号验收。
+- Linux/KVM、真实外部写入、异地恢复、master key 轮换和全库重建未验证。自动化通过不能代替预发布人工验收。
 
-**什么时候用**：库丢了又没有可用备份；或者恢复了较旧的备份，要补上恢复点之后的状态。
+## 后续数据约束
 
-**只信机器人账号自己写的标记**：任何人都能在评论里打出同样的文字，所以只采纳作者是机器人账号（按数字 id）、而且标记里的 `env` 等于本实例环境的记录。preview 和 production 共用一个机器人账号，`env` 用来区分两边的记录。
-
-**能重建的**
-
-| 状态 | 来源 |
-|---|---|
-| `threads.rounds`、`asked_at` | 机器人追问记录的标记（`round=`）和评论的创建时间 |
-| `threads` 的到期时间 | `asked_at` 加上当前配置的天数（重新计算，不是原来落库的值） |
-| `threads.reminded_at`、关闭状态 | 提醒和关闭记录的标记；issue 关闭事件的操作者 |
-| `items.human_reopened_at` | issue 时间线里非机器人账号的重开事件 |
-| `items.reviewed_head_sha` | review 标记里的 `sha=` 按前 12 位对应到 PR 的提交 |
-| `bot_branches` | 机器人账号开的 PR 的 head 分支和提交 |
-| `bot_writes`、`outbox` 中已确认的行 | 机器人账号发出的带标记的评论和 review；`dedupe_key` 由标记推出，防止重建后再写一遍 |
-
-**不能重建的**（只能从备份恢复，或重新配置）：`admins`、`sessions`、`bot_account`（令牌要重新授权绑定）、`nodes` 与 `node_tokens`（节点要重新添加并换令牌）、`settings`、`repo_overrides`、`repo_profiles` 的管理员确认、`model_pools`、`tasks` 及其事件与结果历史、`model_attempts`、`audit_logs`、`alerts`、`backups` 的登记。
-
-**步骤**
-
-1. 以重建模式启动：写入模式强制 `dry_run`，并打开「暂停全部写入」；
-2. 库丢失时，按首次部署重新认领、绑定机器人账号；
-3. 发现仓库；
-4. 对每个监控中的仓库，扫描开着的条目，以及最近 `GEEK_BOT_CATCHUP_WINDOW_HOURS`（默认 72 小时）内关闭或合并的条目，按上面的规则采纳标记；
-5. 写入上表的状态，写审计，并写一条 `rebuilt_from_github` 告警，列出没法重建的数据；
-6. owner 核对后在后台解除写入暂停。
-
-**限制**：窗口之前关闭的条目不扫描，这部分历史不会重建；标记被人删掉或改掉的评论无法重建。整个流程未验证，由 #9（标记）、#16（追问线程）和 #20（恢复演练）实测。
-
-## 验证（计划中）
-
-- #3（已加入：`tests/control/database.test.ts`、`backup.test.ts`、`server.test.ts`、`cli.test.ts`）：空库迁到最新；上一版本的库迁到最新（夹具在运行时用迁移目录生成，库文件不入库）；上一版代码打开新库能启动、能读写；兼容版本高于代码时拒绝启动；迁移中途失败时库停在原版本；迁移文件被改动时拒绝启动；`audit_logs` 的更新和删除被触发器拒绝；备份、每日恢复校验、保留策略，以及校验失败时产生告警；第二个连接打不开 control 持有的库。
-- #5：库里搜不到机器人令牌、会话 id、认领码、`gb_flow` 的明文；`rotate-master-key` 后旧密文全部换成新版本。
-- #8、#11：部分唯一索引挡住同一条目的第二个活跃任务、同一任务的第二个 `active` 租约、同一节点的第二枚有效令牌；epoch 不匹配的结果被拒；重置令牌后旧令牌返回 401。
-- #9：`unknown` 行按标记核对后不重复写；重建后 `dedupe_key` 挡住重复写入。
-- #20：在另一台机器上从备份恢复，并按标记补齐恢复点之后的状态。
-
-## 待定
-
-- `bot_writes`、`outbox` 终态行、已解决告警的保留期没有定。`pre_deploy`、`pre_migration`、`manual` 备份各保留 3 份由 #3 定为代码常量，要改成可配置时另开 issue。
-- `items`、`tasks` 行永久保留，库的增长速度由 #20 在正式实例上观察，必要时再定清理策略。
+`pre_deploy`、`pre_migration`、`manual` 各保留 3 份是现有代码常量。任务内容与已解决告警的保留策略、外部状态恢复方案需要独立定义和验证；未实现前不擅自删业务行。

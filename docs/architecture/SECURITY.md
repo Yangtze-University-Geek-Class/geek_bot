@@ -2,11 +2,16 @@
 
 > 信任边界、安全不变量（S-01…S-20）、每个密钥放在哪、谁能读、泄露后果、如何轮换，以及剩下的风险和验证办法。
 
-状态：`proposed` · 更新：2026-09-26 · 适用：全部 `app/*`、`packages/protocol` 与部署文件（由 #3、#5、#7、#9–#14、#17–#20 实现）
+状态：`proposed` · 更新：2026-10-03 · 适用：全部 `app/*`、`packages/protocol` 与部署文件；安全基线保持，当前实现范围见 #34 服务契约
 
-本文写的是设计要求。#3 实现了其中几条的一部分：S-16 的 control 侧打码（日志、审计、告警）、S-17 的本机加密备份与每日恢复校验、S-20 的监听地址与 origin 启动检查、S-18 的 control 镜像部分（非 root、HEALTHCHECK、基础镜像按 digest 钉死，三者都由 CI 的 `docker` job 断言）、S-01 的 master key 只从文件读取（令牌加密随 #5）；其余都还没有实现，实现范围以 [control 服务契约](../services/control/README.md) 为准。每条不变量后面括号里是实现它的 issue；实现时必须带上「验证」一节列出的测试。改动涉及 GitHub 令牌、写入白名单、节点协议、VM 或 sandbox 隔离、模型中继时，先读本文，再按 [CODE-REVIEW](../conventions/CODE-REVIEW.md) 第 11–14 项审查。`proposed` 文档是审查时不得放宽的基线，不能拿来证明功能已经实现。
+本文保留完整设计要求，不能作为全部安全功能已实现或实机通过的证明。#3 已有独占数据库、打码、加密备份与基础监听约束；#34 新增身份、连接凭据密文、项目权限、租约栅栏、模型中继、受控 publisher 与隔离执行源码。真实外部账号、镜像、Linux/KVM、完整 W/D 矩阵与发布验收仍未完成。实际行为和缺口分别见 [control](../services/control/README.md)、[node](../services/node/README.md)、[runner](../services/runner/README.md) 与 [写入白名单](../services/control/write-whitelist.md) 的当前实现部分。编号要求不因实现缺口而放宽。
 
 相关文档：架构见 [ARCHITECTURE](ARCHITECTURE.md)；机器人对 GitHub 的每一种写入见 [写入白名单](../services/control/write-whitelist.md)（W、D 编号）；节点消息见 [节点协议](../services/node/protocol.md)；密钥扫描与公开安全检查见 [TESTING](../conventions/TESTING.md)。
+
+#34 按 [ADR-0012](../decisions/0012-shared-cross-platform-workspace.md) 分离后台身份与渠道账号。GitHub/GitLab/飞书/Webhook 凭据集中存 connection_credentials.credentials_ct，不再使用 bot_account 单行表；只有相应适配器、凭据更新与 publisher 路径在 control 内解密。会话密钥独立于 master 与 backup。当前只有 device flow，不声称 web flow/PKCE、master key 轮换、完整 issue 线程状态机或全库重建已实现。
+
+publisher 当前按稳定逻辑目标去重，不因 task 重排的 epoch 变化重新写入；远端核对要求作者数字 id 与连接当前身份相同。模型输出的关闭关键字、跨仓库引用、批准指令和 PR/MR 标题都中和。这些源码约束仍需拒绝用例与真实沙盒验收，不能用 dry_run 代替。
+
 
 ## 信任边界
 
@@ -133,7 +138,7 @@ S-01…S-08 的编号和含义已被 [CODE-REVIEW](../conventions/CODE-REVIEW.md
 - GET 不改变状态。所有非 GET、HEAD 请求校验 Origin 与 Sec-Fetch-Site，缺失或不匹配返回 403。control 监听非回环地址时必须配置 `GEEK_BOT_PUBLIC_ORIGIN`，并校验 Host 头与它一致；部署在反代后面时要配置可信代理，只信任它转发的来源信息（配置见 [API](API.md)）。
 - 管理员按 GitHub 数字 id 识别，不按 login（login 可改名、可被别人重新注册）。
 - 后台角色分三种（[ADR-0002](../decisions/0002-github-identity.md)），服务端对每个 `/api/v1/*` 按角色鉴权，不以按钮是否显示为准；入参用 JSON Schema 声明，拒绝未知字段：
-  - `owner`：认领实例的账号，默认路径下它同时是机器人账号。下面重新认证清单里的操作只归 owner。
+  - `owner`：认领实例的账号；按 ADR-0012，它与机器人连接账号分离，不自动绑定成同一身份。下面重新认证清单里的操作只归 owner。
   - `operator`：由 owner 按数字 id 邀请。可以关掉仓库的开关、开关「监控」、暂停和恢复派发、暂停写入（不能恢复）、取消、重新排队、提到最前、cordon、解除 cordon、排空、改模型池、确认告警。
   - `viewer`：由 owner 按数字 id 邀请，只读。只读也能看到机器人读得到的私有仓库内容（R-21）。
 - **重新认证清单**（唯一权威位置，API、ARCHITECTURE、ADR-0002 引用这里，不另列）。下面 9 项全部只归 owner，并要求当前会话 10 分钟内重新认证过：
@@ -239,7 +244,7 @@ publisher 按禁改路径拒绝补丁。**禁改路径的唯一权威清单在�
 
 | 密钥 | 放在哪 | 谁能读 | 泄露后果 | 如何轮换 |
 |---|---|---|---|---|
-| 机器人账号的 GitHub 令牌（OAuth 用户令牌，scope `repo read:org`，每个环境一枚） | control 库 `bot_account` 表里的 AES-256-GCM 密文；明文只在 control 发请求时的内存里 | control 的 publisher 与 GitHub 读取层（仅有的两处解密调用）；能同时读到库文件和 master key 的主机账号 | 以机器人账号身份操作它能访问的全部仓库：读私有代码，按仓库角色推任何分支（包括默认分支）、打 tag（可能触发目标仓库的部署）、合并、关 issue 和 PR；读组织成员关系。免费计划私有仓库没有服务端拦截（S-07） | 后台「重新绑定」走 device flow 取得新令牌，新令牌校验通过后用 W-14 吊销旧令牌；紧急时由账号本人在 GitHub 设置的 Authorized OAuth Apps 里撤销对应环境的 OAuth App（只影响这个环境），再重新绑定 |
+| 代码平台连接凭据（GitHub OAuth 令牌，scope 不超 repo/read:org；GitLab 平台令牌） | control 库 connection_credentials.credentials_ct 的 AES-256-GCM 密文；明文只在 control 处理请求的内存里 | 对应适配器、凭据更新路径与 publisher；能同时读库和 master key 的主机账号 | 获得连接账号在平台上的真实权限；publisher 约束不能保护已泄露的令牌 | GitHub 连接重新授权；GitLab 在平台撤销旧令牌后由 owner 重新认证配置新凭据。master key 轮换仍待实现 |
 | 登录与重新认证的临时令牌（owner、operator、viewer 登录后台时取得，包括机器人账号本人；也包括重新认证和不在管理员名单里的账号登录时取得的） | 只在 control 处理那次请求的内存里；不进库、不进日志、不到浏览器 | control 的登录模块，随后交给 publisher 吊销 | 申请的是空 scope，本来只能读公开资料。但同一 OAuth App 对同一用户已授权的 scope 会沿用：机器人账号本人登录时，这枚令牌可能带着 `repo read:org`，泄露后果与机器人令牌相同，直到被吊销 | 不轮换：取到数字 id 后立即用 W-14 单独吊销；吊销失败时重试并告警，必要时由账号本人在 GitHub 设置里撤销 |
 | OAuth App client secret（每个环境一个 OAuth App，各一份） | `<栈根>/secrets/oauth_client_secret`，只挂给 control | control 的登录模块和 publisher（web flow 换令牌、W-14 吊销时做 Basic 认证）；主机上能读 secrets 目录的账号 | 可以冒充这个 OAuth App 发起 web flow 骗取授权；再配合一枚泄露的用户令牌，可以查验、重置或吊销它。单凭它拿不到机器人令牌（device flow 不用 client secret） | 在 GitHub 的 OAuth App 设置里生成新 secret，替换文件，重启 control，确认登录和吊销正常后在 GitHub 删除旧 secret |
 | 令牌加密主密钥（master key，每个环境一份） | `<栈根>/secrets/master_key`，只挂给 control；不进备份；所有者另存一份离线副本 | control 进程；主机上能读 secrets 目录的账号 | 单独泄露没有直接后果；与库文件同时泄露（主机被入侵，或备份加上备份加密密钥一起泄露）时，可以解出机器人令牌，后果同第一行 | CLI `rotate-master-key`（#5）生成新密钥并在一个事务里重新加密全部密文；怀疑已经泄露时，还要重新绑定机器人并吊销旧令牌，因为旧密文可能已被解开 |

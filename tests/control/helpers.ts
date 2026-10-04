@@ -36,6 +36,7 @@ export interface Fixture {
   readonly backupDir: string;
   readonly masterKey: { path: string; text: string };
   readonly backupKey: { path: string; text: string };
+  readonly sessionKey: { path: string; text: string };
   readonly env: Record<string, string>;
 }
 
@@ -46,6 +47,7 @@ export function fixture(): Fixture {
   mkdirSync(secrets, { mode: 0o700 });
   const masterKey = writeKey(secrets, "master_key");
   const backupKey = writeKey(secrets, "backup_key");
+  const sessionKey = writeKey(secrets, "session_key");
   const dbPath = join(dir, "data", "geek-bot.db");
   return {
     dir,
@@ -53,12 +55,14 @@ export function fixture(): Fixture {
     backupDir: join(dir, "data", "backups"),
     masterKey,
     backupKey,
+    sessionKey,
     env: {
       GEEK_BOT_INSTANCE_ROLE: "preview",
       GEEK_BOT_HOST: "127.0.0.1",
       GEEK_BOT_DB_PATH: dbPath,
       GEEK_BOT_MASTER_KEY_FILE: masterKey.path,
       GEEK_BOT_BACKUP_KEY_FILE: backupKey.path,
+      GEEK_BOT_SESSION_SECRET_FILE: sessionKey.path,
       GEEK_BOT_LOG_LEVEL: "debug",
     },
   };

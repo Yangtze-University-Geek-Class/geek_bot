@@ -37,30 +37,30 @@
 
 ## services/control/
 
-控制面：唯一的 SQLite 写入者和唯一的 GitHub 写入者，负责登录、令牌、仓库发现、轮询、调度和模型中继，并同源托管 console。
+控制面是唯一数据库写者和多渠道外部写出口，管理身份、连接、项目、需求、任务、机器、模型中继与同源后台。
 
 | 文档 | 说明 | EN |
 |---|---|---|
 | [`behavior.md`](./services/control/behavior.md) | 机器人的每条默认行为规则（B-01…）：规则内容、配置项名、默认值、作用范围，以及哪几条同时是写入白名单的拒绝规则。 | — |
-| [`data-model.md`](./services/control/data-model.md) | control 的 SQLite 库：每张表的用途、主要列、索引、写入模块、保留期和密文列，以及迁移与兼容版本、备份与每日恢复校验、从 GitHub 重建状态的规则。 | — |
+| [`data-model.md`](./services/control/data-model.md) | control 的 SQLite 表、密文与租约字段、去重约束，以及只扩不缩的迁移、加密备份和恢复边界。 | — |
 | [`write-whitelist.md`](./services/control/write-whitelist.md) | 机器人对 GitHub 的每一种写入：允许清单 W-01…W-14、拒绝清单 D-01…D-64，以及输出中和、outbox 状态机与 `dedupe_key`、限速与熔断。 | — |
 
 ## services/node/
 
-工作节点代理：只向外连 control 领任务，不开入站端口；管理 issue 通道的无网 sandbox 容器和 PR 通道的一次性 QEMU/KVM VM。
+工作节点代理：只向外连 control 领任务、回报结果，不开入站端口；在节点上调度无网 sandbox 槽位和一次性 QEMU/KVM VM，并为它们提供本地模型代理和出网代理。
 
 | 文档 | 说明 | EN |
 |---|---|---|
-| [`protocol.md`](./services/node/protocol.md) | 工作节点与 control 之间的 HTTP/JSON 协议：原则、消息表 N-01…，以及 sandbox 与 VM 怎样访问节点。 | — |
+| [`protocol.md`](./services/node/protocol.md) | 工作节点与 control 之间的 HTTP/JSON 协议 `/api/node/v1`：请求头与租约栅栏、端点 N-01…N-09、失联与回放，以及 sandbox 与 VM 怎样访问节点。 | — |
 | [`vm-feasibility.md`](./services/node/vm-feasibility.md) | 在第一台节点的临时容器里，用 QEMU/KVM 起 1 vCPU / 2 GiB 的一次性 VM：冷启动、网络隔离、出网代理、依赖安装、pnpm verify 与内存峰值的实测数据，以及对 ADR-0004 的结论。 | — |
 
 ## services/protocol/
 
-纯类型加 JSON Schema：节点协议、TaskSpec、任务结果、RepoProfile、catalog 文件契约、console API DTO；各包之间唯一的共享契约。
+纯类型加少量冻结常量和 JSON Schema：节点协议、执行任务与任务包、任务结果、共享平台的记录与后台 DTO；各包之间唯一的共享契约。
 
 ## services/runner/
 
-在 sandbox 容器或一次性 VM 里驱动 omp 的单文件程序，只用 Node 标准库。
+在 sandbox 槽位容器或一次性 VM 里驱动 omp 的单文件程序 `runner.mjs`：核对并解开任务包，在干净的 HOME 里按模型池逐个尝试 omp，生成结构化结果和补丁，只用 Node 标准库。
 
 ## components/
 
@@ -93,7 +93,7 @@
 
 | 文档 | 说明 | EN |
 |---|---|---|
-| [`API.md`](./architecture/API.md) | control 给管理后台的 HTTP 接口：路径、格式、会话与 CSRF、角色、校验、错误、幂等、分页、SSE 的约定，以及端点表 A-01…。 | — |
+| [`API.md`](./architecture/API.md) | control 的单实例共享平台 HTTP 接口：后台身份、连接、项目、需求、机器、任务、模型池和事件流。 | — |
 | [`ARCHITECTURE.md`](./architecture/ARCHITECTURE.md) | 控制面加工作节点：control 单进程单写者、唯一 GitHub 写入方；节点只出站领任务，在无网 sandbox 或一次性 VM 里运行 omp。 | — |
 | [`SECURITY.md`](./architecture/SECURITY.md) | 信任边界、安全不变量（S-01…S-20）、每个密钥放在哪、谁能读、泄露后果、如何轮换，以及剩下的风险和验证办法。 | — |
 
@@ -124,7 +124,8 @@
 | [`0009-tuffex-console.md`](./decisions/0009-tuffex-console.md) | console 是 Vue 3.5 + vue-router 4 + Tuffex 0.6.0 + Vite 的单页应用，版本钉死；构建产物打进 control 镜像，与后台 API 和 SSE 同源提供，不另起静态服务器。 | — |
 | [`0010-tracking-record-prefix.md`](./decisions/0010-tracking-record-prefix.md) | 本仓库 issue / PR 评论里的追踪记录统一用 `<!-- track v1 kind=… stage=… -->`，与产品内置的默认格式一致；产品代码里它只是可配置的默认值。 | — |
 | [`0011-qemu-sandbox-elevateprivileges.md`](./decisions/0011-qemu-sandbox-elevateprivileges.md) | qemu 的 `-sandbox` 改为 `on,obsolete=deny,resourcecontrol=deny`：实测 `elevateprivileges=deny` 会让 guestfwd 的转发进程起不来；提权由 node 容器的 cap_drop ALL 与 no-new-privileges 挡住。取代 ADR-0004 里 `-sandbox` 那一句，ADR-0004 的其余决定不变。 | — |
+| [`0012-shared-cross-platform-workspace.md`](./decisions/0012-shared-cross-platform-workspace.md) | 一个实例管理共享项目、需求、任务和机器；渠道账号独立绑定，管理员授权资源，控制面统一调度和发布。 | — |
 
 ---
 
-共 44 篇文档（另有 4 篇英文版）。索引按目录分组，组内按文件名排序。
+共 45 篇文档（另有 4 篇英文版）。索引按目录分组，组内按文件名排序。
