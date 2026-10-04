@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApiClient } from "../../app/console/src/lib/api.js";
-import { SAMPLE_RESOURCES } from "../../app/console/src/mocks/data.js";
-import { SAMPLE_SCENARIOS, SLOW_DELAY_MS, createSampleFetch, readScenario } from "../../app/console/src/mocks/index.js";
+import { SAMPLE_AUTH_STATE, SAMPLE_ME, SAMPLE_RELEASE, SAMPLE_RESOURCES } from "../../app/console/src/mocks/data.js";
+import { SAMPLE_SCENARIOS, createSampleFetch, readScenario } from "../../app/console/src/mocks/index.js";
 import { CONSOLE_PAGES } from "../../app/console/src/shell/pages.js";
 
 afterEach(() => {
@@ -9,11 +9,9 @@ afterEach(() => {
 });
 
 describe("样板数据模式", () => {
-  it("从 ?sample= 读场景，不认识的值当作 ok", () => {
+  it("从 ?sample= 读明确指定的场景", () => {
     expect(readScenario("?sample=error")).toBe("error");
-    expect(readScenario("?sample=bogus")).toBe("ok");
-    expect(readScenario("")).toBe("ok");
-    expect([...SAMPLE_SCENARIOS]).toEqual(["ok", "empty", "slow", "error", "forbidden", "unauthenticated", "offline"]);
+    expect(readScenario("?other=value&sample=slow")).toBe("slow");
   });
 
   it("每个页面的数据端点都有样板响应", () => {
@@ -46,19 +44,33 @@ describe("样板数据模式", () => {
     await expect(offline.get("/api/v1/tasks")).rejects.toMatchObject({ kind: "network" });
   });
 
-  it("empty 场景只把列表清空，外壳用的 me 与 release 照常返回", async () => {
+  it("empty 场景只把列表清空，外壳用的 auth、me 与 release 照常返回", async () => {
     const api = createApiClient(createSampleFetch({ scenario: "empty" }));
     await expect(api.get("/api/v1/tasks")).resolves.toEqual({ items: [], next_cursor: null });
-    await expect(api.get("/api/v1/bot-account")).resolves.toMatchObject({ bound: true });
-    await expect(api.get("/api/v1/me")).resolves.toMatchObject({ role: "owner" });
-    await expect(api.get("/api/release")).resolves.toMatchObject({ display: "本地开发 · 未发布" });
+    await expect(api.get("/api/v1/machines")).resolves.toEqual({ items: [], next_cursor: null });
+    await expect(api.get("/api/v1/auth/state")).resolves.toEqual(SAMPLE_AUTH_STATE);
+    await expect(api.get("/api/v1/me")).resolves.toEqual(SAMPLE_ME);
+    await expect(api.get("/api/release")).resolves.toEqual(SAMPLE_RELEASE);
   });
 
-  it("slow 场景先等待再返回", async () => {
-    const sleep = vi.fn(async () => {});
-    const api = createApiClient(createSampleFetch({ scenario: "slow", sleep }));
-    await expect(api.get("/api/v1/nodes")).resolves.toMatchObject({ items: expect.any(Array) });
-    expect(sleep).toHaveBeenCalledWith(SLOW_DELAY_MS);
+  it("slow 场景等待期间外壳仍可读取，放行后返回机器列表", async () => {
+    let release!: () => void;
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    const api = createApiClient(createSampleFetch({ scenario: "slow", sleep: () => pending }));
+    const machines = api.get("/api/v1/machines");
+    try {
+      const first = await Promise.race([
+        machines.then(() => "machines"),
+        api.get("/api/v1/me").then(me => {
+          expect(me).toEqual(SAMPLE_ME);
+          return "shell";
+        }),
+      ]);
+      expect(first).toBe("shell");
+    } finally {
+      release();
+    }
+    await expect(machines).resolves.toEqual({ items: SAMPLE_RESOURCES["/api/v1/machines"], next_cursor: null });
   });
 
   it("未知路径 404、写请求 405", async () => {

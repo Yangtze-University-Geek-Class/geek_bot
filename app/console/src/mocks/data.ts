@@ -1,8 +1,22 @@
 /**
- * 样板数据：全部虚构，只用于界面开发与回归（DESIGN「硬性规则」：样板数据要在界面上标明）。
- * 账号、组织、仓库一律是占位写法，不对应任何真实的 GitHub 账号或仓库。
+ * 样板数据：全部虚构，只用于界面开发与浏览器回归（DESIGN「硬性规则」：样板数据要在界面上标明）。
+ * 账号、组织、项目一律是占位写法，不对应任何真实的平台账号或仓库；形状与 @geek-bot/protocol 的 DTO 一致。
  */
-import type { ApiList, MeResponse, ReleaseInfo } from "@geek-bot/protocol";
+import type {
+  AuthStateResponse,
+  ConnectionRecord,
+  DemandRecord,
+  ItemRecord,
+  MachineRecord,
+  MeResponse,
+  ModelPoolsResponse,
+  OverviewResponse,
+  PlatformAdministrator,
+  ProjectRecord,
+  ReleaseInfo,
+  TaskEvent,
+  TaskRecord,
+} from "@geek-bot/protocol";
 
 export const SAMPLE_RELEASE: ReleaseInfo = {
   display: "本地开发 · 未发布",
@@ -14,41 +28,428 @@ export const SAMPLE_ME: MeResponse = {
   github_id: 1000001,
   login: "example-owner",
   role: "owner",
-  is_bot_account: true,
+  is_bot_account: false,
   reauth_valid_until: null,
   session_expires_at: "2026-01-01T12:00:00Z",
 };
 
-const list = <T>(items: T[]): ApiList<T> => ({ items, next_cursor: null });
+export const SAMPLE_AUTH_STATE: AuthStateResponse = { claimed: true, login_methods: ["device"], insecure_context: false, bot_bound: true };
 
-/** 各页面数据端点的样板响应。列表端点在 empty 场景下返回空列表，其它端点照常返回。 */
-export const SAMPLE_RESOURCES: Readonly<Record<string, unknown>> = {
-  "/api/v1/overview": {
-    nodes: { total: 1, active: 1 },
-    slots: { sandbox: { used: 0, total: 2 }, vm: { used: 0, total: 1 } },
-    tasks: { queued: 2, running: 1, failed: 0 },
+export const SAMPLE_CONNECTIONS: readonly ConnectionRecord[] = [
+  {
+    id: "conn-sample-github",
+    provider: "github",
+    name: "样板 GitHub 账号",
+    base_url: "https://api.github.com",
+    enabled: true,
+    status: "ok",
+    account_name: "example-bot",
+    capabilities: ["monitor", "review", "triage", "followup", "fix", "rework"],
+    secret_configured: true,
+    revision: 3,
+    created_at: "2026-01-01T08:00:00Z",
   },
-  "/api/v1/tasks": list([
-    { task_id: "task-sample-1", kind: "review", channel: "pr", state: "queued", repo: "example-org/sample-repo", number: 12 },
-    { task_id: "task-sample-2", kind: "triage", channel: "issue", state: "running", repo: "example-org/sample-repo", number: 7 },
-  ]),
-  "/api/v1/items": list([
-    { repo: "example-org/sample-repo", number: 3, type: "issue", title: "样板条目：已分给人", reason: "assigned_to_human" },
-  ]),
-  "/api/v1/repos": list([
-    { repo_id: "repo-sample-1", full_name: "example-org/sample-repo", private: false, permission: "write", state: "active" },
-    { repo_id: "repo-sample-2", full_name: "example-owner/sample-notes", private: true, permission: "read", state: "active" },
-  ]),
-  "/api/v1/nodes": list([
-    { node_id: "node-sample-1", name: "sample-node", state: "active", slots: { sandbox: 2, vm: 1 } },
-  ]),
-  "/api/v1/model-pools": {
-    review: [{ model_id: "example-model", effort: "medium", in_catalog: true }],
+  {
+    id: "conn-sample-gitlab",
+    provider: "gitlab",
+    name: "样板 GitLab",
+    base_url: "https://gitlab.example.com",
+    enabled: true,
+    status: "ok",
+    account_name: "example-bot",
+    capabilities: ["monitor", "review", "triage"],
+    secret_configured: true,
+    revision: 1,
+    created_at: "2026-01-01T08:10:00Z",
   },
-  "/api/v1/bot-account": { bound: true, login: "example-owner", token_status: "valid", writes_paused: false },
-  "/api/v1/settings": { items: [{ name: "poll.interval_s", value: 60, source: "default", read_only: false }], next_cursor: null },
-  "/api/v1/alerts": list([]),
-  "/api/v1/audit": list([
-    { id: "audit-sample-1", actor: "system", action: "instance.started", target: "control", note: "样板记录" },
-  ]),
+  {
+    id: "conn-sample-feishu",
+    provider: "feishu",
+    name: "样板飞书应用",
+    base_url: "https://open.feishu.cn",
+    enabled: true,
+    status: "ok",
+    account_name: null,
+    capabilities: [],
+    secret_configured: true,
+    revision: 2,
+    created_at: "2026-01-01T08:20:00Z",
+  },
+  {
+    id: "conn-sample-webhook",
+    provider: "webhook",
+    name: "样板签名 Webhook",
+    base_url: "",
+    enabled: false,
+    status: "disabled",
+    account_name: null,
+    capabilities: [],
+    secret_configured: false,
+    revision: 1,
+    created_at: "2026-01-01T08:30:00Z",
+  },
+];
+
+export const SAMPLE_MACHINES: readonly MachineRecord[] = [
+  {
+    id: "machine-sample-1",
+    name: "sample-builder-01",
+    status: "ready",
+    trust: "high",
+    tags: ["arm64", "kvm"],
+    slots: { sandbox: 4, vm: 2 },
+    capacity: { cpu: 16, memory_mib: 32768 },
+    used: { cpu: 4, memory_mib: 8192, sandbox: 1, vm: 1 },
+    last_seen_at: "2026-01-01T11:59:30Z",
+    revision: 5,
+  },
+  {
+    id: "machine-sample-2",
+    name: "sample-builder-02",
+    status: "cordoned",
+    trust: "standard",
+    tags: ["x86_64"],
+    slots: { sandbox: 2, vm: 0 },
+    capacity: { cpu: 8, memory_mib: 16384 },
+    used: { cpu: 0, memory_mib: 0, sandbox: 0, vm: 0 },
+    last_seen_at: "2026-01-01T11:58:00Z",
+    revision: 2,
+  },
+  {
+    id: "machine-sample-3",
+    name: "sample-builder-03",
+    status: "pending",
+    trust: "standard",
+    tags: [],
+    slots: { sandbox: 2, vm: 1 },
+    capacity: { cpu: 4, memory_mib: 8192 },
+    used: { cpu: 0, memory_mib: 0, sandbox: 0, vm: 0 },
+    last_seen_at: null,
+    revision: 1,
+  },
+];
+
+export const SAMPLE_PROJECTS: readonly ProjectRecord[] = [
+  {
+    id: "project-sample-1",
+    connection_id: "conn-sample-github",
+    external_id: "1001",
+    name: "sample-repo",
+    path: "example-org/sample-repo",
+    url: "https://github.com/example-org/sample-repo",
+    default_branch: "main",
+    private: false,
+    archived: false,
+    permission: "write",
+    capabilities: ["monitor", "review", "triage", "followup", "fix", "rework"],
+    status: "active",
+    enabled: true,
+    write_mode: "dry_run",
+    review_enabled: true,
+    triage_enabled: true,
+    fix_enabled: false,
+    rework_enabled: false,
+    machine_ids: [],
+    tags: ["backend"],
+    revision: 4,
+    updated_at: "2026-01-01T10:00:00Z",
+  },
+  {
+    id: "project-sample-2",
+    connection_id: "conn-sample-github",
+    external_id: "1002",
+    name: "sample-notes",
+    path: "example-owner/sample-notes",
+    url: "https://github.com/example-owner/sample-notes",
+    default_branch: "main",
+    private: true,
+    archived: false,
+    permission: "read",
+    capabilities: ["monitor", "triage"],
+    status: "active",
+    enabled: false,
+    write_mode: "off",
+    review_enabled: false,
+    triage_enabled: false,
+    fix_enabled: false,
+    rework_enabled: false,
+    machine_ids: ["machine-sample-1"],
+    tags: [],
+    revision: 1,
+    updated_at: "2026-01-01T09:00:00Z",
+  },
+  {
+    id: "project-sample-3",
+    connection_id: "conn-sample-gitlab",
+    external_id: "77",
+    name: "sample-service",
+    path: "example-group/sample-service",
+    url: "https://gitlab.example.com/example-group/sample-service",
+    default_branch: "main",
+    private: true,
+    archived: true,
+    permission: "developer",
+    capabilities: ["monitor"],
+    status: "lost",
+    enabled: false,
+    write_mode: "off",
+    review_enabled: false,
+    triage_enabled: false,
+    fix_enabled: false,
+    rework_enabled: false,
+    machine_ids: [],
+    tags: [],
+    revision: 2,
+    updated_at: "2026-01-01T07:00:00Z",
+  },
+];
+
+export const SAMPLE_ITEMS: readonly ItemRecord[] = [
+  {
+    id: "item-sample-1",
+    project_id: "project-sample-1",
+    external_id: "5001",
+    kind: "change",
+    number: 12,
+    title: "样板变更：调整配置读取顺序",
+    body: "样板正文，不对应任何真实变更。",
+    url: "https://github.com/example-org/sample-repo/pull/12",
+    state: "open",
+    author: "example-contributor",
+    bot_authored: false,
+    active_task: { id: "task-sample-2", kind: "review", status: "awaiting_publish" },
+    head_sha: "1111111111111111111111111111111111111111",
+    base_sha: "2222222222222222222222222222222222222222",
+    updated_at: "2026-01-01T10:30:00Z",
+  },
+  {
+    id: "item-sample-2",
+    project_id: "project-sample-1",
+    external_id: "5002",
+    kind: "issue",
+    number: 7,
+    title: "样板 issue：启动时偶尔读不到配置",
+    body: "样板正文。",
+    url: "https://github.com/example-org/sample-repo/issues/7",
+    state: "open",
+    author: "example-reporter",
+    bot_authored: false,
+    active_task: { id: "task-sample-1", kind: "fix", status: "running" },
+    head_sha: null,
+    base_sha: null,
+    updated_at: "2026-01-01T09:30:00Z",
+  },
+  {
+    id: "item-sample-3",
+    project_id: "project-sample-1",
+    external_id: "5003",
+    kind: "change",
+    number: 15,
+    title: "样板变更：机器人开的修复变更",
+    body: "样板正文：由机器人账号开出的变更，只能返工，不能审查。",
+    url: "https://github.com/example-org/sample-repo/pull/15",
+    state: "open",
+    author: "example-bot",
+    bot_authored: true,
+    active_task: null,
+    head_sha: "3333333333333333333333333333333333333333",
+    base_sha: "2222222222222222222222222222222222222222",
+    updated_at: "2026-01-01T11:30:00Z",
+  },
+  {
+    id: "item-sample-4",
+    project_id: "project-sample-1",
+    external_id: "5004",
+    kind: "issue",
+    number: 9,
+    title: "样板 issue：日志里时间没有时区",
+    body: "样板正文。",
+    url: "https://github.com/example-org/sample-repo/issues/9",
+    state: "open",
+    author: "example-reporter",
+    bot_authored: false,
+    active_task: null,
+    head_sha: null,
+    base_sha: null,
+    updated_at: "2026-01-01T08:30:00Z",
+  },
+];
+
+export const SAMPLE_DEMANDS: readonly DemandRecord[] = [
+  {
+    id: "demand-sample-1",
+    title: "样板需求：修复启动时读不到配置",
+    body: "背景：样板描述。\n期望：启动后配置总是生效。\n这段文字按纯文本显示，<b>不会</b>被当成标记。",
+    project_id: "project-sample-1",
+    source: "feishu",
+    source_ref: "om_sample_message",
+    source_connection_id: "conn-sample-feishu",
+    status: "running",
+    created_by: null,
+    created_at: "2026-01-01T09:40:00Z",
+    updated_at: "2026-01-01T10:05:00Z",
+    revision: 3,
+  },
+  {
+    id: "demand-sample-2",
+    title: "样板需求：还没有关联项目",
+    body: "从签名 Webhook 进来的样板需求。",
+    project_id: null,
+    source: "webhook",
+    source_ref: "evt-sample-2",
+    source_connection_id: "conn-sample-webhook",
+    status: "new",
+    created_by: null,
+    created_at: "2026-01-01T11:00:00Z",
+    updated_at: "2026-01-01T11:00:00Z",
+    revision: 1,
+  },
+];
+
+export const SAMPLE_TASKS: readonly TaskRecord[] = [
+  {
+    id: "task-sample-1",
+    project_id: "project-sample-1",
+    demand_id: "demand-sample-1",
+    item_id: "item-sample-2",
+    kind: "fix",
+    executor: "vm",
+    status: "running",
+    priority: 30,
+    resources: { cpu: 2, memory_mib: 4096 },
+    machine_id: "machine-sample-1",
+    epoch: 1,
+    lease_id: "lease-sample-1",
+    head_sha: "a".repeat(40),
+    base_sha: "b".repeat(40),
+    lease_expires_at: "2026-01-01T12:05:00Z",
+    result: null,
+    error: null,
+    created_at: "2026-01-01T10:00:00Z",
+    updated_at: "2026-01-01T10:05:00Z",
+  },
+  {
+    id: "task-sample-2",
+    project_id: "project-sample-1",
+    demand_id: null,
+    item_id: "item-sample-1",
+    kind: "review",
+    executor: "sandbox",
+    status: "awaiting_publish",
+    priority: 10,
+    resources: { cpu: 1, memory_mib: 2048 },
+    machine_id: "machine-sample-1",
+    epoch: 1,
+    lease_id: null,
+    head_sha: "a".repeat(40),
+    base_sha: "b".repeat(40),
+    lease_expires_at: null,
+    result: {
+      summary: "样板审查：1 条应修、1 条建议",
+      body: "样板结论正文。\n模型输出按纯文本显示，<script> 之类的内容不会执行。",
+      findings: [
+        { severity: "warning", path: "src/config.ts", line: 42, message: "样板意见：读取顺序与文档不一致。" },
+        { severity: "suggestion", path: "src/config.ts", line: 60, message: "样板意见：可以提成常量。" },
+      ],
+    },
+    error: null,
+    created_at: "2026-01-01T09:00:00Z",
+    updated_at: "2026-01-01T09:20:00Z",
+  },
+  {
+    id: "task-sample-3",
+    project_id: "project-sample-2",
+    demand_id: null,
+    item_id: null,
+    kind: "triage",
+    executor: "sandbox",
+    status: "failed",
+    priority: 50,
+    resources: { cpu: 1, memory_mib: 1024 },
+    machine_id: null,
+    epoch: 2,
+    lease_id: null,
+    head_sha: null,
+    base_sha: null,
+    lease_expires_at: null,
+    result: null,
+    error: "样板错误：租约过期两次，按基础设施失败处理。",
+    created_at: "2026-01-01T08:00:00Z",
+    updated_at: "2026-01-01T08:30:00Z",
+  },
+];
+
+export const SAMPLE_EVENTS: Readonly<Record<string, readonly TaskEvent[]>> = {
+  "task-sample-1": [
+    { seq: 1, at: "2026-01-01T10:01:00Z", kind: "model", text: "样板：使用 example-model（medium）" },
+    { seq: 2, at: "2026-01-01T10:02:00Z", kind: "tool", text: "样板：读取 src/config.ts" },
+    { seq: 3, at: "2026-01-01T10:03:00Z", kind: "text", text: "样板输出：定位到配置读取顺序问题。" },
+  ],
+  "task-sample-2": [{ seq: 1, at: "2026-01-01T09:05:00Z", kind: "text", text: "样板输出：审查完成。" }],
+  "task-sample-3": [
+    { seq: 1, at: "2026-01-01T08:05:00Z", kind: "retry", text: "样板：租约过期，重新排队。" },
+    { seq: 2, at: "2026-01-01T08:25:00Z", kind: "error", text: "样板：第二次租约过期。" },
+  ],
 };
+
+export const SAMPLE_ADMINS: readonly PlatformAdministrator[] = [
+  { github_id: 1000001, login: "example-owner", role: "owner" },
+  { github_id: 1000002, login: "example-operator", role: "operator" },
+  { github_id: 1000003, login: "example-viewer", role: "viewer" },
+];
+
+export const SAMPLE_MODEL_POOLS: ModelPoolsResponse = {
+  catalog: {
+    models: [
+      { id: "example-model", name: "样板模型", efforts: ["low", "medium", "high"] },
+      { id: "example-model-mini", name: "样板小模型", efforts: [] },
+    ],
+    error: null,
+  },
+  pools: [
+    { kind: "review", entries: [{ model: "example-model", effort: "medium" }, { model: "example-model-mini", effort: "off" }], revision: 2 },
+    { kind: "triage", entries: [{ model: "example-model-mini", effort: "off" }], revision: 1 },
+    { kind: "followup", entries: [{ model: "example-model-mini", effort: "off" }], revision: 1 },
+    { kind: "fix", entries: [{ model: "example-model", effort: "high" }], revision: 1 },
+    { kind: "rework", entries: [{ model: "example-model", effort: "high" }], revision: 1 },
+  ],
+};
+
+export const SAMPLE_OVERVIEW: OverviewResponse = {
+  projects: SAMPLE_PROJECTS.length,
+  demands: SAMPLE_DEMANDS.length,
+  machines: SAMPLE_MACHINES.length,
+  queued: 0,
+  running: 1,
+  awaiting_publish: 1,
+  failed: 1,
+  connections: SAMPLE_CONNECTIONS.length,
+};
+
+/** 各列表端点的样板记录（页面清单里每个数据端点都在这里）；empty 场景下列表端点返回空列表。 */
+export const SAMPLE_RESOURCES: Readonly<Record<string, unknown>> = {
+  "/api/v1/projects": SAMPLE_PROJECTS,
+  "/api/v1/demands": SAMPLE_DEMANDS,
+  "/api/v1/machines": SAMPLE_MACHINES,
+  "/api/v1/tasks": SAMPLE_TASKS,
+  "/api/v1/connections": SAMPLE_CONNECTIONS,
+  "/api/v1/admins": SAMPLE_ADMINS,
+  "/api/v1/model-pools": SAMPLE_MODEL_POOLS,
+  "/api/v1/overview": SAMPLE_OVERVIEW,
+};
+
+/** 有详情端点的集合：`<集合>/<id>` 返回对应记录（带 ETag）。 */
+export const SAMPLE_DETAILS: Readonly<Record<string, readonly { readonly id: string }[]>> = {
+  "/api/v1/projects": SAMPLE_PROJECTS,
+  "/api/v1/demands": SAMPLE_DEMANDS,
+  "/api/v1/machines": SAMPLE_MACHINES,
+  "/api/v1/tasks": SAMPLE_TASKS,
+  "/api/v1/connections": SAMPLE_CONNECTIONS,
+};
+
+/** 详情下的子列表：`/api/v1/projects/<id>/items`、`/api/v1/tasks/<id>/events`。 */
+export function sampleSubList(collection: string, id: string, sub: string): readonly unknown[] | null {
+  if (collection === "/api/v1/projects" && sub === "items") return SAMPLE_ITEMS.filter(item => item.project_id === id);
+  if (collection === "/api/v1/tasks" && sub === "events") return SAMPLE_EVENTS[id] ?? [];
+  return null;
+}

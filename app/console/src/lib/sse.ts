@@ -10,7 +10,7 @@
  * - 收到 `reset` 表示补发不了，调用方要重新拉取当前页的数据；收到 `session_expired` 关闭连接、不再重连。
  * - 事件里的文本已由 control 打码，渲染时仍按纯文本处理（S-05）。
  *
- * 服务端的 SSE 由 #14 实现；在那之前外壳不建立连接，本模块由单测覆盖。EventSource 与定时器都可注入。
+ * 任务详情页订阅 `task:<task_id>`，收到 task.updated / task.event 时重新读取任务与事件。EventSource 与定时器都可注入。
  */
 import type { StreamTopic } from "@geek-bot/protocol";
 
@@ -23,21 +23,16 @@ export const RECONNECT_MAX_MS = 60_000;
 const EVENT_SOURCE_CLOSED = 2;
 /** 每个连接最多订阅的 topic 数（A-56）。 */
 export const MAX_TOPICS = 20;
-/** 连接上要监听的事件类型（API.md「SSE」事件表）。 */
+/** 连接上要监听的事件类型：任务、需求、项目、机器、连接的变化与平台计数。 */
 export const STREAM_EVENT_TYPES = Object.freeze([
   "overview.stats",
   "task.created",
   "task.updated",
   "task.event",
-  "task.attempt",
-  "publish.updated",
-  "node.updated",
-  "node.health",
-  "repo.updated",
-  "bot.status",
-  "alert.raised",
-  "alert.resolved",
-  "settings.updated",
+  "demand.updated",
+  "project.updated",
+  "machine.updated",
+  "connection.updated",
 ] as const);
 export type StreamEventType = (typeof STREAM_EVENT_TYPES)[number];
 

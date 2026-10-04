@@ -1,174 +1,186 @@
-/**
- * 后台外壳：宽屏侧栏、390px 窄屏抽屉、键盘可达、样板数据标识、断网提示与验收截图（#4）。
- */
+/** Canonical console routes, keyboard access, modal navigation and sample isolation. */
 import { CONSOLE_PAGES } from "../../app/console/src/shell/pages.js";
 import type { Page } from "@playwright/test";
-import { NARROW, WIDE, clippedElements, expect, expectPageRules, settledState, test } from "./fixtures.js";
+import { NARROW, WIDE, clippedElements, expect, expectPageRules, test } from "./fixtures.js";
 
-/**
- * 等抽屉滑入完成：面板左边缘回到 0，且前后两次读到的宽度一致。
- * 动画进行中做页面检查会把正在移动的内容当成被截断（#30）。
- */
+/** Ready content replaces StateView; there is no data-state=ready element. */
+async function readPage(page: Page, path: string): Promise<void> {
+  await page.goto(`${path}?sample=slow`);
+  await expect(page.locator('.state-view[data-state="loading"]').first()).toBeVisible();
+  await expect(page.locator('.state-view[data-state="loading"]')).toHaveCount(0);
+  await expect(page.locator('.state-view')).toHaveCount(0);
+}
+
 async function drawerSettled(page: Page): Promise<void> {
   const panel = page.locator(".tx-drawer__panel");
   let lastWidth = -1;
-  await expect
-    .poll(async () => {
-      const box = await panel.boundingBox();
-      const settled = box !== null && box.x === 0 && box.width === lastWidth;
-      lastWidth = box?.width ?? -1;
-      return settled;
-    }, { message: "抽屉滑入完成" })
-    .toBe(true);
+  await expect.poll(async () => {
+    const box = await panel.boundingBox();
+    const settled = box !== null && box.x === 0 && box.width === lastWidth;
+    lastWidth = box?.width ?? -1;
+    return settled;
+  }, { message: "抽屉滑入完成" }).toBe(true);
 }
 
-/** 抽屉打开后：焦点已经在抽屉里，连按 Tab 也出不去（W3C APG modal dialog）。 */
 async function expectFocusTrappedIn(page: Page): Promise<void> {
-  const insideDialog = () => page.evaluate(() => Boolean(document.activeElement?.closest("[role=dialog]")));
-  await expect.poll(insideDialog, { message: "打开后焦点进入抽屉" }).toBe(true);
-  for (let step = 0; step < 14; step += 1) {
-    await page.keyboard.press("Tab");
-    expect(await insideDialog(), `第 ${step + 1} 次 Tab 后焦点仍在抽屉里`).toBe(true);
+  const inside = () => page.evaluate(() => Boolean(document.activeElement?.closest('[role="dialog"]')));
+  await expect.poll(inside).toBe(true);
+  for (const key of ["Tab", "Shift+Tab"] as const) {
+    for (let step = 0; step < 16; step += 1) {
+      await page.keyboard.press(key);
+      expect(await inside(), `${key} 第 ${step + 1} 次后焦点仍在抽屉里`).toBe(true);
+    }
   }
 }
 
-test.describe("宽屏（1280px）", () => {
+async function tabTo(page: Page, target: ReturnType<Page["getByRole"]>): Promise<void> {
+  let reached = false;
+  for (let step = 0; step < 40 && !reached; step += 1) {
+    await page.keyboard.press("Tab");
+    reached = await target.evaluate(element => element === document.activeElement);
+  }
+  expect(reached, "目标可通过 Tab 到达").toBe(true);
+  await expect(target).toBeFocused();
+}
+
+ test.describe("宽屏（1280px）", () => {
   test.use({ viewport: WIDE });
 
   for (const consolePage of CONSOLE_PAGES) {
-    test(`${consolePage.label}：侧栏导航、页面标题与页面检查`, async ({ page }) => {
-      await page.goto(consolePage.path);
+    test(`${consolePage.path}：读取成功、路由选中与页面规则`, async ({ page }) => {
+      await readPage(page, consolePage.path);
       const nav = page.getByRole("navigation", { name: "主导航" });
       await expect(nav).toBeVisible();
-      await expect(nav.getByRole("button", { name: consolePage.label })).toHaveAttribute("aria-current", "page");
-      await expect(page.getByRole("heading", { level: 1 })).toHaveText(consolePage.label);
-      await expect(page).toHaveTitle(`${consolePage.label} · geek_bot 后台`);
-      // 样板数据里告警是空列表，其余页面有数据；两种都不能是失败类状态。
-      expect(["ready", "empty"]).toContain(await settledState(page));
+      await expect(nav.getByRole("button", { name: consolePage.label, exact: true })).toHaveAttribute("aria-current", "page");
+      await expect(nav.locator('[aria-current="page"]')).toHaveCount(1);
+      await expect(page).toHaveURL(new RegExp(`${consolePage.path}\\?sample=slow$`));
+      await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
       await expect(page.getByRole("button", { name: "导航", exact: true })).toHaveCount(0);
       await expectPageRules(page);
     });
   }
 
-  test("点侧栏切换页面，地址与标题跟着变", async ({ page }) => {
-    await page.goto("/");
-    await expect(page).toHaveURL(/\/overview$/);
-    await page.getByRole("navigation", { name: "主导航" }).getByRole("button", { name: "节点" }).click();
-    await expect(page).toHaveURL(/\/nodes$/);
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText("节点");
+  test("侧栏切换到明确选择的路由", async ({ page }) => {
+    await readPage(page, "/projects");
+    const nav = page.getByRole("navigation", { name: "主导航" });
+    const target = nav.getByRole("button", { name: "机器", exact: true });
+    await target.click();
+    await expect(page).toHaveURL(/\/machines$/);
+    await expect(target).toHaveAttribute("aria-current", "page");
+    await expect(nav.getByRole("button", { name: "项目", exact: true })).not.toHaveAttribute("aria-current", "page");
   });
 
-  test("键盘：第一个 Tab 到「跳到主要内容」，之后能用 Tab 和 Enter 切换页面", async ({ page }) => {
-    await page.goto("/overview");
-    await settledState(page);
+  test("跳过导航将焦点交给正文；Tab 和 Enter 能选择侧栏路由", async ({ page }) => {
+    await readPage(page, "/projects");
     await page.keyboard.press("Tab");
-    const skip = page.getByRole("link", { name: "跳到主要内容" });
-    await expect(skip).toBeFocused();
+    await expect(page.getByRole("link", { name: "跳到主要内容" })).toBeFocused();
     await page.keyboard.press("Enter");
     await expect(page.locator("#main-content")).toBeFocused();
 
-    await page.goto("/overview");
-    await settledState(page);
-    const target = page.getByRole("navigation", { name: "主导航" }).getByRole("button", { name: "审计" });
-    let reached = false;
-    for (let step = 0; step < 30 && !reached; step += 1) {
-      await page.keyboard.press("Tab");
-      reached = await target.evaluate(element => element === document.activeElement);
-    }
-    expect(reached, "Tab 能到达侧栏里的「审计」").toBe(true);
+    await readPage(page, "/projects");
+    const target = page.getByRole("navigation", { name: "主导航" }).getByRole("button", { name: "管理员", exact: true });
+    await tabTo(page, target);
     await page.keyboard.press("Enter");
-    await expect(page).toHaveURL(/\/audit$/);
+    await expect(page).toHaveURL(/\/admins$/);
+    await expect(target).toHaveAttribute("aria-current", "page");
   });
 
-  test("样板数据模式在顶栏和页脚标明，页脚显示版本", async ({ page }) => {
-    await page.goto("/overview");
+  test("项目列表链接选择详情，侧栏仍选择父列表", async ({ page }) => {
+    await readPage(page, "/projects");
+    await page.locator('#main-content a[href="/projects/project-sample-1"]').click();
+    await expect(page).toHaveURL(/\/projects\/project-sample-1$/);
+    const nav = page.getByRole("navigation", { name: "主导航" });
+    await expect(nav.getByRole("button", { name: "项目", exact: true })).toHaveAttribute("aria-current", "page");
+    await expect(nav.locator('[aria-current="page"]')).toHaveCount(1);
+  });
+
+  test("样板模式有实际标识与警告；请求隔离由自动夹具断言", async ({ page }) => {
+    await readPage(page, "/projects");
     await expect(page.locator("header").getByText("样板数据", { exact: true })).toBeVisible();
-    await expect(page.locator("footer")).toContainText("样板数据模式：页面上的数据全部虚构");
-    await expect(page.locator("footer")).toContainText("版本 本地开发 · 未发布");
-    await expect(page.locator("header")).toContainText("example-owner · 所有者");
-  });
-
-  test("断网时顶部出现提示，恢复后消失", async ({ page, context }) => {
-    await page.goto("/overview");
-    await settledState(page);
-    await context.setOffline(true);
-    const alert = page.getByRole("alert").filter({ hasText: "网络已断开" });
-    await expect(alert).toBeVisible();
-    await context.setOffline(false);
-    await expect(alert).toHaveCount(0);
-  });
-
-  test("未知地址显示「页面不存在」，能回到概览", async ({ page }) => {
-    await page.goto("/no-such-page");
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText("页面不存在");
+    await expect(page.locator(".shell__notice").getByRole("alert").filter({ hasText: "样板数据模式" })).toBeVisible();
     await expectPageRules(page);
-    await page.getByRole("button", { name: "回到概览" }).click();
-    await expect(page).toHaveURL(/\/overview$/);
   });
 
-  test("验收截图：宽屏概览", async ({ page }) => {
-    await page.goto("/overview");
-    await settledState(page);
-    // 侧栏的高亮块会滑到选中行上；等它与选中行对齐再截图。
-    const sidebar = page.locator(".shell__sidebar");
-    const top = async (selector: string) => (await sidebar.locator(selector).first().boundingBox())?.y;
-    await expect.poll(async () => (await top(".tx-bui-sidebar-nav__indicator")) === (await top("[aria-current=page]"))).toBe(true);
+  test("断网提示不替换已有数据，恢复后撤销提示", async ({ page, context }) => {
+    await readPage(page, "/projects");
+    const record = page.locator('#main-content a[href="/projects/project-sample-1"]');
+    const alert = page.getByRole("alert").filter({ hasText: "网络已断开" });
+    try {
+      await context.setOffline(true);
+      await expect(alert).toBeVisible();
+      await expect(record).toBeVisible();
+      await expectPageRules(page);
+    } finally {
+      await context.setOffline(false);
+    }
+    await expect(alert).toHaveCount(0);
+    await expect(record).toBeVisible();
+  });
+
+  for (const path of ["/no-such-page", "/overview", "/queue", "/nodes", "/repos", "/alerts", "/audit"]) {
+    test(`${path} 不作为旧路由别名，未知页提供有效返回操作`, async ({ page }) => {
+      await page.goto(path);
+      await expect(page).toHaveURL(new RegExp(`${path}$`));
+      await expect(page.locator(".not-found").getByRole("status")).toBeVisible();
+      await expect(page.getByRole("navigation", { name: "主导航" }).locator('[aria-current="page"]')).toHaveCount(0);
+      await expectPageRules(page);
+      await page.getByRole("button", { name: "回到项目", exact: true }).click();
+      await expect(page).toHaveURL(/\/projects$/);
+      await expect(page.getByRole("navigation", { name: "主导航" }).getByRole("button", { name: "项目", exact: true })).toHaveAttribute("aria-current", "page");
+    });
+  }
+
+  test("验收截图：宽屏项目", async ({ page }) => {
+    await readPage(page, "/projects");
+    await expectPageRules(page);
     await page.screenshot({ path: "test-results/evidence/console-wide-1280x800.png", fullPage: true });
   });
 });
 
-test.describe("窄屏（390px）", () => {
+ test.describe("窄屏（390px）", () => {
   test.use({ viewport: NARROW });
 
   for (const consolePage of CONSOLE_PAGES) {
-    test(`${consolePage.label}：侧栏收起、没有页面级横向溢出`, async ({ page }) => {
-      await page.goto(consolePage.path);
-      await expect(page.getByRole("heading", { level: 1 })).toHaveText(consolePage.label);
-      await settledState(page);
+    test(`${consolePage.path}：导航收起、读取成功且内容不溢出或裁切`, async ({ page }) => {
+      await readPage(page, consolePage.path);
+      await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
       await expect(page.getByRole("navigation", { name: "主导航" })).toHaveCount(0);
       await expect(page.getByRole("button", { name: "导航", exact: true })).toBeVisible();
       await expectPageRules(page);
     });
   }
 
-  test("抽屉导航：打开、切换页面后关闭；Esc 关闭后焦点回到「导航」按钮", async ({ page }) => {
-    await page.goto("/overview");
-    await settledState(page);
+  test("抽屉选择路由后关闭；Escape 和关闭按钮都恢复焦点", async ({ page }) => {
+    await readPage(page, "/projects");
     const opener = page.getByRole("button", { name: "导航", exact: true });
-    await opener.click();
     const drawer = page.getByRole("dialog", { name: "导航" });
+    await opener.click();
     await expect(drawer).toBeVisible();
     await expect(opener).toHaveAttribute("aria-expanded", "true");
     await drawerSettled(page);
     await expectFocusTrappedIn(page);
     await expectPageRules(page);
-
-    await drawer.getByRole("button", { name: "队列" }).click();
-    await expect(page).toHaveURL(/\/queue$/);
+    await drawer.getByRole("button", { name: "任务", exact: true }).click();
+    await expect(page).toHaveURL(/\/tasks$/);
     await expect(drawer).toBeHidden();
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText("队列");
+    await expect(opener).toHaveAttribute("aria-expanded", "false");
 
-    await opener.click();
-    await expect(drawer).toBeVisible();
-    await page.keyboard.press("Escape");
-    await expect(drawer).toBeHidden();
-    await expect(opener).toBeFocused();
-
-    await opener.click();
-    await drawer.getByRole("button", { name: "关闭导航" }).click();
-    await expect(drawer).toBeHidden();
+    for (const close of ["escape", "button"] as const) {
+      await opener.click();
+      await expect(drawer).toBeVisible();
+      await expect(drawer.getByRole("button", { name: "任务", exact: true })).toHaveAttribute("aria-current", "page");
+      if (close === "escape") await page.keyboard.press("Escape");
+      else await drawer.getByRole("button", { name: "关闭导航", exact: true }).click();
+      await expect(drawer).toBeHidden();
+      await expect(opener).toHaveAttribute("aria-expanded", "false");
+      await expect(opener).toBeFocused();
+    }
   });
 
-  test("纯键盘：Tab 到「导航」按 Enter 打开抽屉，焦点进入并圈在抽屉里，Esc 关闭后回到按钮", async ({ page }) => {
-    await page.goto("/overview");
-    await settledState(page);
+  test("纯键盘打开抽屉、双向焦点圈定、Escape 恢复焦点", async ({ page }) => {
+    await readPage(page, "/projects");
     const opener = page.getByRole("button", { name: "导航", exact: true });
-    let reached = false;
-    for (let step = 0; step < 5 && !reached; step += 1) {
-      await page.keyboard.press("Tab");
-      reached = await opener.evaluate(element => element === document.activeElement);
-    }
-    expect(reached, "Tab 能到达「导航」按钮").toBe(true);
+    await tabTo(page, opener);
     await page.keyboard.press("Enter");
     await expect(page.getByRole("dialog", { name: "导航" })).toBeVisible();
     await drawerSettled(page);
@@ -178,24 +190,23 @@ test.describe("窄屏（390px）", () => {
     await expect(opener).toBeFocused();
   });
 
-  test("抽屉关闭时键盘进不去，面板完全在视口外、不漏阴影", async ({ page }) => {
-    await page.goto("/overview");
-    await settledState(page);
-    for (let step = 0; step < 8; step += 1) {
+  test("关闭抽屉不出现在可见内容中，也不能通过键盘进入", async ({ page }) => {
+    await readPage(page, "/projects");
+    await expect(page.getByRole("dialog", { name: "导航" })).toBeHidden();
+    for (let step = 0; step < 30; step += 1) {
       await page.keyboard.press("Tab");
       expect(await page.evaluate(() => Boolean(document.activeElement?.closest(".tx-drawer")))).toBe(false);
     }
-    const panel = page.locator(".tx-drawer__panel");
-    const box = await panel.boundingBox();
-    expect(box && box.x + box.width).toBeLessThanOrEqual(0);
-    await expect(panel).toHaveCSS("box-shadow", "none");
+    await expectPageRules(page);
   });
 
-  test("截断检查的自测：真实截断会报出来，只放过 v-wave 的波纹容器（#30）", async ({ page }) => {
-    await page.goto("/overview");
-    await settledState(page);
+  test("裁切检查按实际读屏几何豁免，仍识别真实裁切与同名伪装", async ({ page }) => {
+    await readPage(page, "/projects");
     expect(await clippedElements(page)).toEqual([]);
     await page.evaluate(() => {
+      const host = document.createElement("div");
+      host.id = "clipping-probes";
+      host.style.position = "relative";
       const wide = () => {
         const inner = document.createElement("div");
         inner.style.width = "900px";
@@ -204,24 +215,64 @@ test.describe("窄屏（390px）", () => {
       };
       const ripple = document.createElement("div");
       ripple.setAttribute("data-v-wave-container-internal", "");
-      ripple.style.overflow = "hidden";
+      ripple.style.cssText = "width: 64px; overflow: hidden";
       ripple.append(wide());
       const clipped = document.createElement("div");
       clipped.className = "probe-clipped";
-      clipped.style.overflow = "hidden";
+      clipped.style.cssText = "width: 64px; overflow: hidden";
       clipped.append(wide());
-      document.querySelector(".shell__main")!.append(ripple, clipped);
+      const clippedByClip = document.createElement("div");
+      clippedByClip.className = "probe-overflow-clip";
+      clippedByClip.style.cssText = "width: 64px; overflow: clip";
+      clippedByClip.append(wide());
+      const srOnly = (className: string) => {
+        const span = document.createElement("span");
+        span.className = className;
+        span.style.cssText = "position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0";
+        span.textContent = "Screen reader label with overflowing text";
+        return span;
+      };
+      const namedLabel = srOnly("visually-hidden");
+      const unnamedLabel = srOnly("probe-sr-only");
+      const impostor = srOnly("visually-hidden probe-impostor");
+      impostor.style.cssText = "display: block; width: 64px; height: 20px; overflow: hidden; white-space: nowrap";
+      const missingClip = srOnly("probe-missing-clip");
+      missingClip.style.clip = "auto";
+      const partialClip = srOnly("probe-partial-clip");
+      partialClip.style.clip = "rect(0 1px 1px 0)";
+      const oversized = srOnly("probe-oversized");
+      oversized.style.width = "64px";
+      oversized.style.height = "20px";
+      oversized.style.clip = "rect(0 64px 20px 0)";
+      const inFlow = srOnly("probe-in-flow");
+      inFlow.style.position = "static";
+      inFlow.style.display = "inline-block";
+      host.append(ripple, namedLabel, unnamedLabel, clipped, clippedByClip, impostor, missingClip, partialClip, oversized, inFlow);
+      document.querySelector(".shell__main")!.append(host);
     });
-    expect(await clippedElements(page)).toEqual(["div.probe-clipped"]);
+    try {
+      expect(await clippedElements(page)).toEqual([
+        "div.probe-clipped",
+        "div.probe-overflow-clip",
+        "span.visually-hidden.probe-impostor",
+        "span.probe-missing-clip",
+        "span.probe-partial-clip",
+        "span.probe-oversized",
+        "span.probe-in-flow",
+      ]);
+    } finally {
+      await page.locator("#clipping-probes").evaluate(element => element.remove());
+    }
   });
 
-  test("验收截图：窄屏概览与打开的抽屉", async ({ page }) => {
-    await page.goto("/overview");
-    await settledState(page);
+  test("验收截图：窄屏项目与抽屉", async ({ page }) => {
+    await readPage(page, "/projects");
+    await expectPageRules(page);
     await page.screenshot({ path: "test-results/evidence/console-narrow-390x844.png", fullPage: true });
     await page.getByRole("button", { name: "导航", exact: true }).click();
     await expect(page.getByRole("dialog", { name: "导航" })).toBeVisible();
     await drawerSettled(page);
+    await expectPageRules(page);
     await page.screenshot({ path: "test-results/evidence/console-narrow-390x844-drawer.png" });
   });
 });

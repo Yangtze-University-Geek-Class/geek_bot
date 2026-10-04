@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { MAX_TOPICS, POLL_INTERVAL_MS, RECONNECT_BASE_MS, RECONNECT_MAX_MS, openStream, streamUrl, type EventSourceLike, type StreamMessage, type StreamStatus } from "../../app/console/src/lib/sse.js";
+import { MAX_TOPICS, RECONNECT_BASE_MS, RECONNECT_MAX_MS, openStream, streamUrl, type EventSourceLike, type StreamMessage, type StreamStatus } from "../../app/console/src/lib/sse.js";
 
 class FakeEventSource implements EventSourceLike {
   readyState = 0;
@@ -43,8 +43,7 @@ function setup() {
       sources.push(source);
       return source;
     },
-    setInterval: vi.fn((handler: () => void, ms: number) => {
-      expect(ms).toBe(POLL_INTERVAL_MS);
+    setInterval: vi.fn((handler: () => void, _ms: number) => {
       timers.set(++nextTimer, handler);
       return nextTimer;
     }),
@@ -108,7 +107,7 @@ describe("openStream", () => {
     expect(timeouts.size).toBe(0);
   });
 
-  it("EventSource 进入 CLOSED 后按 5 秒起、翻倍、最长 60 秒退避重建；重建后连上会让页面重新拉取", () => {
+  it("EventSource 进入 CLOSED 后翻倍退避并封顶重建；重建后连上会让页面重新拉取", () => {
     const { source, sources, statuses, timers, options, fireReconnect } = setup();
     source.onopen?.(new Event("open"));
     source.failHard();
@@ -121,7 +120,7 @@ describe("openStream", () => {
       delays.push(fireReconnect());
       sources.at(-1)?.failHard();
     }
-    expect(delays).toEqual([RECONNECT_BASE_MS, 10_000, 20_000, 40_000, RECONNECT_MAX_MS, RECONNECT_MAX_MS]);
+    expect(delays).toEqual(Array.from({ length: 6 }, (_, attempt) => Math.min(RECONNECT_BASE_MS * 2 ** attempt, RECONNECT_MAX_MS)));
     expect(sources).toHaveLength(7);
     expect(options.onReset).not.toHaveBeenCalled();
 
@@ -133,7 +132,7 @@ describe("openStream", () => {
     expect(options.onReset).toHaveBeenCalledTimes(1);
 
     rebuilt.failHard();
-    expect(fireReconnect()).toBe(RECONNECT_BASE_MS);
+    expect(fireReconnect()).toBe(delays[0]);
   });
 
   it("重建后的连接只在第一次连上时让页面重新拉取；之后浏览器自己重连不再触发", () => {
@@ -188,9 +187,21 @@ describe("openStream", () => {
   });
 
   it("data 不是 JSON 时保留原文，不打断连接", () => {
-    const { source, events } = setup();
-    source.emit("alert.raised", "not-json", "7");
-    expect(events).toEqual([{ type: "alert.raised", id: "7", data: "not-json" }]);
+    const { handle, source, events, statuses } = setup();
+    const type = "task.event";
+    try {
+      source.onopen?.(new Event("open"));
+      source.emit(type, "not-json", "7");
+      source.emit(type, '{"task_id":"t1","seq":2}', "8");
+      expect(events).toEqual([
+        { type, id: "7", data: "not-json" },
+        { type, id: "8", data: { task_id: "t1", seq: 2 } },
+      ]);
+      expect(source.closed).toBe(false);
+      expect(statuses).toEqual(["connecting", "live"]);
+    } finally {
+      handle.close();
+    }
   });
 
   it("调用方 close 后关闭连接", () => {

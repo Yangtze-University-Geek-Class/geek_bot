@@ -30,3 +30,25 @@ export function formatDuration(ms: number): string {
   if (next < UNITS.length && counts[next] > 0) parts.push(`${counts[next]} ${UNITS[next].label}`);
   return parts.join(" ");
 }
+
+const TIME_FORMAT = new Intl.DateTimeFormat("zh-CN", {
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hour12: false,
+});
+
+/** ISO 时间格式化成本地时间；null 写「从未」，解析不了的原样返回。 */
+export function formatTime(iso: string | null): string {
+  if (iso === null) return "从未";
+  const time = Date.parse(iso);
+  return Number.isNaN(time) ? iso : TIME_FORMAT.format(time);
+}
+
+/** MiB 写成人看的内存大小：不足 1 GiB 写 MiB，否则保留一位小数的 GiB。 */
+export function formatMemory(mib: number): string {
+  return mib < 1024 ? `${mib} MiB` : `${(mib / 1024).toFixed(mib % 1024 === 0 ? 0 : 1)} GiB`;
+}

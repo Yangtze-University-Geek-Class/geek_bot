@@ -4,7 +4,7 @@
  * - 每个用例自动记录浏览器上下文发出的全部请求（含 service worker）与 WebSocket，结束时断言：没有发往预览地址以外的请求，
  *   也没有任何 `/api/` 请求（样板数据模式在页面内打桩，数据请求不出浏览器）。
  * - 页面检查：原生 select 与 checkbox 数量为 0；emoji 与被禁的 unicode 符号扫描为 0；图标类都有图形；
- *   没有页面级横向溢出，外壳和主内容区里也没有被 overflow 截掉的内容（DESIGN：不为了不滚动而截断内容）。
+ *   没有页面级横向溢出，外壳和主内容区里也没有被 overflow 截掉的视觉内容（DESIGN：不为了不滚动而截断内容）。
  */
 import { expect, test as base, type Page } from "@playwright/test";
 import { ALLOWED_GLYPHS, FORBIDDEN_GLYPH_SOURCE } from "./glyphs.js";
@@ -88,8 +88,9 @@ export async function pageOverflow(page: Page): Promise<{ scrollWidth: number; c
 }
 
 /**
- * 外壳里（含侧栏、主内容区和挂到 body 下的抽屉）被 overflow: hidden / clip 截掉的元素：内容比盒子宽，又不能滚动。
+ * 外壳里（含侧栏、主内容区和挂到 body 下的抽屉）被 overflow: hidden / clip 截掉的视觉内容：内容比盒子宽，又不能滚动。
  * 单行省略（text-overflow: ellipsis）且带 title、能看到完整值的，按 DESIGN 允许。
+ * 仅供读屏的 span 必须实际绝对定位、盒子不大于 1px 且 clip 矩形为零；不按类名豁免。
  * Tuffex 按钮点击时 v-wave 生成的波纹容器（`data-v-wave-container-internal`）是装饰动画，
  * 波纹扩散时本来就比容器大，不算内容被截断（#30）。
  */
@@ -101,6 +102,17 @@ export async function clippedElements(page: Page): Promise<string[]> {
         const style = getComputedStyle(element);
         if (style.overflowX !== "hidden" && style.overflowX !== "clip") return false;
         if (element.scrollWidth <= element.clientWidth + 1) return false;
+        const box = element.getBoundingClientRect();
+        const clipRect = /^rect\(([^)]+)\)$/.exec(style.clip);
+        const clipEdges = clipRect?.[1].trim().split(/[\s,]+/);
+        const accessibilityOnly = element.tagName === "SPAN"
+          && style.position === "absolute"
+          && box.width > 0 && box.width <= 1
+          && box.height > 0 && box.height <= 1
+          && (style.overflowY === "hidden" || style.overflowY === "clip")
+          && clipEdges?.length === 4
+          && clipEdges.every(edge => /^0(?:px)?$/.test(edge));
+        if (accessibilityOnly) return false;
         return !(style.textOverflow === "ellipsis" && element.title !== "");
       })
       .map(element => `${element.tagName.toLowerCase()}.${Array.from(element.classList).join(".")}`),
